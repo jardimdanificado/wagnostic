@@ -22,7 +22,7 @@ None. Wagnostic is a pure shared-memory protocol. A ROM does not need to import 
 
 ---
 
-### 2.2 Functions the Host **calls** (ROM must export)
+### 2.2 ROM must export
 
 #### `winit()`
 Called by the Host **exactly once** immediately after instantiation. The ROM uses this to write its initial configuration into the System Header.
@@ -147,36 +147,7 @@ After reading, the Host writes the new `read_ptr` to offset **152**.
 
 ---
 
-## 8. Main Loop Pseudocode
-
-```python
-# Startup
-rom.winit()
-host.setup_window(rom.width, rom.height, rom.message)
-
-# Loop
-while running:
-    # 1. Inputs
-    write_inputs_to_memory(mem)
-    
-    # 2. Update
-    rom.wupdate()
-    
-    # 3. Signals
-    for i in range(4):
-        sig = mem[464 + i]
-        if sig == 1: host.render(mem[512:])
-        if sig == 2: running = False
-        mem[464 + i] = 0
-    
-    # 4. Audio
-    if rom.audio_size > 0:
-        host.feed_audio_device(mem[audio_start:])
-```
-
----
-
-## 9. Conformance Checklist
+## 8. Conformance Checklist
 
 - [ ] Instantiates WASM with `env.get_ticks`.
 - [ ] Calls `winit` once.

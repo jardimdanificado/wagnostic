@@ -17,7 +17,6 @@ const sysOffset = 0;
 let audioCtx = null;
 let audioNode = null;
 
-// Estado do Input
 const input = {
     keys: new Uint8Array(256),
     buttons: 0,

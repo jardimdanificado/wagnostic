@@ -144,8 +144,8 @@ int main(int argc, char** argv) {
     m3_LoadModule(runtime, module);
 
     IM3Function f_init = NULL, f_upd = NULL;
-    if (m3_FindFunction(&f_init, runtime, "winit") != m3Err_none) m3_FindFunction(&f_init, runtime, "init");
-    if (m3_FindFunction(&f_upd, runtime, "wupdate") != m3Err_none) m3_FindFunction(&f_upd, runtime, "frame");
+    m3_FindFunction(&f_init, runtime, "winit");
+    m3_FindFunction(&f_upd, runtime, "wupdate");
 
     if (f_init) m3_CallV(f_init);
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) return 1;

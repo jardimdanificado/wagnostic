@@ -1,7 +1,5 @@
 # Wagnostic
 
-**The Universal, Protocol-First "Virtual Console".**
-
 Wagnostic is a minimalist, platform-agnostic specification and runtime for multimedia applications.
 
 ## Memory Layout
