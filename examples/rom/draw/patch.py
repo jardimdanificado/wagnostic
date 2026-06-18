@@ -1,5 +1,5 @@
 import os, re
-path = "examples/draw/olive.c"
+path = "examples/rom/draw/olive.c"
 with open(path, "r") as f: code = f.read()
 
 # 1. Altera tudo que é 32 bits (ARGB) para 8 bits (Index)

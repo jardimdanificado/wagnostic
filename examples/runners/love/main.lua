@@ -17,7 +17,7 @@ ffi.cdef[[
     uint8_t* m3_GetMemory(IM3Runtime i_runtime, uint32_t* o_memorySizeInBytes, uint32_t i_memoryIndex);
 ]]
 
-local m3 = ffi.load("runners/love/libwasm3.so")
+local m3 = ffi.load("examples/runners/love/libwasm3.so")
 local bit = require("bit")
 local bitand, bitor, bitshift, rshift = bit.band, bit.bor, bit.lshift, bit.rshift
 

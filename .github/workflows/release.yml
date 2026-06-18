@@ -91,7 +91,7 @@ jobs:
           docker run --rm -v "$PWD:/src" -w /src i386/ubuntu:22.04 bash -c "
             apt-get update -qq &&
             apt-get install -y build-essential libsdl2-dev libgl1-mesa-dev pkg-config &&
-            gcc -Ilib/wasm3 -O2 runners/native/host.c lib/wasm3/*.c -o wagnostic \
+            gcc -Iexamples/runners/lib/wasm3 -O2 examples/runners/native/host.c examples/runners/lib/wasm3/*.c -o wagnostic \
               \$(pkg-config --cflags --libs sdl2) -lGL -lm
           "
 
@@ -127,8 +127,8 @@ jobs:
       - name: Build (Linux x64 / ARM64)
         if: matrix.target == 'linux' || matrix.target == 'linux-arm64'
         run: |
-          gcc -Ilib/wasm3 -O2 \
-            runners/native/host.c lib/wasm3/*.c \
+          gcc -Iexamples/runners/lib/wasm3 -O2 \
+            examples/runners/native/host.c examples/runners/lib/wasm3/*.c \
             -o wagnostic \
             $(pkg-config --cflags --libs sdl2) \
             -lGL -lm
@@ -137,8 +137,8 @@ jobs:
         if: startsWith(matrix.target, 'macos')
         run: |
           SDL2_PREFIX=$(brew --prefix sdl2)
-          gcc -Ilib/wasm3 -I${SDL2_PREFIX}/include -O2 \
-            runners/native/host.c lib/wasm3/*.c \
+          gcc -Iexamples/runners/lib/wasm3 -I${SDL2_PREFIX}/include -O2 \
+            examples/runners/native/host.c examples/runners/lib/wasm3/*.c \
             -o wagnostic \
             -L${SDL2_PREFIX}/lib -lSDL2 \
             -framework OpenGL -lm
@@ -147,8 +147,8 @@ jobs:
         if: matrix.target == 'windows-mingw'
         shell: msys2 {0}
         run: |
-          gcc -Ilib/wasm3 -O2 \
-            runners/native/host.c lib/wasm3/*.c \
+          gcc -Iexamples/runners/lib/wasm3 -O2 \
+            examples/runners/native/host.c examples/runners/lib/wasm3/*.c \
             -o wagnostic.exe \
             -lmingw32 -lSDL2main -lSDL2 -lopengl32 -lm
 
@@ -156,8 +156,8 @@ jobs:
         if: matrix.target == 'windows-mingw32'
         shell: msys2 {0}
         run: |
-          gcc -Ilib/wasm3 -O2 \
-            runners/native/host.c lib/wasm3/*.c \
+          gcc -Iexamples/runners/lib/wasm3 -O2 \
+            examples/runners/native/host.c examples/runners/lib/wasm3/*.c \
             -o wagnostic.exe \
             -lmingw32 -lSDL2main -lSDL2 -lopengl32 -lm
 

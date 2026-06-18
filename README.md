@@ -22,9 +22,10 @@ void wupdate() {
 ### Building
 
 ```bash
-make             # Build Host
-make -C examples # Build ROMs
-./wagnostic examples/audio_test.wasm
+make -C examples             # Build Host and ROMs
+make -C examples host        # Build Host only
+make -C examples roms        # Build ROMs only
+./examples/wagnostic examples/audio_test.wasm
 ```
 ---
 
@@ -32,10 +33,10 @@ make -C examples # Build ROMs
 
 ## 1. Overview
 
-A Wagnostic ROM is a standard **WebAssembly (.wasm)** binary. The Host is any program that:
+A Wagnostic ROM is a regular **WebAssembly (.wasm)** binary. The Host is any program that:
 1. Instantiates the WASM module.
-2. Exposes a set of **imported functions** that the ROM can call.
-3. Reads and writes to the module's **linear memory** to exchange state.
+2. Reads and writes to the module's **linear memory** to exchange state.
+3. Calls the ROM's exported functions (`winit` and `wupdate`).
 
 All communication happens through this shared memory. All multi-byte integers are stored in **Little-Endian** format.
 
@@ -54,7 +55,7 @@ None. Wagnostic is a pure shared-memory protocol. A ROM does not need to import 
 Called by the Host **once** immediately after instantiation. The ROM uses this to write its initial configuration into the System Header.
 
 #### `wupdate()`
-Called once per frame by the Host. The ROM reads inputs, updates state, and sets signals.
+Called once per frame by the Host. The ROM reads inputs, updates state, and sets signals. **All signal writes (including REDRAW) must happen inside `wupdate()`.**
 
 ---
 
@@ -105,8 +106,12 @@ The linear memory of the WASM instance is the single source of truth.
 VRAM starts exactly at offset **512**.
 
 ### 8-bit: RGB332
-Layout: `RRRGGGBB`. To convert to RGB888:
+Layout: `RRRGGGBB`.
 ```c
+// Encoding (RGB888 → RGB332)
+pixel = ((r & 0xE0) | ((g & 0xE0) >> 3) | ((b & 0xC0) >> 6));
+
+// Decoding (RGB332 → RGB888)
 r = ((pixel >> 5) & 0x07) * 255 / 7;
 g = ((pixel >> 2) & 0x07) * 255 / 7;
 b = (pixel & 0x03) * 255 / 3;
@@ -115,13 +120,27 @@ b = (pixel & 0x03) * 255 / 3;
 ### 16-bit: RGB565
 Stored as `uint16_t` (Little-Endian). Layout: `RRRRRGGGGGGBBBBB`.
 ```c
+// Encoding (RGB888 → RGB565)
+pixel = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+
+// Decoding (RGB565 → RGB888)
 r = ((pixel >> 11) & 0x1F) * 255 / 31;
 g = ((pixel >> 5) & 0x3F) * 255 / 63;
 b = (pixel & 0x1F) * 255 / 31;
 ```
 
 ### 32-bit: RGBA8888
-4 bytes per pixel: Red, Green, Blue, Alpha (Byte 0 = R, Byte 1 = G...).
+4 bytes per pixel: Red, Green, Blue, Alpha (Byte 0 = R, Byte 1 = G, Byte 2 = B, Byte 3 = A).
+```c
+// Encoding (RGB888 + Alpha → RGBA8888)
+pixel = (a << 24) | (b << 16) | (g << 8) | r;
+
+// Decoding (RGBA8888 → components)
+r = (pixel >> 0) & 0xFF;
+g = (pixel >> 8) & 0xFF;
+b = (pixel >> 16) & 0xFF;
+a = (pixel >> 24) & 0xFF;
+```
 
 ---
 
@@ -135,6 +154,8 @@ The Host must scan the 4 signal bytes after calling `wupdate`. Each processed si
 - `4`: **UPDATE_WINDOW**: Resize window based on header fields.
 - `5`: **UPDATE_AUDIO**: Reconfigure audio device based on header fields.
 - `6`: **LOG_INFO**: Print `message` to stdout.
+- `7`: **LOG_WARN**: Print `message` to stderr (or equivalent).
+- `8`: **LOG_ERR**: Print `message` to stderr (or equivalent).
 
 ---
 
@@ -149,9 +170,30 @@ The Host must scan the 4 signal bytes after calling `wupdate`. Each processed si
 | 3 | Right | 9 | R1 |
 | 4 | A | 10 | Select |
 | 5 | B | 11 | Start |
+| 12 | L2 | 13 | R2 |
 
 ### 6.2 Keyboard (Offset 192)
-256 bytes indexed by USB HID Scancodes.
+256 bytes indexed by USB HID Scancodes. 1 = pressed, 0 = released.
+
+### 6.3 Mouse (Offsets 448–460)
+
+| Offset | Size | Field | Description |
+|---|---|---|---|
+| 448 | 4 | **mouse_x** | Mouse X in framebuffer coordinates (signed int32). |
+| 452 | 4 | **mouse_y** | Mouse Y in framebuffer coordinates (signed int32). |
+| 456 | 4 | **mouse_buttons** | Mouse buttons bitmask (bit 0 = L, bit 1 = R, bit 2 = M). |
+| 460 | 4 | **mouse_wheel** | Wheel delta (signed int32). |
+
+**Host responsibility:** The Host must reset `mouse_wheel` to 0 **after** each `wupdate()` call. This ensures the ROM sees the delta exactly once.
+
+### 6.4 Joystick Axes (Offsets 176–188)
+
+| Offset | Size | Field | Description |
+|---|---|---|---|
+| 176 | 4 | **joystick_lx** | Left stick X axis (signed int32, range: -32767 to 32767). |
+| 180 | 4 | **joystick_ly** | Left stick Y axis (signed int32, range: -32767 to 32767). |
+| 184 | 4 | **joystick_rx** | Right stick X axis (signed int32, range: -32767 to 32767). |
+| 188 | 4 | **joystick_ry** | Right stick Y axis (signed int32, range: -32767 to 32767). |
 
 ---
 
@@ -161,7 +203,17 @@ The Host must scan the 4 signal bytes after calling `wupdate`. Each processed si
 Starts at **512 + (width * height * bpp/8)**.
 Size is `audio_size` bytes.
 
-### 7.2 Mechanics (Host Implementation)
+### 7.2 Audio Format
+
+| audio_bpp | Format | Range |
+|---|---|---|
+| 1 | Unsigned 8-bit PCM | 0–255 (128 = silence) |
+| 2 | Signed 16-bit PCM (Little-Endian) | -32768 to 32767 |
+| 4 | 32-bit float (Little-Endian) | -1.0 to 1.0 |
+
+Multi-channel audio is **interleaved** (L, R, L, R, ...).
+
+### 7.3 Mechanics (Host Implementation)
 ```c
 write_ptr = read_u32(148); read_ptr = read_u32(152);
 if (write_ptr >= read_ptr) available = write_ptr - read_ptr;
@@ -169,17 +221,35 @@ else available = audio_size - read_ptr + write_ptr;
 ```
 After reading, the Host writes the new `read_ptr` to offset **152**.
 
+### 7.4 ROM Writing Audio
+
+The ROM writes audio samples into the ring buffer at `audio_write` offset, then advances the pointer:
+```c
+void* audio_buf = w_audio_ptr();
+uint32_t wp = W_SYS->audio_write;
+uint32_t size = W_SYS->audio_size;
+
+// Write samples
+audio_buf[wp] = sample;
+wp = (wp + 1) % size;
+
+W_SYS->audio_write = wp;
+```
+
 ---
 
 ## 8. Conformance Checklist
 
-- [ ] Instantiates WASM with `env.get_ticks`.
-- [ ] Calls `winit` once.
+- [ ] Instantiates WASM with no imports (pure shared-memory protocol).
+- [ ] Calls `winit` once after instantiation.
 - [ ] Calls `wupdate` per frame.
 - [ ] Keyboard: 1 byte per scancode @ 192.
-- [ ] Gamepad: Bitmask @ 172.
-- [ ] Signals: 4 slots @ 464.
+- [ ] Gamepad: Bitmask @ 172 (bits 0–13).
+- [ ] Mouse: X/Y @ 448/452, buttons @ 456, wheel @ 460.
+- [ ] Joystick: 4 axes @ 176–188 (signed int32, -32767 to 32767).
+- [ ] Signals: 4 slots @ 464 (opcodes 1–8).
 - [ ] VRAM: Offset 512.
 - [ ] Audio: Offset 512 + vram_size.
-- [ ] Resets signals and mouse wheel after processing.
+- [ ] Resets all signals after processing.
+- [ ] Resets `mouse_wheel` to 0 after each `wupdate()` call.
 

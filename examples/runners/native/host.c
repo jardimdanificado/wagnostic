@@ -177,6 +177,9 @@ int main(int argc, char** argv) {
                 if (b == SDL_BUTTON_LEFT) sys->mouse_buttons = (ev.type == SDL_MOUSEBUTTONDOWN) ? (sys->mouse_buttons | 1) : (sys->mouse_buttons & ~1);
                 if (b == SDL_BUTTON_RIGHT) sys->mouse_buttons = (ev.type == SDL_MOUSEBUTTONDOWN) ? (sys->mouse_buttons | 2) : (sys->mouse_buttons & ~2);
             }
+            if (ev.type == SDL_MOUSEWHEEL) {
+                sys->mouse_wheel += ev.wheel.y;
+            }
         }
 
         if (f_upd) m3_CallV(f_upd);
@@ -192,6 +195,7 @@ int main(int argc, char** argv) {
             else if (s >= 3 && s <= 5) init_sdl_from_header();
             sys->signals[i] = 0;
         }
+        sys->mouse_wheel = 0;
 
         if (redraw) {
             uint8_t* vram = mem + 512;

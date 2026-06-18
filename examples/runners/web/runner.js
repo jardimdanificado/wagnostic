@@ -1,7 +1,7 @@
 
 // UI Elements
 const canvas = document.getElementById('gameCanvas');
-const wrapper = document.getElementById('canvasWrapper');
+const emptyState = document.getElementById('emptyState');
 const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
 
 let wasmInstance = null;
@@ -77,7 +77,7 @@ async function loadWasm(buffer) {
     canvas.height = h;
     canvas.style.width = (w * s) + 'px';
     canvas.style.height = (h * s) + 'px';
-    wrapper.classList.remove('empty');
+    if (emptyState) emptyState.style.display = 'none';
     canvas.focus();
 
     const audioSize = dv.getUint32(sysOffset + 144, true);
@@ -235,8 +235,6 @@ function renderFrame(dv) {
     ctx.putImageData(imageDataCache, 0, 0);
 }
 
-window.addEventListener('keydown', e => { const c = keyMap[e.code]; if (c) input.keys[c] = 1; });
-window.addEventListener('keyup', e => { const c = keyMap[e.code]; if (c) input.keys[c] = 0; });
 canvas.addEventListener('mousemove', e => {
     const r = canvas.getBoundingClientRect();
     input.mouse.x = Math.floor((e.clientX - r.left) * (canvas.width / r.width));
@@ -245,3 +243,29 @@ canvas.addEventListener('mousemove', e => {
 canvas.addEventListener('mousedown', e => input.mouse.buttons |= (1 << e.button));
 canvas.addEventListener('mouseup', e => input.mouse.buttons &= ~(1 << e.button));
 canvas.addEventListener('wheel', e => input.mouse.wheel += Math.sign(e.deltaY), {passive:true});
+
+document.querySelectorAll('[data-btn]').forEach(btn => {
+    const bit = btnMap[btn.dataset.btn];
+    if (!bit) return;
+    btn.addEventListener('mousedown', () => input.buttons |= bit);
+    btn.addEventListener('mouseup', () => input.buttons &= ~bit);
+    btn.addEventListener('mouseleave', () => input.buttons &= ~bit);
+});
+
+window.addEventListener('keydown', e => {
+    const c = keyMap[e.code];
+    if (c) input.keys[c] = 1;
+    if (e.key === 'z' || e.key === 'Z') input.buttons |= btnMap.a;
+    if (e.key === 'x' || e.key === 'X') input.buttons |= btnMap.b;
+    if (e.key === 'Shift') input.buttons |= btnMap.select;
+    if (e.key === 'Enter') input.buttons |= btnMap.start;
+});
+
+window.addEventListener('keyup', e => {
+    const c = keyMap[e.code];
+    if (c) input.keys[c] = 0;
+    if (e.key === 'z' || e.key === 'Z') input.buttons &= ~btnMap.a;
+    if (e.key === 'x' || e.key === 'X') input.buttons &= ~btnMap.b;
+    if (e.key === 'Shift') input.buttons &= ~btnMap.select;
+    if (e.key === 'Enter') input.buttons &= ~btnMap.start;
+});

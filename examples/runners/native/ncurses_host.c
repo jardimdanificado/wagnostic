@@ -172,6 +172,10 @@ int main(int argc, char** argv) {
                     if (event.bstate & BUTTON1_RELEASED) sys->mouse_buttons &= ~1;
                     if (event.bstate & BUTTON3_PRESSED) sys->mouse_buttons |= 2;
                     if (event.bstate & BUTTON3_RELEASED) sys->mouse_buttons &= ~2;
+#ifdef BUTTON4_PRESSED
+                    if (event.bstate & BUTTON4_PRESSED) sys->mouse_wheel += 1;
+                    if (event.bstate & BUTTON5_PRESSED) sys->mouse_wheel -= 1;
+#endif
                 }
             }
             ch = getch();
@@ -185,6 +189,7 @@ int main(int argc, char** argv) {
             else if (sys->signals[i] == 2) running = 0;
             sys->signals[i] = 0;
         }
+        sys->mouse_wheel = 0;
 
         if (redraw) {
             int term_h, term_w;
