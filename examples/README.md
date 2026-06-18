@@ -194,9 +194,36 @@ Full-featured desktop runner with audio, gamepad, and mouse support.
 ./examples/wagnostic rom.wasm
 ```
 
-### Web
+### Native GPU (SDL2 + OpenGL 3.3+ Core)
 
-Browser-based runner. Open `examples/runners/web/index.html` or deploy to a web server.
+GPU-accelerated runner using modern OpenGL shaders for rendering. Handles all pixel format conversions on the GPU.
+
+```bash
+make -C examples host-gpu
+./examples/wagnostic-gpu rom.wasm
+```
+
+**Features:**
+- GPU shader handles RGB332, RGB565, and RGBA8888 conversion
+- Nearest-neighbor texture filtering for pixel-perfect scaling
+- Minimal CPU overhead for rendering
+
+### WebGPU
+
+Browser-based runner that maximizes GPU usage with WebGPU compute shaders.
+
+Open `examples/runners/webgpu/index.html` in a WebGPU-capable browser (Chrome 113+, Edge 113+).
+
+**Features:**
+- Compute shader for audio processing (ring buffer decoding + low-pass filter)
+- Fragment shader for VRAM rendering with pixel format conversion
+- Minimal CPU-GPU synchronization
+
+### Web (Canvas 2D)
+
+Simpler browser-based runner using Canvas 2D API.
+
+Open `examples/runners/web/index.html`.
 
 ### LÖVE2D
 

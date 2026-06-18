@@ -7,10 +7,11 @@ HOST_CFLAGS = -I$(WASM3_DIR) -O2
 HOST_LDFLAGS = -lSDL2 -lGL -lm
 
 TARGET_HOST = wagnostic
+TARGET_HOST_GPU = wagnostic-gpu
 
 # ROM build variables
 CLANG = clang
-CFLAGS = --target=wasm32 -nostdlib -fno-delete-null-pointer-checks -O3 -w -Iinclude
+CFLAGS = --target=wasm32 -nostdlib -fno-delete-null-pointer-checks -O3 -w -I../include
 LDFLAGS = -Wl,--no-entry -Wl,--export-all -Wl,--allow-undefined -Wl,--global-base=1048576
 MEM_FLAGS = -Wl,--initial-memory=8388608
 
@@ -18,7 +19,7 @@ MEM_FLAGS = -Wl,--initial-memory=8388608
 IMG2FB = tools/img2fb.sh
 AUDIO2PCM = tools/audio2pcm.py
 
-.PHONY: all clean audio host term portmaster
+.PHONY: all clean audio host host-gpu term portmaster roms
 
 # Default target: build host and ROMs
 all: $(TARGET_HOST) roms
@@ -27,6 +28,11 @@ all: $(TARGET_HOST) roms
 host: $(TARGET_HOST)
 
 $(TARGET_HOST): runners/native/host.c
+	$(CC) $(HOST_CFLAGS) $< $(WASM3_SRC) -o $@ $(HOST_LDFLAGS)
+
+host-gpu: $(TARGET_HOST_GPU)
+
+$(TARGET_HOST_GPU): runners/native_gpu/host_gpu.c
 	$(CC) $(HOST_CFLAGS) $< $(WASM3_SRC) -o $@ $(HOST_LDFLAGS)
 
 term: runners/native/ncurses_host.c
@@ -114,7 +120,7 @@ terminal_test.wasm: rom/terminal_test.c
 	$(CLANG) $(CFLAGS) $(MEM_FLAGS) $(LDFLAGS) rom/terminal_test.c -o terminal_test.wasm
 
 clean:
-	rm -f *.wasm $(TARGET_HOST) wagnostic-term
+	rm -f *.wasm $(TARGET_HOST) $(TARGET_HOST_GPU) wagnostic-term
 	rm -f rom/draw/*.h rom/draw/*.raw
 	rm -f rom/images/*.h rom/images/*.raw
 	rm -f rom/audio/audio_data.h
