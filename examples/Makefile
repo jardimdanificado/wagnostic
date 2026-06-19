@@ -1,9 +1,14 @@
 # Host build variables
 CC = gcc
 WASM3_DIR = runners/lib/wasm3
-WASM3_SRC = $(WASM3_DIR)/*.c
+WASM3_SRC = $(WASM3_DIR)/m3.c
 
-HOST_CFLAGS = -I$(WASM3_DIR) -O2
+# Wasmtime (used by native host)
+WASMTIME_DIR = runners/lib/wasmtime
+WASMTIME_CFLAGS = -I$(WASMTIME_DIR)/include
+WASMTIME_LDFLAGS = -L$(WASMTIME_DIR)/lib -lwasmtime -lpthread -ldl -lm
+
+HOST_CFLAGS = -I$(WASM3_DIR) -O2 -DM3_IMPLEMENTATION
 HOST_LDFLAGS = -lSDL2 -lGL -lm
 
 TARGET_HOST = wagnostic
@@ -20,8 +25,11 @@ IMG2FB = tools/img2fb.sh
 AUDIO2PCM = tools/audio2pcm.py
 
 TARGET_HOST_BENCH = wagnostic-bench
+TARGET_HOST_BENCH_WASMTIME = wagnostic-bench-wasmtime
+TARGET_HOST_V8 = wagnostic-v8
+TARGET_HOST_BENCH_V8 = wagnostic-bench-v8
 
-.PHONY: all clean audio host host-gpu host-bench term portmaster roms benchmarks
+.PHONY: all clean audio host host-gpu host-bench host-bench-wasmtime host-v8 host-bench-v8 term portmaster roms benchmarks benchmark_roms
 
 # Default target: build host and ROMs
 all: $(TARGET_HOST) roms
@@ -30,7 +38,7 @@ all: $(TARGET_HOST) roms
 host: $(TARGET_HOST)
 
 $(TARGET_HOST): runners/native/host.c
-	$(CC) $(HOST_CFLAGS) $< $(WASM3_SRC) -o $@ $(HOST_LDFLAGS)
+	$(CC) $(WASMTIME_CFLAGS) $< -o $@ $(HOST_LDFLAGS) $(WASMTIME_LDFLAGS)
 
 host-gpu: $(TARGET_HOST_GPU)
 
@@ -41,6 +49,32 @@ host-bench: $(TARGET_HOST_BENCH)
 
 $(TARGET_HOST_BENCH): runners/native/host_benchmark.c
 	$(CC) $(HOST_CFLAGS) $< $(WASM3_SRC) -o $@ -lm
+
+# wasmtime target: Wasmtime JIT + GPU (PBO + triple buffer)
+WASMTIME_DIR = runners/lib/wasmtime
+WASMTIME_CFLAGS = -I$(WASMTIME_DIR)/include
+WASMTIME_LDFLAGS = -L$(WASMTIME_DIR)/lib -lwasmtime -lpthread -ldl -lm
+
+host-bench-wasmtime: $(TARGET_HOST_BENCH_WASMTIME)
+
+$(TARGET_HOST_BENCH_WASMTIME): runners/wasmtime/host_benchmark.c
+	$(CC) $(HOST_CFLAGS) $(WASMTIME_CFLAGS) $< -o $@ $(WASMTIME_LDFLAGS) $(HOST_LDFLAGS)
+
+# V8 targets
+CXX = g++
+V8_DIR = runners/native-v8/v8_Linux_x64
+V8_CXXFLAGS = -I$(V8_DIR)/include -std=c++20 -O2
+V8_LDFLAGS = $(V8_DIR)/libv8_monolith.a -lpthread -ldl -lm -lrt
+
+host-v8: $(TARGET_HOST_V8)
+
+$(TARGET_HOST_V8): runners/native-v8/host_v8.cpp
+	$(CXX) $(V8_CXXFLAGS) $< -o $@ $(HOST_LDFLAGS) $(V8_LDFLAGS)
+
+host-bench-v8: $(TARGET_HOST_BENCH_V8)
+
+$(TARGET_HOST_BENCH_V8): runners/native-v8/host_benchmark_v8.cpp
+	$(CXX) $(V8_CXXFLAGS) $< -o $@ $(V8_LDFLAGS)
 
 term: runners/native/ncurses_host.c
 	$(CC) $(HOST_CFLAGS) $< $(WASM3_SRC) -o wagnostic-term -lncurses -lm
@@ -146,7 +180,7 @@ benchmark_all.wasm: rom/benchmark_all.c
 	$(CLANG) $(CFLAGS) -Wl,--initial-memory=67108864 $(LDFLAGS) rom/benchmark_all.c -o benchmark_all.wasm
 
 clean:
-	rm -f *.wasm $(TARGET_HOST) $(TARGET_HOST_GPU) $(TARGET_HOST_BENCH) wagnostic-term
+	rm -f *.wasm $(TARGET_HOST) $(TARGET_HOST_GPU) $(TARGET_HOST_BENCH) $(TARGET_HOST_BENCH_WASMTIME) $(TARGET_HOST_V8) $(TARGET_HOST_BENCH_V8) wagnostic-term wagnostic-bench-wamr wagnostic-bench-native wagnostic-bench-gpu wagnostic-wasmtime
 	rm -f rom/draw/*.h rom/draw/*.raw
 	rm -f rom/images/*.h rom/images/*.raw
 	rm -f rom/audio/audio_data.h

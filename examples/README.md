@@ -141,7 +141,7 @@ clang --target=wasm32 \
     -nostdlib \
     -fno-delete-null-pointer-checks \
     -O3 \
-    -I../include \
+    -Iinclude \
     -Wl,--no-entry \
     -Wl,--export-all \
     -Wl,--allow-undefined \
@@ -186,9 +186,9 @@ void wupdate() {
 
 ## Runners
 
-### Native (SDL2 + OpenGL)
+### Native wasm3 (SDL2 + OpenGL)
 
-Full-featured desktop runner with audio, gamepad, and mouse support.
+Full-featured desktop runner using the wasm3 interpreter, with audio, gamepad, and mouse support.
 
 ```bash
 ./examples/wagnostic rom.wasm
@@ -196,7 +196,7 @@ Full-featured desktop runner with audio, gamepad, and mouse support.
 
 ### Native GPU (SDL2 + OpenGL 3.3+ Core)
 
-GPU-accelerated runner using modern OpenGL shaders for rendering. Handles all pixel format conversions on the GPU.
+Wasmtime JIT-powered GPU-accelerated runner with triple buffer + PBO async uploads and GLSL pixel format conversion.
 
 ```bash
 make -C examples host-gpu
@@ -204,20 +204,11 @@ make -C examples host-gpu
 ```
 
 **Features:**
+- Wasmtime Cranelift JIT (3-10x faster than wasm3)
 - GPU shader handles RGB332, RGB565, and RGBA8888 conversion
+- PBO async texture uploads (no CPU-GPU stalls)
+- Triple buffering for maximum throughput
 - Nearest-neighbor texture filtering for pixel-perfect scaling
-- Minimal CPU overhead for rendering
-
-### WebGPU
-
-Browser-based runner that maximizes GPU usage with WebGPU compute shaders.
-
-Open `examples/runners/webgpu/index.html` in a WebGPU-capable browser (Chrome 113+, Edge 113+).
-
-**Features:**
-- Compute shader for audio processing (ring buffer decoding + low-pass filter)
-- Fragment shader for VRAM rendering with pixel format conversion
-- Minimal CPU-GPU synchronization
 
 ### Web (Canvas 2D)
 

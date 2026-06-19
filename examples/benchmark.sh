@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Wagnostic Benchmark Runner
-# Compila e executa todos os benchmarks, mostrando tempos no console
+# Compila e executa todos os benchmarks em ambos os runners (CPU e GPU)
 #
 # Usage: ./benchmark.sh [num_frames]
-#   num_frames: número de frames por benchmark (default: 100)
 
 set -e
 
@@ -12,41 +11,75 @@ cd "$SCRIPT_DIR"
 
 FRAMES="${1:-100}"
 BENCH_HOST="./wagnostic-bench"
+BENCH_WASMTIME="./wagnostic-bench-wasmtime"
+BENCH_V8="./wagnostic-bench-v8"
+BENCH_LOVE_DIR="/tmp/love-bench"
+BENCH_LOVE="love"
 
-# Cores para output
+# Forçar locale US para printf() com ponto decimal
+export LC_NUMERIC=C
+
+# Configurar LD_LIBRARY_PATH para wasmtime
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:runners/lib/wasmtime/lib"
+
+# Cores
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 echo ""
-echo -e "${BOLD}${BLUE}╔══════════════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}${BLUE}║          WAGNOSTIC BENCHMARK SUITE              ║${NC}"
-echo -e "${BOLD}${BLUE}╚══════════════════════════════════════════════════╝${NC}"
+echo -e "${BOLD}${BLUE}╔══════════════════════════════════════════════════════╗${NC}"
+echo -e "${BOLD}${BLUE}║           WAGNOSTIC BENCHMARK SUITE                ║${NC}"
+echo -e "${BOLD}${BLUE}╚══════════════════════════════════════════════════════╝${NC}"
 echo ""
 
 # ============================================================
-# Step 1: Compilar host de benchmark
+# Step 1: Compilar hosts de benchmark
 # ============================================================
-echo -e "${CYAN}[1/3] Compilando host de benchmark...${NC}"
+echo -e "${CYAN}[1/3] Compilando hosts de benchmark...${NC}"
+
 make host-bench 2>&1 | tail -1
-if [ ! -f "$BENCH_HOST" ]; then
-    echo -e "${RED}ERRO: Falha ao compilar wagnostic-bench${NC}"
-    exit 1
-fi
+if [ ! -f "$BENCH_HOST" ]; then echo -e "${RED}  ERRO: Falha ao compilar $BENCH_HOST${NC}"; exit 1; fi
 echo -e "${GREEN}  OK: $BENCH_HOST${NC}"
+
+make host-bench-wasmtime 2>&1 | tail -1
+if [ ! -f "$BENCH_WASMTIME" ]; then
+    echo -e "${YELLOW}  AVISO: wasmtime não disponível${NC}"; BENCH_WASMTIME=""
+else
+    echo -e "${GREEN}  OK: $BENCH_WASMTIME${NC}"
+fi
+
+make host-bench-v8 2>&1 | tail -1
+if [ ! -f "$BENCH_V8" ]; then
+    echo -e "${YELLOW}  AVISO: V8 não disponível${NC}"; BENCH_V8=""
+else
+    echo -e "${GREEN}  OK: $BENCH_V8${NC}"
+fi
+
+# Setup LÖVE benchmark project
+if command -v love &>/dev/null; then
+    if [ -f "runners/love/libwasm3.so" ] && [ -f "runners/love/benchmark_main.lua" ]; then
+        mkdir -p "$BENCH_LOVE_DIR"
+        cp runners/love/benchmark_main.lua "$BENCH_LOVE_DIR/main.lua"
+        cp runners/love/libwasm3.so "$BENCH_LOVE_DIR/"
+        echo -e "${GREEN}  OK: LÖVE benchmark ($(love --version 2>&1 | head -1))${NC}"
+    else
+        echo -e "${YELLOW}  AVISO: love-bench incompleto${NC}"; BENCH_LOVE=""
+    fi
+else
+    echo -e "${YELLOW}  AVISO: LÖVE não instalado${NC}"; BENCH_LOVE=""
+fi
 echo ""
 
 # ============================================================
 # Step 2: Compilar ROMs de benchmark
 # ============================================================
 echo -e "${CYAN}[2/3] Compilando ROMs de benchmark...${NC}"
-make benchmarks 2>&1 | grep -E "^(clang|make)" | while read -r line; do
-    echo "  $line"
-done
+make benchmarks 2>&1 | grep -v "^make\[" | grep -v "^$" | head -5
 
 BENCHMARKS=(
     "benchmark_cpu.wasm"
@@ -58,7 +91,7 @@ BENCHMARKS=(
 
 for bm in "${BENCHMARKS[@]}"; do
     if [ ! -f "$bm" ]; then
-        echo -e "${RED}ERRO: Falha ao compilar $bm${NC}"
+        echo -e "${RED}  ERRO: Falha ao compilar $bm${NC}"
         exit 1
     fi
     SIZE=$(du -h "$bm" | cut -f1)
@@ -74,68 +107,167 @@ echo ""
 
 RESULTS_FILE=$(mktemp /tmp/wagnostic_bench.XXXXXX)
 
-for bm in "${BENCHMARKS[@]}"; do
-    echo -e "${YELLOW}────────────────────────────────────────────────────${NC}"
-    echo -e "${BOLD}  Running: $bm${NC}"
-    echo -e "${YELLOW}────────────────────────────────────────────────────${NC}"
-    
-    # Executar benchmark e capturar output
-    OUTPUT=$("$BENCH_HOST" "$bm" "$FRAMES" 2>&1)
-    EXIT_CODE=$?
-    
-    if [ $EXIT_CODE -ne 0 ]; then
-        echo -e "${RED}  FAILED (exit code $EXIT_CODE)${NC}"
-        echo "$OUTPUT"
-        echo ""
-        continue
+run_bench() {
+    local runner="$1"
+    local bm="$2"
+    local label="$3"
+
+    if [ -z "$runner" ] || [ ! -f "$runner" ]; then
+        return 1
     fi
-    
-    # Exibir output do benchmark
-    echo "$OUTPUT" | while IFS= read -r line; do
-        echo "  $line"
-    done
+
+    echo -e "${YELLOW}  [$label] $bm${NC}"
+    local OUTPUT=$("$runner" "$bm" "$FRAMES" 2>&1 | tr -d '\r')
+    local EXIT_CODE=$?
+
+    if [ $EXIT_CODE -ne 0 ]; then
+        echo -e "${RED}    FAILED (exit $EXIT_CODE)${NC}"
+        echo ""
+        return 1
+    fi
+
+    # Extrair métricas
+    local AVG=$(echo "$OUTPUT" | grep "Avg frame time:" | awk '{print $4}')
+    local FPS=$(echo "$OUTPUT" | grep "Avg FPS:" | awk '{print $3}')
+    local MPPS=$(echo "$OUTPUT" | grep "Pixels/sec:" | sed 's/.*Pixels\/sec: *\([0-9.]*\).*/\1/')
+    local BW=$(echo "$OUTPUT" | grep "VRAM bandwidth:" | sed 's/.*VRAM bandwidth: *\([0-9.]*\).*/\1/')
+    local RES=$(echo "$OUTPUT" | grep "Resolution:" | awk -F': ' '{print $2}' | tr -d '|')
+
+    # Só mostrar se tiver resultado válido
+    if [ -n "$AVG" ] && [ -n "$FPS" ]; then
+        echo "    ${GREEN}✓${NC} ${AVG}ms/frame  |  ${FPS} FPS  |  $MPPS MP/s  |  $BW MB/s"
+        echo "$bm|$label|$RES|$AVG|$FPS|$MPPS|$BW" >> "$RESULTS_FILE"
+    else
+        echo "    ${RED}✗ FALHOU${NC}"
+    fi
     echo ""
-    
-    # Extrair métricas para tabela final
-    AVG_MS=$(echo "$OUTPUT" | grep "Avg frame time:" | awk '{print $4}')
-    FPS=$(echo "$OUTPUT" | grep "Avg FPS:" | awk '{print $3}')
-    MPPS=$(echo "$OUTPUT" | grep "Pixels/sec:" | sed 's/.*Pixels\/sec: *\([0-9.]*\).*/\1/')
-    BW=$(echo "$OUTPUT" | grep "VRAM bandwidth:" | sed 's/.*VRAM bandwidth: *\([0-9.]*\).*/\1/')
-    RES=$(echo "$OUTPUT" | grep "Resolution:" | awk -F': ' '{print $2}')
-    
-    echo "$bm|$RES|$AVG_MS|$FPS|$MPPS|$BW" >> "$RESULTS_FILE"
+    return 0
+    return 0
+}
+
+for bm in "${BENCHMARKS[@]}"; do
+    echo -e "${YELLOW}────────────────────────────────────────────────────────────${NC}"
+    echo -e "${BOLD}  $bm${NC}"
+    echo -e "${YELLOW}────────────────────────────────────────────────────────────${NC}"
+
+    run_bench "$BENCH_HOST" "$bm" "native-wasm3"
+    run_bench "$BENCH_WASMTIME" "$bm" "wasmtime"
+    run_bench "$BENCH_V8" "$bm" "V8"
+    if [ -n "$BENCH_LOVE" ]; then
+        LOVE_OUTPUT=$(LD_LIBRARY_PATH="$BENCH_LOVE_DIR" "$BENCH_LOVE" "$BENCH_LOVE_DIR" "$bm" "$FRAMES" 2>&1 | tr -d '\r' | tr -d '\000')
+        LOVE_AVG=$(echo "$LOVE_OUTPUT" | grep -a "Avg frame time:" | awk '{print $4}')
+        LOVE_FPS=$(echo "$LOVE_OUTPUT" | grep -a "Avg FPS:" | awk '{print $3}')
+        LOVE_MPPS=$(echo "$LOVE_OUTPUT" | grep -a "Pixels/sec:" | sed 's/.*Pixels\/sec: *\([0-9.]*\).*/\1/')
+        LOVE_BW=$(echo "$LOVE_OUTPUT" | grep -a "VRAM bandwidth:" | sed 's/.*VRAM bandwidth: *\([0-9.]*\).*/\1/')
+        LOVE_RES=$(echo "$LOVE_OUTPUT" | grep -a "Resolution:" | awk -F': ' '{print $2}' | tr -d '|')
+        if [ -n "$LOVE_AVG" ]; then
+            echo "    ${GREEN}✓${NC} ${LOVE_AVG}ms/frame  |  ${LOVE_FPS} FPS  |  $LOVE_MPPS MP/s  |  $LOVE_BW MB/s"
+            echo "$bm|LÖVE|$LOVE_RES|$LOVE_AVG|$LOVE_FPS|$LOVE_MPPS|$LOVE_BW" >> "$RESULTS_FILE"
+        else
+            echo "    ${RED}✗ FALHOU${NC}"
+        fi
+        echo ""
+    fi
 done
 
 # ============================================================
-# Tabela de resultados
+# ============================================================
+# Tabela comparativa
 # ============================================================
 echo ""
-echo -e "${BOLD}${BLUE}╔══════════════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}${BLUE}║              SUMMARY TABLE                     ║${NC}"
-echo -e "${BOLD}${BLUE}╚══════════════════════════════════════════════════╝${NC}"
+echo -e "${BOLD}${BLUE}╔══════════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${BOLD}${BLUE}║                    COMPARATIVE TABLE                          ║${NC}"
+echo -e "${BOLD}${BLUE}╚══════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-printf "${BOLD}%-28s %-16s %10s %10s %10s %10s${NC}\n" \
-    "Benchmark" "Resolution" "Avg(ms)" "FPS" "MP/s" "BW(MB/s)"
-echo "──────────────────────────────────────────────────────────────────────────────"
 
-while IFS='|' read -r name res avg fps mpps bw; do
-    # Colorir FPS
-    FPS_NUM=$(echo "$fps" | cut -d. -f1)
-    if [ "$FPS_NUM" -gt 30 ] 2>/dev/null; then
-        FPS_COLOR="${GREEN}"
-    elif [ "$FPS_NUM" -gt 10 ] 2>/dev/null; then
-        FPS_COLOR="${YELLOW}"
-    else
-        FPS_COLOR="${RED}"
-    fi
-    
-    printf "%-28s %-16s %10s ${FPS_COLOR}%10s${NC} %10s %10s\n" \
-        "$name" "$res" "$avg" "$fps" "$mpps" "$bw"
+printf "${BOLD}%-26s %-16s %8s %8s %8s %8s %8s${NC}\n" \
+    "Benchmark" "Runner" "Avg(ms)" "FPS" "MP/s" "BW(MB/s)" "Speedup"
+echo "───────────────────────────────────────────────────────────────────────────────────"
+
+# Ler resultados para arrays
+declare -a BM_NAMES
+declare -a BM_RUNNERS
+declare -a BM_AVGS
+declare -a BM_FPSS
+declare -a BM_MPPSS
+declare -a BM_BWS
+
+while IFS='|' read -r bm_label runner_label res avg fps mpps bw; do
+    [ -z "$bm_label" ] && continue
+    BM_NAMES+=("$bm_label")
+    BM_RUNNERS+=("$runner_label")
+    BM_AVGS+=("$avg")
+    BM_FPSS+=("$fps")
+    BM_MPPSS+=("$mpps")
+    BM_BWS+=("$bw")
 done < "$RESULTS_FILE"
 
-echo "──────────────────────────────────────────────────────────────────────────────"
-echo ""
-echo -e "${GREEN}Benchmark completo! Resultados salvos em: $RESULTS_FILE${NC}"
+# Imprimir tabela
+for idx in "${!BM_NAMES[@]}"; do
+    bm="${BM_NAMES[$idx]}"
+    runner="${BM_RUNNERS[$idx]}"
+    avg="${BM_AVGS[$idx]}"
+    fps="${BM_FPSS[$idx]}"
+    mpps="${BM_MPPSS[$idx]}"
+    bw="${BM_BWS[$idx]}"
+
+    SPEEDUP_STR=""
+    if [ "$runner" = "wasmtime" ]; then
+        for jdx in "${!BM_NAMES[@]}"; do
+            if [ "${BM_NAMES[$jdx]}" = "$bm" ] && [ "${BM_RUNNERS[$jdx]}" = "native-wasm3" ]; then
+                cpu_avg="${BM_AVGS[$jdx]}"
+                if [ -n "$cpu_avg" ] && [ -n "$avg" ]; then
+                    SP=$(LC_NUMERIC=C awk "BEGIN { printf \"%.2f\", $cpu_avg / $avg }" 2>/dev/null || echo "")
+                    if [ -n "$SP" ]; then
+                        SP_GT1=$(LC_NUMERIC=C awk "BEGIN { print ($SP > 1) }" 2>/dev/null || echo "0")
+                        SP_LT1=$(LC_NUMERIC=C awk "BEGIN { print ($SP < 1) }" 2>/dev/null || echo "0")
+                        [ "$SP_GT1" = "1" ] && SPEEDUP_STR="${BOLD}${GREEN}${SP}x${NC}"
+                        [ "$SP_LT1" = "1" ] && SPEEDUP_STR="${RED}${SP}x${NC}"
+                    fi
+                fi
+                break
+            fi
+        done
+    elif [ "$runner" = "V8" ]; then
+        for jdx in "${!BM_NAMES[@]}"; do
+            if [ "${BM_NAMES[$jdx]}" = "$bm" ] && [ "${BM_RUNNERS[$jdx]}" = "native-wasm3" ]; then
+                cpu_avg="${BM_AVGS[$jdx]}"
+                if [ -n "$cpu_avg" ] && [ -n "$avg" ]; then
+                    SP=$(LC_NUMERIC=C awk "BEGIN { printf \"%.2f\", $cpu_avg / $avg }" 2>/dev/null || echo "")
+                    if [ -n "$SP" ]; then
+                        SP_GT1=$(LC_NUMERIC=C awk "BEGIN { print ($SP > 1) }" 2>/dev/null || echo "0")
+                        SP_LT1=$(LC_NUMERIC=C awk "BEGIN { print ($SP < 1) }" 2>/dev/null || echo "0")
+                        [ "$SP_GT1" = "1" ] && SPEEDUP_STR="${BOLD}${BLUE}${SP}x${NC}"
+                        [ "$SP_LT1" = "1" ] && SPEEDUP_STR="${RED}${SP}x${NC}"
+                    fi
+                fi
+                break
+            fi
+        done
+    elif [ "$runner" = "LÖVE" ]; then
+        for jdx in "${!BM_NAMES[@]}"; do
+            if [ "${BM_NAMES[$jdx]}" = "$bm" ] && [ "${BM_RUNNERS[$jdx]}" = "native-wasm3" ]; then
+                cpu_avg="${BM_AVGS[$jdx]}"
+                if [ -n "$cpu_avg" ] && [ -n "$avg" ]; then
+                    SP=$(LC_NUMERIC=C awk "BEGIN { printf \"%.2f\", $cpu_avg / $avg }" 2>/dev/null || echo "")
+                    if [ -n "$SP" ]; then
+                        SP_GT1=$(LC_NUMERIC=C awk "BEGIN { print ($SP > 1) }" 2>/dev/null || echo "0")
+                        SP_LT1=$(LC_NUMERIC=C awk "BEGIN { print ($SP < 1) }" 2>/dev/null || echo "0")
+                        [ "$SP_GT1" = "1" ] && SPEEDUP_STR="${YELLOW}${SP}x${NC}"
+                        [ "$SP_LT1" = "1" ] && SPEEDUP_STR="${RED}${SP}x${NC}"
+                    fi
+                fi
+                break
+            fi
+        done
+    fi
+
+    printf "%-26s %-16s %8.3f %8.1f %8.2f %8.2f  ${SPEEDUP_STR}\n" \
+        "$bm" "$runner" "$avg" "$fps" "$mpps" "$bw"
+done
+
+echo "───────────────────────────────────────────────────────────────────────────────────"
+echo -e "${GREEN}Benchmark completo! ($FRAMES frames cada)${NC}"
 echo ""
 
 rm -f "$RESULTS_FILE"

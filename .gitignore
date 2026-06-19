@@ -11,3 +11,6 @@ wagnostic/
 *.so
 examples/benchmark
 examples/wagnostic-bench
+wagnostic-bench-*
+wagnostic-wasmtime
+v8_Linux_x64

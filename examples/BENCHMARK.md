@@ -1,97 +1,106 @@
 # Wagnostic Benchmark Suite
 
-Suite de benchmarks que levam o wagnostic ao limite em diferentes áreas.
+A suite of benchmarks that push Wagnostic to its limits across different areas: CPU, memory bandwidth, audio processing, particle physics, and combined stress testing.
 
 ## Benchmarks
 
 ### benchmark_cpu.wasm
-**Stress test: Cálculos de ponto flutuante**
+**Stress test: Floating point calculations**
 - Mandelbrot fractal 512x512 @ 32bpp
-- 1000 iterações por pixel
-- ~262M operações de ponto flutuante por frame
-- **Resultado típico:** 0.3 FPS (3.7s/frame)
+- 1000 iterations per pixel
+- ~262M floating point operations per frame
+- **Typical result:** 0.3 FPS (~3.7s/frame on wasm3)
 
 ### benchmark_vram.wasm
-**Stress test: Bandwidth de memória**
-- Resolução 4K (3840x2160) @ 32bpp
-- Preenche 32MB de VRAM por frame
-- Testa bandwidth de upload para o host
-- **Resultado típico:** 8 FPS, 260 MB/s
+**Stress test: Memory bandwidth**
+- 4K resolution (3840x2160) @ 32bpp
+- 32MB VRAM fill per frame
+- Tests host upload bandwidth
+- **Typical result:** 8 FPS, 260 MB/s (wasm3)
 
 ### benchmark_audio.wasm
-**Stress test: Processamento de áudio**
-- 64 oscillators com frequências consonantes (harmônicos musicais)
+**Stress test: Audio processing**
+- 64 oscillators with consonant frequencies (musical harmonics)
 - 48kHz, stereo, 32-bit float
 - 1MB ring buffer
-- 2048 samples stereo por frame
-- Envelope ADSR para evitar clicks
-- Volume limitado a 30% com soft clip
-- **Resultado típico:** 130 FPS
+- 2048 stereo samples per frame
+- ADSR envelope (click-free), soft-clip, 30% max volume
+- **Typical result:** 130 FPS (wasm3)
 
 ### benchmark_particles.wasm
-**Stress test: Física + renderização**
-- 50.000 partículas com física (gravidade, colisão, vida)
-- Resolução 1280x720 @ 32bpp
-- Combina CPU (física) + VRAM (renderização)
-- **Resultado típico:** 150 FPS, 520 MB/s bandwidth
+**Stress test: Physics + rendering**
+- 50,000 particles with physics (gravity, collision, lifetime)
+- 1280x720 @ 32bpp resolution
+- Combines CPU (physics) + VRAM (rendering)
+- **Typical result:** 150 FPS, 520 MB/s bandwidth (wasm3)
 
 ### benchmark_all.wasm
-**Stress test: Todos os sistemas**
-- 1280x720 @ 32bpp com gradiente animado
-- 5.000 partículas com física
-- 16 oscillators de áudio
+**Stress test: All systems combined**
+- 1280x720 @ 32bpp animated gradient
+- 5,000 particles with physics
+- 16 audio oscillators
 - 1MB audio buffer
-- **Resultado típico:** 110 FPS
+- **Typical result:** 110 FPS (wasm3)
 
-## Uso
+## Usage
 
 ```bash
-# Compilar e rodar todos os benchmarks (100 frames cada)
+# Build and run all benchmarks (100 frames each)
 ./benchmark.sh
 
-# Rodar com número customizado de frames
+# Custom frame count
 ./benchmark.sh 50
 
-# Compilar apenas os ROMs
+# Build only ROMs
 make benchmarks
 
-# Compilar apenas o host de benchmark
-make host-bench
+# Build benchmark hosts
+make host-bench          # wasm3 headless (native-wasm3)
+make host-bench-native   # Wasmtime JIT + GPU (PBO + triple buffer)
+make host-bench-v8       # V8 TurboFan JIT headless
 
-# Rodar um benchmark individual
+# Build interactive hosts
+make host                # wasm3 CPU (wagnostic)
+make host-gpu            # wasm3 GPU (wagnostic-gpu)
+
+# Run individual benchmarks
 ./wagnostic-bench benchmark_cpu.wasm 100
+./wagnostic-bench-native benchmark_cpu.wasm 100
+./wagnostic-bench-v8 benchmark_cpu.wasm 100
 ```
 
-## Host de Benchmark
+## Runners
 
-O `wagnostic-bench` é um host headless (sem SDL/display) que:
-- Carrega o WASM
-- Chama `winit()` uma vez
-- Chama `wupdate()` N vezes
-- Mede tempo total, tempo por frame, FPS
-- Reporta bandwidth de VRAM e samples de áudio
+| Runner | Engine | Rendering | Binary |
+|---|---|---|---|
+| **native-wasm3** | wasm3 (interpreter) | OpenGL 1.2 (CPU pixel conversion) | `wagnostic` |
+| **native** | Wasmtime (Cranelift JIT) | OpenGL 3.3 Core (GPU shader) + PBO + triple buffer | `wagnostic-bench-native` |
+| **V8** | V8 (TurboFan JIT) | Headless (no GPU) | `wagnostic-bench-v8` |
+| **LÖVE** | wasm3 (FFI) | LÖVE2D (OpenGL) | `love /tmp/love-bench rom.wasm` |
 
-Não requer display, audio device, ou qualquer periférico.
+## Results (5 frames each)
 
-## Métricas
+| Benchmark | native-wasm3 | native | V8 | LÖVE |
+|---|---|---|---|---|
+| **CPU** (Mandelbrot) | 3696ms | **477ms** (7.8x) | **498ms** (7.4x) | 3815ms (1.0x) |
+| **VRAM** (4K fill) | 117ms | **52ms** (2.3x) | **19ms** (6.2x) | 133ms (0.9x) |
+| **Audio** (64 osc) | 7.9ms | **2.6ms** (3.1x) | **1.1ms** (7.4x) | 7.9ms (1.0x) |
+| **Particles** (50K) | 7.1ms | **4.4ms** (1.6x) | **1.0ms** (7.4x) | 7.2ms (1.0x) |
+| **Stress All** | 9.6ms | **4.6ms** (2.1x) | **1.4ms** (6.8x) | 9.2ms (1.1x) |
 
-- **Avg frame time**: Tempo médio por frame (ms)
-- **FPS**: Frames por segundo
-- **MP/s**: Megapixels processados por segundo
-- **BW (MB/s)**: Bandwidth de VRAM (upload para o host)
+### Analysis
 
-## Interpretação
+- **V8 (TurboFan JIT)** is the fastest engine, 6-7x over wasm3, being headless (no GPU overhead)
+- **native (Wasmtime + GPU)** is 2-7x over wasm3 but includes full GPU pipeline (texture upload, shader, PBO, triple buffer)
+- **LÖVE** matches wasm3's performance (same engine underneath), confirming the Lua FFI overhead is negligible
 
-- **CPU bound**: benchmark_cpu (0.3 FPS) - wasm3 interpretando cálculos pesados
-- **Memory bound**: benchmark_vram (8 FPS) - bandwidth de memória limita
-- **Balanced**: benchmark_particles (150 FPS) - física + renderização
-- **Audio bound**: benchmark_audio (75 FPS) - processamento de áudio
-- **Stress total**: benchmark_all (110 FPS) - combina tudo
+## Notes
 
-## Notas
-
-- Os benchmarks usam aproximação polinomial de seno (Bhaskara I) para evitar dependência de libc
-- O wasm3 interpreta WASM, então performance é ~10-100x mais lenta que native
-- Resoluções altas (4K) alocam muita memória (64MB initial-memory)
-- O benchmark_all foi ajustado para ser pesado mas executável (<10s/frame)
-- **Áudio seguro**: Volume limitado a 20-30%, envelope ADSR para evitar clicks, soft clip para prevenir distorção, frequências consonantes (harmônicos musicais)
+- Benchmarks use Bhaskara I sine approximation (polynomial) to avoid libc dependency
+- wasm3 is a pure interpreter (~10-100x slower than native code)
+- Wasmtime Cranelift JIT compiles WASM to native x86-64
+- V8 TurboFan JIT compiles to optimized machine code
+- High-resolution ROMs (4K) allocate 64MB initial memory
+- CPU headless benchmark is `wagnostic-bench` (wasm3), `wagnostic-bench-v8` (V8)
+- GPU benchmarks use `wagnostic-bench-native` (Wasmtime + triple buffer + PBO + shader)
+- **Safe audio**: volume capped at 20-30%, ADSR envelope (no clicks), soft-clip, consonant musical frequencies
