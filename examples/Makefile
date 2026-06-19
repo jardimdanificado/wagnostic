@@ -1,6 +1,6 @@
 # Host build variables
 CC = gcc
-WASM3_DIR = runners/lib/wasm3/source
+WASM3_DIR = runners/lib/wasm3
 WASM3_SRC = $(WASM3_DIR)/m3_api_libc.c \
             $(WASM3_DIR)/m3_bind.c \
             $(WASM3_DIR)/m3_code.c \
@@ -13,7 +13,8 @@ WASM3_SRC = $(WASM3_DIR)/m3_api_libc.c \
             $(WASM3_DIR)/m3_module.c \
             $(WASM3_DIR)/m3_parse.c
 
-# Wasmtime (used by native host)
+HOST_CFLAGS = -I$(WASM3_DIR) -O2
+HOST_LDFLAGS = -lSDL2 -lGL -lm
 WASMTIME_DIR = runners/lib/wasmtime
 WASMTIME_CFLAGS = -I$(WASMTIME_DIR)/include
 WASMTIME_LDFLAGS = -L$(WASMTIME_DIR)/lib -lwasmtime -lpthread -ldl -lm
