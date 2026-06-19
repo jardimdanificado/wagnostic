@@ -13,4 +13,6 @@ examples/benchmark
 examples/wagnostic-bench
 wagnostic-bench-*
 wagnostic-wasmtime
+wagnostic-*
 v8_Linux_x64
+examples/runners/lib/*

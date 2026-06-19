@@ -1,14 +1,24 @@
 # Host build variables
 CC = gcc
-WASM3_DIR = runners/lib/wasm3
-WASM3_SRC = $(WASM3_DIR)/m3.c
+WASM3_DIR = runners/lib/wasm3/source
+WASM3_SRC = $(WASM3_DIR)/m3_api_libc.c \
+            $(WASM3_DIR)/m3_bind.c \
+            $(WASM3_DIR)/m3_code.c \
+            $(WASM3_DIR)/m3_compile.c \
+            $(WASM3_DIR)/m3_core.c \
+            $(WASM3_DIR)/m3_env.c \
+            $(WASM3_DIR)/m3_exec.c \
+            $(WASM3_DIR)/m3_function.c \
+            $(WASM3_DIR)/m3_info.c \
+            $(WASM3_DIR)/m3_module.c \
+            $(WASM3_DIR)/m3_parse.c
 
 # Wasmtime (used by native host)
 WASMTIME_DIR = runners/lib/wasmtime
 WASMTIME_CFLAGS = -I$(WASMTIME_DIR)/include
 WASMTIME_LDFLAGS = -L$(WASMTIME_DIR)/lib -lwasmtime -lpthread -ldl -lm
 
-HOST_CFLAGS = -I$(WASM3_DIR) -O2 -DM3_IMPLEMENTATION
+HOST_CFLAGS = -I$(WASM3_DIR) -O2
 HOST_LDFLAGS = -lSDL2 -lGL -lm
 
 TARGET_HOST = wagnostic
@@ -38,7 +48,7 @@ all: $(TARGET_HOST) roms
 host: $(TARGET_HOST)
 
 $(TARGET_HOST): runners/native/host.c
-	$(CC) $(WASMTIME_CFLAGS) $< -o $@ $(HOST_LDFLAGS) $(WASMTIME_LDFLAGS)
+	$(CC) $(HOST_CFLAGS) $< $(WASM3_SRC) -o $@ -lSDL2 -lm
 
 host-gpu: $(TARGET_HOST_GPU)
 
