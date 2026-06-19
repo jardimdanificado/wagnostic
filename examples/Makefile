@@ -75,7 +75,7 @@ $(TARGET_HOST_BENCH_WASMTIME): runners/native-wasmtime/host_benchmark.c
 
 # V8 targets
 CXX = g++
-V8_DIR = runners/native-v8/v8_Linux_x64
+V8_DIR = runners/lib/libv8
 V8_CXXFLAGS = -I$(V8_DIR)/include -std=c++20 -O2
 V8_LDFLAGS = $(V8_DIR)/libv8_monolith.a -lpthread -ldl -lm -lrt
 
