@@ -1,106 +1,137 @@
-# Wagnostic Benchmark Suite
+# Wagnostic Benchmarks
 
-A suite of benchmarks that push Wagnostic to its limits across different areas: CPU, memory bandwidth, audio processing, particle physics, and combined stress testing.
+## Available Runners
 
-## Benchmarks
+| Runner | Engine | Render | Size | Flags |
+|--------|--------|--------|------|-------|
+| `wagnostic` | wasm3 | SDL2 software + triple buffer | ~185KB | Portable, no OpenGL |
+| `wagnostic-wasmtime` | Wasmtime JIT | OpenGL 3.3 + PBO + triple buffer | ~29KB | High performance |
+| `wagnostic-v8` | V8 13 JIT | OpenGL 3.3 + PBO + triple buffer | ~41MB | Maximum performance |
 
-### benchmark_cpu.wasm
-**Stress test: Floating point calculations**
-- Mandelbrot fractal 512x512 @ 32bpp
-- 1000 iterations per pixel
-- ~262M floating point operations per frame
-- **Typical result:** 0.3 FPS (~3.7s/frame on wasm3)
+## Runner Features
 
-### benchmark_vram.wasm
-**Stress test: Memory bandwidth**
-- 4K resolution (3840x2160) @ 32bpp
-- 32MB VRAM fill per frame
-- Tests host upload bandwidth
-- **Typical result:** 8 FPS, 260 MB/s (wasm3)
+### wasm3 (Portable)
+- **Engine:** wasm3 interpreter
+- **Render:** SDL2 software rendering
+- **Triple Buffer:** 3 SDL textures
+- **Conversion:** CPU (RGB332/RGB565 → RGBA)
+- **Dependencies:** SDL2 only
+- **Use case:** Maximum portability (headless, embedded, etc)
 
-### benchmark_audio.wasm
-**Stress test: Audio processing**
-- 64 oscillators with consonant frequencies (musical harmonics)
-- 48kHz, stereo, 32-bit float
-- 1MB ring buffer
-- 2048 stereo samples per frame
-- ADSR envelope (click-free), soft-clip, 30% max volume
-- **Typical result:** 130 FPS (wasm3)
+### Wasmtime (Performance)
+- **Engine:** Wasmtime JIT
+- **Render:** OpenGL 3.3 core
+- **Triple Buffer:** 3 OpenGL textures
+- **PBO:** 2 Pixel Buffer Objects for async upload
+- **Shaders:** RGB332/RGB565 decode in fragment shader
+- **Dependencies:** SDL2, OpenGL, libwasmtime
 
-### benchmark_particles.wasm
-**Stress test: Physics + rendering**
-- 50,000 particles with physics (gravity, collision, lifetime)
-- 1280x720 @ 32bpp resolution
-- Combines CPU (physics) + VRAM (rendering)
-- **Typical result:** 150 FPS, 520 MB/s bandwidth (wasm3)
+### V8 (Maximum Performance)
+- **Engine:** V8 13 JIT
+- **Render:** OpenGL 3.3 core
+- **Triple Buffer:** 3 OpenGL textures
+- **PBO:** 2 Pixel Buffer Objects for async upload
+- **Shaders:** RGB332/RGB565 decode in fragment shader
+- **Dependencies:** SDL2, OpenGL, libv8_monolith, icudtl.dat
 
-### benchmark_all.wasm
-**Stress test: All systems combined**
-- 1280x720 @ 32bpp animated gradient
-- 5,000 particles with physics
-- 16 audio oscillators
-- 1MB audio buffer
-- **Typical result:** 110 FPS (wasm3)
-
-## Usage
+## Compilation
 
 ```bash
-# Build and run all benchmarks (100 frames each)
-./benchmark.sh
+# Portable runner (wasm3 + SDL)
+make host
 
-# Custom frame count
-./benchmark.sh 50
+# Wasmtime runner (JIT + OpenGL)
+make host-wasmtime
 
-# Build only ROMs
-make benchmarks
-
-# Build benchmark hosts
-make host-bench          # wasm3 headless (native-wasm3)
-make host-bench-native   # Wasmtime JIT + GPU (PBO + triple buffer)
-make host-bench-v8       # V8 TurboFan JIT headless
-
-# Build interactive hosts
-make host                # wasm3 CPU (wagnostic)
-make host-gpu            # wasm3 GPU (wagnostic-gpu)
-
-# Run individual benchmarks
-./wagnostic-bench benchmark_cpu.wasm 100
-./wagnostic-bench-native benchmark_cpu.wasm 100
-./wagnostic-bench-v8 benchmark_cpu.wasm 100
+# V8 runner (JIT + OpenGL)
+make host-v8
 ```
 
-## Runners
+## Execution
 
-| Runner | Engine | Rendering | Binary |
-|---|---|---|---|
-| **native-wasm3** | wasm3 (interpreter) | OpenGL 1.2 (CPU pixel conversion) | `wagnostic` |
-| **native** | Wasmtime (Cranelift JIT) | OpenGL 3.3 Core (GPU shader) + PBO + triple buffer | `wagnostic-bench-native` |
-| **V8** | V8 (TurboFan JIT) | Headless (no GPU) | `wagnostic-bench-v8` |
-| **LÖVE** | wasm3 (FFI) | LÖVE2D (OpenGL) | `love /tmp/love-bench rom.wasm` |
+```bash
+# Run ROM
+./wagnostic rom.wasm
+./wagnostic-wasmtime rom.wasm
+./wagnostic-v8 rom.wasm
+```
 
-## Results (5 frames each)
+## Benchmark
 
-| Benchmark | native-wasm3 | native | V8 | LÖVE |
-|---|---|---|---|---|
-| **CPU** (Mandelbrot) | 3696ms | **477ms** (7.8x) | **498ms** (7.4x) | 3815ms (1.0x) |
-| **VRAM** (4K fill) | 117ms | **52ms** (2.3x) | **19ms** (6.2x) | 133ms (0.9x) |
-| **Audio** (64 osc) | 7.9ms | **2.6ms** (3.1x) | **1.1ms** (7.4x) | 7.9ms (1.0x) |
-| **Particles** (50K) | 7.1ms | **4.4ms** (1.6x) | **1.0ms** (7.4x) | 7.2ms (1.0x) |
-| **Stress All** | 9.6ms | **4.6ms** (2.1x) | **1.4ms** (6.8x) | 9.2ms (1.1x) |
+```bash
+# Run full benchmark suite
+./benchmark.sh [num_frames]
 
-### Analysis
+# Example: 500 frames
+./benchmark.sh 500
+```
 
-- **V8 (TurboFan JIT)** is the fastest engine, 6-7x over wasm3, being headless (no GPU overhead)
-- **native (Wasmtime + GPU)** is 2-7x over wasm3 but includes full GPU pipeline (texture upload, shader, PBO, triple buffer)
-- **LÖVE** matches wasm3's performance (same engine underneath), confirming the Lua FFI overhead is negligible
+The benchmark runs all available runners and generates a comparison table with:
+- Avg frame time (ms)
+- FPS
+- Megapixels/second
+- VRAM bandwidth (MB/s)
+- Speedup relative to wasm3
 
-## Notes
+## Available Benchmarks
 
-- Benchmarks use Bhaskara I sine approximation (polynomial) to avoid libc dependency
-- wasm3 is a pure interpreter (~10-100x slower than native code)
-- Wasmtime Cranelift JIT compiles WASM to native x86-64
-- V8 TurboFan JIT compiles to optimized machine code
-- High-resolution ROMs (4K) allocate 64MB initial memory
-- CPU headless benchmark is `wagnostic-bench` (wasm3), `wagnostic-bench-v8` (V8)
-- GPU benchmarks use `wagnostic-bench-native` (Wasmtime + triple buffer + PBO + shader)
-- **Safe audio**: volume capped at 20-30%, ADSR envelope (no clicks), soft-clip, consonant musical frequencies
+| ROM | Description |
+|-----|-------------|
+| `benchmark_cpu.wasm` | CPU-intensive calculations |
+| `benchmark_vram.wasm` | VRAM transfer |
+| `benchmark_audio.wasm` | Audio processing |
+| `benchmark_particles.wasm` | Particle system |
+| `benchmark_all.wasm` | Combined test suite |
+
+## Render Architecture
+
+### Triple Buffer
+```
+Frame N:   memcpy VRAM → PBO[N%2]
+           upload PBO[(N-1)%2] → texture[N%3]
+           render texture[(N-2)%3]
+```
+
+### PBO (Pixel Buffer Objects)
+- 2 alternating PBOs
+- Async upload (CPU and GPU in parallel)
+- `glMapBufferRange` with `GL_MAP_INVALIDATE_BUFFER_BIT`
+
+### Shaders (Wasmtime/V8)
+```glsl
+// Fragment shader RGB332 decode
+uint raw = uint(texelFetch(vram, pix, 0).r * 255.0);
+float r = float((raw >> 5) & 0x07u) / 7.0;
+float g = float((raw >> 2) & 0x07u) / 7.0;
+float b = float(raw & 0x03u) / 3.0;
+```
+
+## Portability
+
+| Platform | wasm3 | Wasmtime | V8 |
+|----------|-------|----------|-----|
+| Linux x64 | ✓ | ✓ | ✓ |
+| Linux ARM | ✓ | ✓ | - |
+| Windows | ✓ | ✓ | ✓ |
+| macOS | ✓ | ✓ | ✓ |
+| Raspberry Pi | ✓ | ✓ | - |
+| Headless | ✓ | - | - |
+| Browser | - | - | - |
+
+## Dependencies
+
+### wasm3
+- SDL2
+- C99 compiler
+
+### Wasmtime
+- SDL2
+- OpenGL 3.3+
+- libwasmtime (runners/lib/wasmtime/)
+
+### V8
+- SDL2
+- OpenGL 3.3+
+- libv8_monolith (runners/native-v8/v8_Linux_x64/)
+- icudtl.dat (runtime)
+- C++20 compiler

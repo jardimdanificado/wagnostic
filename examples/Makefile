@@ -23,6 +23,7 @@ HOST_LDFLAGS = -lSDL2 -lGL -lm
 
 TARGET_HOST = wagnostic
 TARGET_HOST_GPU = wagnostic-gpu
+TARGET_HOST_WASMTIME = wagnostic-wasmtime
 
 # ROM build variables
 CLANG = clang
@@ -39,7 +40,7 @@ TARGET_HOST_BENCH_WASMTIME = wagnostic-bench-wasmtime
 TARGET_HOST_V8 = wagnostic-v8
 TARGET_HOST_BENCH_V8 = wagnostic-bench-v8
 
-.PHONY: all clean audio host host-gpu host-bench host-bench-wasmtime host-v8 host-bench-v8 term portmaster roms benchmarks benchmark_roms
+.PHONY: all clean audio host host-gpu host-wasmtime host-bench host-bench-wasmtime host-v8 host-bench-v8 term portmaster roms benchmarks benchmark_roms
 
 # Default target: build host and ROMs
 all: $(TARGET_HOST) roms
@@ -55,19 +56,20 @@ host-gpu: $(TARGET_HOST_GPU)
 $(TARGET_HOST_GPU): runners/native_gpu/host_gpu.c
 	$(CC) $(HOST_CFLAGS) $< $(WASM3_SRC) -o $@ $(HOST_LDFLAGS)
 
+host-wasmtime: $(TARGET_HOST_WASMTIME)
+
+$(TARGET_HOST_WASMTIME): runners/native-wasmtime/host.c
+	$(CC) $(WASMTIME_CFLAGS) $< -o $@ $(HOST_LDFLAGS) $(WASMTIME_LDFLAGS)
+
 host-bench: $(TARGET_HOST_BENCH)
 
 $(TARGET_HOST_BENCH): runners/native/host_benchmark.c
 	$(CC) $(HOST_CFLAGS) $< $(WASM3_SRC) -o $@ -lm
 
-# wasmtime target: Wasmtime JIT + GPU (PBO + triple buffer)
-WASMTIME_DIR = runners/lib/wasmtime
-WASMTIME_CFLAGS = -I$(WASMTIME_DIR)/include
-WASMTIME_LDFLAGS = -L$(WASMTIME_DIR)/lib -lwasmtime -lpthread -ldl -lm
-
+# wasmtime benchmark target
 host-bench-wasmtime: $(TARGET_HOST_BENCH_WASMTIME)
 
-$(TARGET_HOST_BENCH_WASMTIME): runners/wasmtime/host_benchmark.c
+$(TARGET_HOST_BENCH_WASMTIME): runners/native-wasmtime/host_benchmark.c
 	$(CC) $(HOST_CFLAGS) $(WASMTIME_CFLAGS) $< -o $@ $(WASMTIME_LDFLAGS) $(HOST_LDFLAGS)
 
 # V8 targets
