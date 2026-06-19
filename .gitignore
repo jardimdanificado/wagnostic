@@ -9,3 +9,5 @@ wagnostic/
 *_data.h
 *.raw
 *.so
+examples/benchmark
+examples/wagnostic-bench

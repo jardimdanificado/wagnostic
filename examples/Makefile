@@ -11,7 +11,7 @@ TARGET_HOST_GPU = wagnostic-gpu
 
 # ROM build variables
 CLANG = clang
-CFLAGS = --target=wasm32 -nostdlib -fno-delete-null-pointer-checks -O3 -w -I../include
+CFLAGS = --target=wasm32 -nostdlib -fno-delete-null-pointer-checks -O3 -w -Iinclude
 LDFLAGS = -Wl,--no-entry -Wl,--export-all -Wl,--allow-undefined -Wl,--global-base=1048576
 MEM_FLAGS = -Wl,--initial-memory=8388608
 
@@ -19,7 +19,9 @@ MEM_FLAGS = -Wl,--initial-memory=8388608
 IMG2FB = tools/img2fb.sh
 AUDIO2PCM = tools/audio2pcm.py
 
-.PHONY: all clean audio host host-gpu term portmaster roms
+TARGET_HOST_BENCH = wagnostic-bench
+
+.PHONY: all clean audio host host-gpu host-bench term portmaster roms benchmarks
 
 # Default target: build host and ROMs
 all: $(TARGET_HOST) roms
@@ -34,6 +36,11 @@ host-gpu: $(TARGET_HOST_GPU)
 
 $(TARGET_HOST_GPU): runners/native_gpu/host_gpu.c
 	$(CC) $(HOST_CFLAGS) $< $(WASM3_SRC) -o $@ $(HOST_LDFLAGS)
+
+host-bench: $(TARGET_HOST_BENCH)
+
+$(TARGET_HOST_BENCH): runners/native/host_benchmark.c
+	$(CC) $(HOST_CFLAGS) $< $(WASM3_SRC) -o $@ -lm
 
 term: runners/native/ncurses_host.c
 	$(CC) $(HOST_CFLAGS) $< $(WASM3_SRC) -o wagnostic-term -lncurses -lm
@@ -60,6 +67,9 @@ portmaster:
 roms: buttons_test.wasm test_8bpp.wasm test_16bpp.wasm test_32bpp.wasm \
 	draw_example.wasm images_example.wasm roguelike_example.wasm tracker_example.wasm \
 	fallback_test.wasm terminal_test.wasm
+
+benchmarks: benchmark_cpu.wasm benchmark_vram.wasm benchmark_audio.wasm \
+	benchmark_particles.wasm benchmark_all.wasm
 
 audio: audio_test.wasm audio_example.wasm
 
@@ -119,8 +129,24 @@ fallback_test.wasm: rom/fallback_test.c
 terminal_test.wasm: rom/terminal_test.c
 	$(CLANG) $(CFLAGS) $(MEM_FLAGS) $(LDFLAGS) rom/terminal_test.c -o terminal_test.wasm
 
+# Benchmark ROMs
+benchmark_cpu.wasm: rom/benchmark_cpu.c
+	$(CLANG) $(CFLAGS) $(MEM_FLAGS) $(LDFLAGS) rom/benchmark_cpu.c -o benchmark_cpu.wasm
+
+benchmark_vram.wasm: rom/benchmark_vram.c
+	$(CLANG) $(CFLAGS) -Wl,--initial-memory=67108864 $(LDFLAGS) rom/benchmark_vram.c -o benchmark_vram.wasm
+
+benchmark_audio.wasm: rom/benchmark_audio.c
+	$(CLANG) $(CFLAGS) -Wl,--initial-memory=33554432 $(LDFLAGS) rom/benchmark_audio.c -o benchmark_audio.wasm
+
+benchmark_particles.wasm: rom/benchmark_particles.c
+	$(CLANG) $(CFLAGS) -Wl,--initial-memory=33554432 $(LDFLAGS) rom/benchmark_particles.c -o benchmark_particles.wasm
+
+benchmark_all.wasm: rom/benchmark_all.c
+	$(CLANG) $(CFLAGS) -Wl,--initial-memory=67108864 $(LDFLAGS) rom/benchmark_all.c -o benchmark_all.wasm
+
 clean:
-	rm -f *.wasm $(TARGET_HOST) $(TARGET_HOST_GPU) wagnostic-term
+	rm -f *.wasm $(TARGET_HOST) $(TARGET_HOST_GPU) $(TARGET_HOST_BENCH) wagnostic-term
 	rm -f rom/draw/*.h rom/draw/*.raw
 	rm -f rom/images/*.h rom/images/*.raw
 	rm -f rom/audio/audio_data.h
