@@ -74,18 +74,14 @@ TARGET_HOST_GPU       = wagnostic-gpu
 TARGET_HOST_WASMTIME  = wagnostic-wasmtime
 TARGET_HOST_BENCH     = wagnostic-bench
 TARGET_HOST_BENCH_WASMTIME = wagnostic-bench-wasmtime
-TARGET_HOST_BENCH_NODE = wagnostic-bench-node
 TARGET_HOST_BENCH_SM  = wagnostic-bench-sm
-TARGET_HOST_BENCH_JS140 = wagnostic-bench-js140
-TARGET_HOST_BENCH_JSC = wagnostic-bench-jsc
+TARGET_HOST_SM = wagnostic-sm
 
 # ── Phony targets ────────────────────────────────────────────────────────────
 .PHONY: all help clean \
-        host host-gpu host-wasmtime \
-        term \
+        host host-gpu host-wasmtime host-sm \
         roms benchmarks audio \
-        host-bench host-bench-wasmtime host-bench-node \
-        host-bench-sm host-bench-js140 host-bench-jsc \
+        host-bench host-bench-wasmtime host-bench-sm \
         portmaster
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -104,22 +100,18 @@ help:
 	@echo "    host             Build native host (wasm3 + SDL2)"
 	@echo "    host-gpu         Build GPU-accelerated host"
 	@echo "    host-wasmtime    Build Wasmtime JIT host"
-	@echo "    host-v8          Build V8 host"
+	@echo "    host-sm          Build SpiderMonkey host (SDL2+OpenGL)"
 	@echo "    host-bench*      Build benchmark runners (see below)"
 	@echo "    roms             Build example ROMs"
 	@echo "    benchmarks       Build benchmark ROMs"
 	@echo "    audio            Build audio example ROMs"
 	@echo "    portmaster       Cross-compile for PortMaster"
-	@echo "    term             Build terminal-only (ncurses) host"
 	@echo "    clean            Remove all build artifacts"
 	@echo ""
 	@echo "  Benchmark runners:"
 	@echo "    host-bench              wasm3 interpreter"
 	@echo "    host-bench-wasmtime     Wasmtime JIT"
-	@echo "    host-bench-node         Node.js/V8"
 	@echo "    host-bench-sm           SpiderMonkey C++"
-	@echo "    host-bench-js140        SpiderMonkey shell"
-	@echo "    host-bench-jsc          JavaScriptCore (WebKit)"
 	@echo ""
 	@echo "  Build individual ROM:  make -C roms/<name>"
 	@echo "  Build individual runner:  make -C runners/<name>"
@@ -155,9 +147,10 @@ host-wasmtime: $(TARGET_HOST_WASMTIME)
 $(TARGET_HOST_WASMTIME): runners/native-wasmtime/host.c
 	$(CC) $(WASMTIME_CFLAGS) $< -o $@ $(HOST_LDFLAGS) $(WASMTIME_LDFLAGS)
 
-# ── Terminal-only host (ncurses) ─────────────────────────────────────────────
-term: runners/native/ncurses_host.c
-	$(CC) $(HOST_CFLAGS) $< $(WASM3_SRC) -o wagnostic-term -lncurses -lm
+host-sm: $(TARGET_HOST_SM)
+
+$(TARGET_HOST_SM): runners/native-spidermonkey/host_sm.cpp
+	$(CXX) -std=c++17 $(SM_CXXFLAGS) $< -o $@ $(SM_LDFLAGS) -O2 -lSDL2 -lGL
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  ROM TARGETS  (delegate to sub-Makefiles)
@@ -190,27 +183,10 @@ host-bench-wasmtime: $(TARGET_HOST_BENCH_WASMTIME)
 $(TARGET_HOST_BENCH_WASMTIME): runners/native-wasmtime/host_benchmark.c
 	$(CC) $(HOST_CFLAGS) $(WASMTIME_CFLAGS) $< -o $@ $(WASMTIME_LDFLAGS) $(HOST_LDFLAGS)
 
-host-bench-node: $(TARGET_HOST_BENCH_NODE)
-
-$(TARGET_HOST_BENCH_NODE): runners/native-node/host_benchmark_node.js
-	printf '#!/usr/bin/env bash\nexec node "$$(dirname "$$0")/runners/native-node/host_benchmark_node.js" "$$@"\n' > $@
-	chmod +x $@
-
 host-bench-sm: $(TARGET_HOST_BENCH_SM)
 
 $(TARGET_HOST_BENCH_SM): runners/native-spidermonkey/host_benchmark_sm.cpp
 	$(CXX) -std=c++17 $(SM_CXXFLAGS) $< -o $@ $(SM_LDFLAGS) -O2
-
-host-bench-js140: $(TARGET_HOST_BENCH_JS140)
-
-$(TARGET_HOST_BENCH_JS140): runners/native-js140/host_benchmark_js140.js
-	printf '#!/usr/bin/env bash\nexec js140 "$$(dirname "$$0")/runners/native-js140/host_benchmark_js140.js" "$$@"\n' > $@
-	chmod +x $@
-
-host-bench-jsc: $(TARGET_HOST_BENCH_JSC)
-
-$(TARGET_HOST_BENCH_JSC): runners/native-jsc/host_benchmark_jsc.cpp
-	$(CXX) -std=c++17 $(shell pkg-config --cflags javascriptcoregtk-4.1) $< -o $@ $(shell pkg-config --libs javascriptcoregtk-4.1) -O2
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  CROSS-COMPILE (PortMaster)
@@ -243,10 +219,9 @@ clean:
 	# Clean built .wasm files at root
 	rm -f *.wasm
 	# Clean host binaries
-	rm -f $(TARGET_HOST) $(TARGET_HOST_GPU) $(TARGET_HOST_WASMTIME) \
+	rm -f $(TARGET_HOST) $(TARGET_HOST_GPU) $(TARGET_HOST_WASMTIME) $(TARGET_HOST_SM) \
 	      wagnostic-bench wagnostic-bench-wasmtime \
-	      wagnostic-bench-node wagnostic-bench-sm wagnostic-bench-js140 wagnostic-bench-jsc \
-	      wagnostic-term
+	      wagnostic-bench-sm
 	# Clean other legacy artifacts
 	rm -f wagnostic-bench-wamr wagnostic-bench-native wagnostic-bench-gpu wagnostic-wasmtime
 	# Clean benchmark dir
