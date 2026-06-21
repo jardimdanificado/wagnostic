@@ -41,8 +41,10 @@ TARGET_HOST_BENCH_WASMTIME = wagnostic-bench-wasmtime
 TARGET_HOST_V8 = wagnostic-v8
 TARGET_HOST_BENCH_V8 = wagnostic-bench-v8
 TARGET_HOST_BENCH_NODE = wagnostic-bench-node
+TARGET_HOST_BENCH_SM = wagnostic-bench-sm
+TARGET_HOST_BENCH_JS140 = wagnostic-bench-js140
 
-.PHONY: all clean audio host host-gpu host-wasmtime host-bench host-bench-wasmtime host-v8 host-bench-v8 host-bench-node term portmaster roms benchmarks benchmark_roms
+.PHONY: all clean audio host host-gpu host-wasmtime host-bench host-bench-wasmtime host-v8 host-bench-v8 host-bench-node host-bench-sm host-bench-js140 term portmaster roms benchmarks benchmark_roms
 
 # Default target: build host and ROMs
 all: $(TARGET_HOST) roms
@@ -97,6 +99,22 @@ host-bench-node: $(TARGET_HOST_BENCH_NODE)
 
 $(TARGET_HOST_BENCH_NODE): runners/native-node/host_benchmark_node.js
 	printf '#!/usr/bin/env bash\nexec node "$$(dirname "$$0")/runners/native-node/host_benchmark_node.js" "$$@"\n' > $@
+	chmod +x $@
+
+# SpiderMonkey C++ benchmark target (native-spidermonkey, V8-style)
+SM_CXXFLAGS = $(shell pkg-config --cflags mozjs-140)
+SM_LDFLAGS = $(shell pkg-config --libs mozjs-140)
+
+host-bench-sm: $(TARGET_HOST_BENCH_SM)
+
+$(TARGET_HOST_BENCH_SM): runners/native-spidermonkey/host_benchmark_sm.cpp
+	$(CXX) -std=c++17 $(SM_CXXFLAGS) $< -o $@ $(SM_LDFLAGS) -O2
+
+# SpiderMonkey JS shell benchmark target (native-js140, Node.js-style)
+host-bench-js140: $(TARGET_HOST_BENCH_JS140)
+
+$(TARGET_HOST_BENCH_JS140): runners/native-js140/host_benchmark_js140.js
+	printf '#!/usr/bin/env bash\nexec js140 "$$(dirname "$$0")/runners/native-js140/host_benchmark_js140.js" "$$@"\n' > $@
 	chmod +x $@
 
 term: runners/native/ncurses_host.c
@@ -203,7 +221,7 @@ benchmark_all.wasm: rom/benchmark_all.c
 	$(CLANG) $(CFLAGS) -Wl,--initial-memory=67108864 $(LDFLAGS) rom/benchmark_all.c -o benchmark_all.wasm
 
 clean:
-	rm -f *.wasm $(TARGET_HOST) $(TARGET_HOST_GPU) $(TARGET_HOST_BENCH) $(TARGET_HOST_BENCH_WASMTIME) $(TARGET_HOST_V8) $(TARGET_HOST_BENCH_V8) $(TARGET_HOST_BENCH_NODE) wagnostic-term wagnostic-bench-wamr wagnostic-bench-native wagnostic-bench-gpu wagnostic-wasmtime
+	rm -f *.wasm $(TARGET_HOST) $(TARGET_HOST_GPU) $(TARGET_HOST_BENCH) $(TARGET_HOST_BENCH_WASMTIME) $(TARGET_HOST_V8) $(TARGET_HOST_BENCH_V8) $(TARGET_HOST_BENCH_NODE) $(TARGET_HOST_BENCH_SM) $(TARGET_HOST_BENCH_JS140) wagnostic-term wagnostic-bench-wamr wagnostic-bench-native wagnostic-bench-gpu wagnostic-wasmtime
 	rm -f rom/draw/*.h rom/draw/*.raw
 	rm -f rom/images/*.h rom/images/*.raw
 	rm -f rom/audio/audio_data.h

@@ -14,6 +14,8 @@ BENCH_HOST="./wagnostic-bench"
 BENCH_WASMTIME="./wagnostic-bench-wasmtime"
 BENCH_V8="./wagnostic-bench-v8"
 BENCH_NODE="./wagnostic-bench-node"
+BENCH_SM="./wagnostic-bench-sm"
+BENCH_JS140="./wagnostic-bench-js140"
 BENCH_LOVE_DIR="/tmp/love-bench"
 BENCH_LOVE="love"
 
@@ -66,6 +68,20 @@ if [ ! -f "$BENCH_NODE" ]; then
     echo -e "${YELLOW}  AVISO: Node.js runner não disponível${NC}"; BENCH_NODE=""
 else
     echo -e "${GREEN}  OK: $BENCH_NODE${NC}"
+fi
+
+make host-bench-sm 2>&1 | tail -1
+if [ ! -f "$BENCH_SM" ]; then
+    echo -e "${YELLOW}  AVISO: SpiderMonkey C++ não disponível${NC}"; BENCH_SM=""
+else
+    echo -e "${GREEN}  OK: $BENCH_SM${NC}"
+fi
+
+make host-bench-js140 2>&1 | tail -1
+if [ ! -f "$BENCH_JS140" ]; then
+    echo -e "${YELLOW}  AVISO: js140 runner não disponível${NC}"; BENCH_JS140=""
+else
+    echo -e "${GREEN}  OK: $BENCH_JS140${NC}"
 fi
 
 # Setup LÖVE benchmark project
@@ -162,6 +178,8 @@ for bm in "${BENCHMARKS[@]}"; do
     run_bench "$BENCH_WASMTIME" "$bm" "wasmtime"
     run_bench "$BENCH_V8" "$bm" "V8"
     run_bench "$BENCH_NODE" "$bm" "Node.js"
+    run_bench "$BENCH_SM" "$bm" "native-spidermonkey"
+    run_bench "$BENCH_JS140" "$bm" "js140"
     if [ -n "$BENCH_LOVE" ]; then
         LOVE_OUTPUT=$(LD_LIBRARY_PATH="$BENCH_LOVE_DIR" "$BENCH_LOVE" "$BENCH_LOVE_DIR" "$bm" "$FRAMES" 2>&1 | tr -d '\r' | tr -d '\000')
         LOVE_AVG=$(echo "$LOVE_OUTPUT" | grep -a "Avg frame time:" | awk '{print $4}')
@@ -254,6 +272,38 @@ for idx in "${!BM_NAMES[@]}"; do
             fi
         done
     elif [ "$runner" = "Node.js" ]; then
+        for jdx in "${!BM_NAMES[@]}"; do
+            if [ "${BM_NAMES[$jdx]}" = "$bm" ] && [ "${BM_RUNNERS[$jdx]}" = "native-wasm3" ]; then
+                cpu_avg="${BM_AVGS[$jdx]}"
+                if [ -n "$cpu_avg" ] && [ -n "$avg" ]; then
+                    SP=$(LC_NUMERIC=C awk "BEGIN { printf \"%.2f\", $cpu_avg / $avg }" 2>/dev/null || echo "")
+                    if [ -n "$SP" ]; then
+                        SP_GT1=$(LC_NUMERIC=C awk "BEGIN { print ($SP > 1) }" 2>/dev/null || echo "0")
+                        SP_LT1=$(LC_NUMERIC=C awk "BEGIN { print ($SP < 1) }" 2>/dev/null || echo "0")
+                        [ "$SP_GT1" = "1" ] && SPEEDUP_STR="${BOLD}${CYAN}${SP}x${NC}"
+                        [ "$SP_LT1" = "1" ] && SPEEDUP_STR="${RED}${SP}x${NC}"
+                    fi
+                fi
+                break
+            fi
+        done
+    elif [ "$runner" = "native-spidermonkey" ]; then
+        for jdx in "${!BM_NAMES[@]}"; do
+            if [ "${BM_NAMES[$jdx]}" = "$bm" ] && [ "${BM_RUNNERS[$jdx]}" = "native-wasm3" ]; then
+                cpu_avg="${BM_AVGS[$jdx]}"
+                if [ -n "$cpu_avg" ] && [ -n "$avg" ]; then
+                    SP=$(LC_NUMERIC=C awk "BEGIN { printf \"%.2f\", $cpu_avg / $avg }" 2>/dev/null || echo "")
+                    if [ -n "$SP" ]; then
+                        SP_GT1=$(LC_NUMERIC=C awk "BEGIN { print ($SP > 1) }" 2>/dev/null || echo "0")
+                        SP_LT1=$(LC_NUMERIC=C awk "BEGIN { print ($SP < 1) }" 2>/dev/null || echo "0")
+                        [ "$SP_GT1" = "1" ] && SPEEDUP_STR="${BOLD}${BLUE}${SP}x${NC}"
+                        [ "$SP_LT1" = "1" ] && SPEEDUP_STR="${RED}${SP}x${NC}"
+                    fi
+                fi
+                break
+            fi
+        done
+    elif [ "$runner" = "js140" ]; then
         for jdx in "${!BM_NAMES[@]}"; do
             if [ "${BM_NAMES[$jdx]}" = "$bm" ] && [ "${BM_RUNNERS[$jdx]}" = "native-wasm3" ]; then
                 cpu_avg="${BM_AVGS[$jdx]}"
