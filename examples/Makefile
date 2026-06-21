@@ -40,8 +40,9 @@ TARGET_HOST_BENCH = wagnostic-bench
 TARGET_HOST_BENCH_WASMTIME = wagnostic-bench-wasmtime
 TARGET_HOST_V8 = wagnostic-v8
 TARGET_HOST_BENCH_V8 = wagnostic-bench-v8
+TARGET_HOST_BENCH_NODE = wagnostic-bench-node
 
-.PHONY: all clean audio host host-gpu host-wasmtime host-bench host-bench-wasmtime host-v8 host-bench-v8 term portmaster roms benchmarks benchmark_roms
+.PHONY: all clean audio host host-gpu host-wasmtime host-bench host-bench-wasmtime host-v8 host-bench-v8 host-bench-node term portmaster roms benchmarks benchmark_roms
 
 # Default target: build host and ROMs
 all: $(TARGET_HOST) roms
@@ -77,7 +78,9 @@ $(TARGET_HOST_BENCH_WASMTIME): runners/native-wasmtime/host_benchmark.c
 CXX = g++
 V8_DIR = runners/lib/libv8
 V8_CXXFLAGS = -I$(V8_DIR)/include -std=c++20 -O2
-V8_LDFLAGS = $(V8_DIR)/libv8_monolith.a -lpthread -ldl -lm -lrt
+V8_LDFLAGS = -L$(V8_DIR)/lib -Wl,-rpath,'$$ORIGIN/runners/lib/libv8/lib' \
+             -lv8 -lv8_libplatform -lv8_libbase \
+             -lpthread -ldl -lm -lrt
 
 host-v8: $(TARGET_HOST_V8)
 
@@ -88,6 +91,13 @@ host-bench-v8: $(TARGET_HOST_BENCH_V8)
 
 $(TARGET_HOST_BENCH_V8): runners/native-v8/host_benchmark_v8.cpp
 	$(CXX) $(V8_CXXFLAGS) $< -o $@ $(V8_LDFLAGS)
+
+# Node.js benchmark target (no compilation — creates a wrapper script)
+host-bench-node: $(TARGET_HOST_BENCH_NODE)
+
+$(TARGET_HOST_BENCH_NODE): runners/native-node/host_benchmark_node.js
+	printf '#!/usr/bin/env bash\nexec node "$$(dirname "$$0")/runners/native-node/host_benchmark_node.js" "$$@"\n' > $@
+	chmod +x $@
 
 term: runners/native/ncurses_host.c
 	$(CC) $(HOST_CFLAGS) $< $(WASM3_SRC) -o wagnostic-term -lncurses -lm
@@ -193,7 +203,7 @@ benchmark_all.wasm: rom/benchmark_all.c
 	$(CLANG) $(CFLAGS) -Wl,--initial-memory=67108864 $(LDFLAGS) rom/benchmark_all.c -o benchmark_all.wasm
 
 clean:
-	rm -f *.wasm $(TARGET_HOST) $(TARGET_HOST_GPU) $(TARGET_HOST_BENCH) $(TARGET_HOST_BENCH_WASMTIME) $(TARGET_HOST_V8) $(TARGET_HOST_BENCH_V8) wagnostic-term wagnostic-bench-wamr wagnostic-bench-native wagnostic-bench-gpu wagnostic-wasmtime
+	rm -f *.wasm $(TARGET_HOST) $(TARGET_HOST_GPU) $(TARGET_HOST_BENCH) $(TARGET_HOST_BENCH_WASMTIME) $(TARGET_HOST_V8) $(TARGET_HOST_BENCH_V8) $(TARGET_HOST_BENCH_NODE) wagnostic-term wagnostic-bench-wamr wagnostic-bench-native wagnostic-bench-gpu wagnostic-wasmtime
 	rm -f rom/draw/*.h rom/draw/*.raw
 	rm -f rom/images/*.h rom/images/*.raw
 	rm -f rom/audio/audio_data.h

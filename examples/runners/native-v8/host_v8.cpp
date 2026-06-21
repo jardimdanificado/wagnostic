@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <span>
 #include <SDL2/SDL.h>
 
 #if defined(_WIN32) && defined(_MSC_VER)
@@ -301,7 +302,7 @@ int main(int argc, char** argv) {
         v8::Local<v8::ArrayBuffer> wasm_buffer = v8::ArrayBuffer::New(v8_isolate, sz);
         memcpy(wasm_buffer->GetBackingStore()->Data(), wasm_data, sz);
 
-        v8::MemorySpan<const uint8_t> wire_bytes(static_cast<const uint8_t*>(wasm_data), sz);
+        std::span<const uint8_t> wire_bytes(static_cast<const uint8_t*>(wasm_data), sz);
         v8::Local<v8::WasmModuleObject> module = v8::WasmModuleObject::Compile(v8_isolate, wire_bytes).ToLocalChecked();
 
         v8::Local<v8::Value> global_webassembly = v8_context->Global()->Get(v8_context,
