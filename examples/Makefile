@@ -64,12 +64,6 @@ HOST_LDFLAGS = -lSDL2 -lGL -lm
 WASMTIME_CFLAGS = -I$(WASMTIME_DIR)/include
 WASMTIME_LDFLAGS = -L$(WASMTIME_DIR)/lib -lwasmtime -lpthread -ldl -lm
 
-V8_DIR = runners/lib/libv8
-V8_CXXFLAGS = -I$(V8_DIR)/include -std=c++20 -O2
-V8_LDFLAGS = -L$(V8_DIR)/lib -Wl,-rpath,'$$ORIGIN/runners/lib/libv8/lib' \
-             -lv8 -lv8_libplatform -lv8_libbase \
-             -lpthread -ldl -lm -lrt
-
 # SpiderMonkey flags
 SM_CXXFLAGS = $(shell pkg-config --cflags mozjs-140)
 SM_LDFLAGS = $(shell pkg-config --libs mozjs-140)
@@ -78,21 +72,20 @@ SM_LDFLAGS = $(shell pkg-config --libs mozjs-140)
 TARGET_HOST           = wagnostic
 TARGET_HOST_GPU       = wagnostic-gpu
 TARGET_HOST_WASMTIME  = wagnostic-wasmtime
-TARGET_HOST_V8        = wagnostic-v8
 TARGET_HOST_BENCH     = wagnostic-bench
 TARGET_HOST_BENCH_WASMTIME = wagnostic-bench-wasmtime
-TARGET_HOST_BENCH_V8  = wagnostic-bench-v8
 TARGET_HOST_BENCH_NODE = wagnostic-bench-node
 TARGET_HOST_BENCH_SM  = wagnostic-bench-sm
 TARGET_HOST_BENCH_JS140 = wagnostic-bench-js140
+TARGET_HOST_BENCH_JSC = wagnostic-bench-jsc
 
 # ── Phony targets ────────────────────────────────────────────────────────────
 .PHONY: all help clean \
-        host host-gpu host-wasmtime host-v8 \
+        host host-gpu host-wasmtime \
         term \
         roms benchmarks audio \
-        host-bench host-bench-wasmtime host-bench-v8 host-bench-node \
-        host-bench-sm host-bench-js140 \
+        host-bench host-bench-wasmtime host-bench-node \
+        host-bench-sm host-bench-js140 host-bench-jsc \
         portmaster
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -123,10 +116,10 @@ help:
 	@echo "  Benchmark runners:"
 	@echo "    host-bench              wasm3 interpreter"
 	@echo "    host-bench-wasmtime     Wasmtime JIT"
-	@echo "    host-bench-v8           V8 (TurboFan JIT)"
 	@echo "    host-bench-node         Node.js/V8"
 	@echo "    host-bench-sm           SpiderMonkey C++"
 	@echo "    host-bench-js140        SpiderMonkey shell"
+	@echo "    host-bench-jsc          JavaScriptCore (WebKit)"
 	@echo ""
 	@echo "  Build individual ROM:  make -C roms/<name>"
 	@echo "  Build individual runner:  make -C runners/<name>"
@@ -161,11 +154,6 @@ host-wasmtime: $(TARGET_HOST_WASMTIME)
 
 $(TARGET_HOST_WASMTIME): runners/native-wasmtime/host.c
 	$(CC) $(WASMTIME_CFLAGS) $< -o $@ $(HOST_LDFLAGS) $(WASMTIME_LDFLAGS)
-
-host-v8: $(TARGET_HOST_V8)
-
-$(TARGET_HOST_V8): runners/native-v8/host_v8.cpp
-	$(CXX) $(V8_CXXFLAGS) $< -o $@ $(HOST_LDFLAGS) $(V8_LDFLAGS)
 
 # ── Terminal-only host (ncurses) ─────────────────────────────────────────────
 term: runners/native/ncurses_host.c
@@ -202,11 +190,6 @@ host-bench-wasmtime: $(TARGET_HOST_BENCH_WASMTIME)
 $(TARGET_HOST_BENCH_WASMTIME): runners/native-wasmtime/host_benchmark.c
 	$(CC) $(HOST_CFLAGS) $(WASMTIME_CFLAGS) $< -o $@ $(WASMTIME_LDFLAGS) $(HOST_LDFLAGS)
 
-host-bench-v8: $(TARGET_HOST_BENCH_V8)
-
-$(TARGET_HOST_BENCH_V8): runners/native-v8/host_benchmark_v8.cpp
-	$(CXX) $(V8_CXXFLAGS) $< -o $@ $(filter-out -lSDL2 -lGL,$(V8_LDFLAGS))
-
 host-bench-node: $(TARGET_HOST_BENCH_NODE)
 
 $(TARGET_HOST_BENCH_NODE): runners/native-node/host_benchmark_node.js
@@ -223,6 +206,11 @@ host-bench-js140: $(TARGET_HOST_BENCH_JS140)
 $(TARGET_HOST_BENCH_JS140): runners/native-js140/host_benchmark_js140.js
 	printf '#!/usr/bin/env bash\nexec js140 "$$(dirname "$$0")/runners/native-js140/host_benchmark_js140.js" "$$@"\n' > $@
 	chmod +x $@
+
+host-bench-jsc: $(TARGET_HOST_BENCH_JSC)
+
+$(TARGET_HOST_BENCH_JSC): runners/native-jsc/host_benchmark_jsc.cpp
+	$(CXX) -std=c++17 $(shell pkg-config --cflags javascriptcoregtk-4.1) $< -o $@ $(shell pkg-config --libs javascriptcoregtk-4.1) -O2
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  CROSS-COMPILE (PortMaster)
@@ -255,9 +243,9 @@ clean:
 	# Clean built .wasm files at root
 	rm -f *.wasm
 	# Clean host binaries
-	rm -f $(TARGET_HOST) $(TARGET_HOST_GPU) $(TARGET_HOST_WASMTIME) $(TARGET_HOST_V8) \
-	      wagnostic-bench wagnostic-bench-wasmtime wagnostic-bench-v8 \
-	      wagnostic-bench-node wagnostic-bench-sm wagnostic-bench-js140 \
+	rm -f $(TARGET_HOST) $(TARGET_HOST_GPU) $(TARGET_HOST_WASMTIME) \
+	      wagnostic-bench wagnostic-bench-wasmtime \
+	      wagnostic-bench-node wagnostic-bench-sm wagnostic-bench-js140 wagnostic-bench-jsc \
 	      wagnostic-term
 	# Clean other legacy artifacts
 	rm -f wagnostic-bench-wamr wagnostic-bench-native wagnostic-bench-gpu wagnostic-wasmtime
