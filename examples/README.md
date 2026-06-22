@@ -23,7 +23,7 @@ examples/
 │   ├── web/          # Browser-based host
 │   └── love/         # LÖVE2D host
 └── tools/            # Build utilities
-    ├── img2fb.sh     # Convert images to framebuffer format
+    ├── img2wasm.sh   # Convert images to C headers (.rgba.h, .rgb565.h, .rgb332.h)
     └── audio2pcm.py  # Convert audio to PCM data
 ```
 
@@ -111,14 +111,21 @@ olivec_sprite_copy(dst, x, y, w, h, src);
 
 ## Tools
 
-### img2fb.sh
+### img2wasm.sh
 
-Converts images to raw framebuffer data and C header files.
+Converts any image to a C header with raw pixel data. The extension says the format:
+
+| Extension | Format | C type | Bits |
+|---|---|---|---|
+| `.rgba.h` | RGBA32 (little-endian) | `uint32_t` | 32 |
+| `.rgb565.h` | RGB565 | `uint16_t` | 16 |
+| `.rgb332.h` | RGB332 | `uint8_t` | 8 |
 
 ```bash
-# Usage: img2fb.sh <input_image> <output_name> <bpp>
-./tools/img2fb.sh image.webp output_name 16
-# Creates: output_name.h and output_name.raw
+# Usage: img2wasm.sh <input_image> [--rgba|--rgb565|--rgb332] [-o <prefix>]
+./tools/img2wasm.sh image.webp --rgb565   # → image.rgb565.h
+./tools/img2wasm.sh photo.jpg --rgba      # → photo.rgba.h
+./tools/img2wasm.sh photo.jpg --rgba -o sprites/player  # → sprites/player.rgba.h
 ```
 
 ### audio2pcm.py

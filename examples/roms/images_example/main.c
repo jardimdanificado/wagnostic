@@ -1,7 +1,7 @@
 #include "wagnostic.h"
 #define OLIVEC_IMPLEMENTATION
 #include "olive.h"
-#include "image.h"
+#include "image.rgb565.h"
 
 static Olivec_Canvas _oc;
 static Olivec_Canvas _img;
@@ -11,7 +11,7 @@ static int scale_w = 120, scale_h = 100;
 void winit() {
     w_setup("Wagnostic SDK - Images", 320, 240, 16, 4, 8);
     _oc = olivec_canvas(W_FB_PTR, 320, 240, 320, 16);
-    _img = olivec_canvas((uint16_t*)image_raw, image_width, image_height, image_width, 16);
+    _img = olivec_canvas((uint16_t*)image_pixels, image_width, image_height, image_width, 16);
 }
 
 __attribute__((visibility("default")))

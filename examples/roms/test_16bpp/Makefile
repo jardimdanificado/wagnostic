@@ -7,7 +7,7 @@ TARGET = ../../test_16bpp.wasm
 
 all: $(TARGET)
 
-$(TARGET): main.c ../images_example/image16.h
+$(TARGET): main.c ../images_example/image.rgb565.h
 	$(CLANG) $(CFLAGS) $(MEM_FLAGS) $(LDFLAGS) -o $@ main.c
 
 clean:

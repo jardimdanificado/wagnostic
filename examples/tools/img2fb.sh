@@ -1,13 +1,7 @@
 #!/bin/bash
-
-show_help() {
-    echo "Usage: $0 <input_image> [output_prefix] [bpp: 8|16|32]"
-    echo "Default BPP is 16."
-    echo "Output: <output_prefix>.raw and <output_prefix>_data.h"
-    exit 1
-}
-
-if [ "$#" -lt 1 ]; then show_help; fi
+# img2fb.sh — DEPRECATED: use img2wasm.sh instead
+#   Old: ./img2fb.sh image.webp output_name 16
+#   New: ./img2wasm.sh image.webp --rgb565 -o output_name
 
 IN="$1"
 PREFIX="${2:-image}"

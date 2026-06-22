@@ -43,7 +43,7 @@ RUNNER_DIRS_ALL    = \
 	runners/native-js140
 
 # ── Tools ────────────────────────────────────────────────────────────────────
-IMG2FB     = tools/img2fb.sh
+IMG2WASM   = tools/img2wasm.sh
 AUDIO2PCM  = tools/audio2pcm.py
 
 # ── ROM compilation flags (exported so sub-Makefiles can use them) ───────────

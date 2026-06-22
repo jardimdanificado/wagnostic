@@ -1,7 +1,7 @@
 #include "wagnostic.h"
 #define OLIVEC_IMPLEMENTATION
 #include "olive.h"
-#include "image.h"
+#include "image.rgb565.h"
 
 extern uint32_t get_ticks();
 
@@ -28,7 +28,7 @@ void winit() {
     w_setup("Wagnostic SDK - Draw", 320, 240, 16, 4, 8);
     
     _oc = olivec_canvas(W_FB_PTR, 320, 240, 320, 16);
-    _img_sprite = olivec_canvas((uint16_t*)image_raw, image_width, image_height, image_width, 16);
+    _img_sprite = olivec_canvas((uint16_t*)image_pixels, image_width, image_height, image_width, 16);
 
     for (int i = 0; i < SPRITE_COUNT; i++) {
         _sprites[i].w = 24; _sprites[i].h = 24;
