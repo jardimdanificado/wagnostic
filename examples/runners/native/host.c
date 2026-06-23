@@ -64,17 +64,6 @@ static uint8_t read_u8(const char* name) {
     return mem[ptr];
 }
 
-static void write_u8(const char* name, uint8_t val) {
-    IM3Global global = m3_FindGlobal(g_module, name);
-    if (!global) return;
-    M3TaggedValue value;
-    if (m3_GetGlobal(global, &value)) return;
-    uint32_t ptr = value.value.i32;
-    uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
-    if (!mem || ptr == 0) return;
-    mem[ptr] = val;
-}
-
 static void read_str(const char* name, char* dst, int max) {
     IM3Global global = m3_FindGlobal(g_module, name);
     if (!global) { dst[0] = '\0'; return; }
@@ -87,13 +76,30 @@ static void read_str(const char* name, char* dst, int max) {
     dst[max - 1] = '\0';
 }
 
+// Read dirty rect by index
+static void read_dirty_rect(int idx, int* x, int* y, int* w, int* h) {
+    IM3Global global = m3_FindGlobal(g_module, "w_dirty_rects");
+    if (!global) { *x = *y = *w = *h = 0; return; }
+    M3TaggedValue value;
+    if (m3_GetGlobal(global, &value)) { *x = *y = *w = *h = 0; return; }
+    uint32_t ptr = value.value.i32;
+    uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
+    if (!mem || ptr == 0) { *x = *y = *w = *h = 0; return; }
+    // Rect is 4 int32s (x, y, w, h) = 16 bytes each
+    uint32_t* rect = (uint32_t*)(mem + ptr + idx * 16);
+    *x = (int)rect[0];
+    *y = (int)rect[1];
+    *w = (int)rect[2];
+    *h = (int)rect[3];
+}
+
 // ============================================
 // Audio callback
 // ============================================
 
 static void host_audio_callback(void* userdata, Uint8* stream_ptr, int len_bytes) {
     float* stream = (float*)stream_ptr;
-    int ns = len_bytes / sizeof(float);
+    int ns = len_bytes / (int)sizeof(float);
 
     uint32_t r = read_u32("w_audio_read");
     uint32_t w = read_u32("w_audio_write");
@@ -139,8 +145,7 @@ static void convert_mouse_coords(int window_x, int window_y, int* rom_x, int* ro
 
     uint32_t W = read_u32("w_width");
     uint32_t H = read_u32("w_height");
-    uint32_t SCALE = read_u32("w_scale");
-    if (W == 0) W = 320; if (H == 0) H = 240; if (SCALE == 0) SCALE = 1;
+    if (W == 0) W = 320; if (H == 0) H = 240;
 
     float aspect_rom = (float)W / (float)H;
     float aspect_win = (float)win_w / (float)win_h;
@@ -168,6 +173,50 @@ static void convert_mouse_coords(int window_x, int window_y, int* rom_x, int* ro
     if (*rom_x >= (int)W) *rom_x = W - 1;
     if (*rom_y < 0) *rom_y = 0;
     if (*rom_y >= (int)H) *rom_y = H - 1;
+}
+
+// ============================================
+// Render VRAM region to texture
+// ============================================
+
+static void render_rect_to_texture(SDL_Texture* texture, uint8_t* vram, int rx, int ry, int rw, int rh, uint32_t W, uint32_t H, uint32_t BPP) {
+    void* pixels;
+    int pitch;
+    SDL_LockTexture(texture, NULL, &pixels, &pitch);
+
+    if (BPP == 16) {
+        uint16_t* src = (uint16_t*)vram;
+        uint32_t* dst = (uint32_t*)pixels;
+        for (int y = ry; y < ry + rh && y < (int)H; y++) {
+            for (int x = rx; x < rx + rw && x < (int)W; x++) {
+                uint16_t p = src[y * W + x];
+                uint32_t r = ((p >> 11) & 0x1F) * 255 / 31;
+                uint32_t g = ((p >> 5) & 0x3F) * 255 / 63;
+                uint32_t b = (p & 0x1F) * 255 / 31;
+                dst[y * W + x] = 0xFF000000 | (b << 16) | (g << 8) | r;
+            }
+        }
+    } else if (BPP == 32) {
+        uint32_t* src = (uint32_t*)vram;
+        uint32_t* dst = (uint32_t*)pixels;
+        for (int y = ry; y < ry + rh && y < (int)H; y++) {
+            memcpy(&dst[y * W + rx], &src[y * W + rx], rw * 4);
+        }
+    } else if (BPP == 8) {
+        uint8_t* src = vram;
+        uint32_t* dst = (uint32_t*)pixels;
+        for (int y = ry; y < ry + rh && y < (int)H; y++) {
+            for (int x = rx; x < rx + rw && x < (int)W; x++) {
+                uint8_t p = src[y * W + x];
+                uint32_t r = ((p >> 5) & 0x07) * 255 / 7;
+                uint32_t g = ((p >> 2) & 0x07) * 255 / 7;
+                uint32_t b = (p & 0x03) * 255 / 3;
+                dst[y * W + x] = 0xFF000000 | (b << 16) | (g << 8) | r;
+            }
+        }
+    }
+
+    SDL_UnlockTexture(texture);
 }
 
 // ============================================
@@ -236,6 +285,7 @@ int main(int argc, char** argv) {
         SDL_TEXTUREACCESS_STREAMING, W, H);
     SDL_SetTextureScaleMode(texture, SDL_ScaleModeNearest);
 
+    // Audio setup
     SDL_AudioDeviceID audio_dev = 0;
     uint32_t audio_size = read_u32("w_audio_size");
     if (audio_size > 0) {
@@ -252,15 +302,23 @@ int main(int argc, char** argv) {
         if (audio_dev) SDL_PauseAudioDevice(audio_dev, 0);
     }
 
+    // Previous config for change detection
+    uint32_t prev_W = W, prev_H = H, prev_BPP = BPP, prev_SCALE = SCALE;
+    uint32_t prev_audio_size = audio_size;
+    uint32_t prev_audio_rate = read_u32("w_audio_sample_rate");
+    uint32_t prev_audio_bpp = read_u32("w_audio_bpp");
+    uint32_t prev_audio_channels = read_u32("w_audio_channels");
+
     int running = 1;
     while (running) {
+        // Check w_running
+        if (read_u32("w_running") == 0) running = 0;
+
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_QUIT) running = 0;
             if (ev.type == SDL_KEYDOWN || ev.type == SDL_KEYUP) {
-                if (ev.key.keysym.scancode < 256)
-                    write_u8("w_keys", ev.key.keysym.scancode);  // This writes to offset 0 of keys array
-                    // Need to write to keys[scancode] specifically
+                if (ev.key.keysym.scancode < 256) {
                     IM3Global keys_global = m3_FindGlobal(g_module, "w_keys");
                     if (keys_global) {
                         M3TaggedValue kv;
@@ -271,6 +329,7 @@ int main(int argc, char** argv) {
                             }
                         }
                     }
+                }
             }
             if (ev.type == SDL_MOUSEMOTION) {
                 int rx, ry;
@@ -297,92 +356,116 @@ int main(int argc, char** argv) {
         // Call wupdate
         if (f_upd) m3_CallV(f_upd);
 
-        // Read config again (ROM may have changed it)
+        // Read config (ROM may have changed it)
         W = read_u32("w_width");
         H = read_u32("w_height");
         BPP = read_u32("w_bpp");
         SCALE = read_u32("w_scale");
         if (W == 0) W = 320; if (H == 0) H = 240; if (BPP == 0) BPP = 16; if (SCALE == 0) SCALE = 1;
 
-        // Check signals
-        uint8_t redraw = read_u8("w_signal_redraw");
-        uint8_t quit = read_u8("w_signal_quit");
-        uint8_t update_window = read_u8("w_signal_update_window");
-        uint8_t update_audio = read_u8("w_signal_update_audio");
+        // Detect config changes
+        int config_changed = (W != prev_W || H != prev_H || BPP != BPP || SCALE != prev_SCALE);
+        int title_changed = 0;
+        char new_title[128];
+        read_str("w_title", new_title, 128);
+        if (strcmp(new_title, title) != 0) title_changed = 1;
 
-        if (quit) running = 0;
+        // Detect audio config changes
+        uint32_t cur_audio_size = read_u32("w_audio_size");
+        uint32_t cur_audio_rate = read_u32("w_audio_sample_rate");
+        uint32_t cur_audio_bpp = read_u32("w_audio_bpp");
+        uint32_t cur_audio_channels = read_u32("w_audio_channels");
+        int audio_changed = (cur_audio_size != prev_audio_size || cur_audio_rate != prev_audio_rate ||
+                             cur_audio_bpp != prev_audio_bpp || cur_audio_channels != prev_audio_channels);
 
-        if (update_window || update_audio) {
-            // Re-read title
-            read_str("w_title", title, 128);
+        // Handle config changes
+        if (config_changed || title_changed) {
             SDL_SetWindowSize(window, W * SCALE, H * SCALE);
-            SDL_SetWindowTitle(window, title[0] ? title : "Wagnostic");
-
-            // Reinit texture
+            if (title_changed) {
+                SDL_SetWindowTitle(window, new_title[0] ? new_title : "Wagnostic");
+                strcpy(title, new_title);
+            }
             SDL_DestroyTexture(texture);
             texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888,
                 SDL_TEXTUREACCESS_STREAMING, W, H);
             SDL_SetTextureScaleMode(texture, SDL_ScaleModeNearest);
-
-            // Reinit audio if needed
-            if (update_audio && audio_size > 0 && audio_dev == 0) {
-                SDL_AudioSpec wanted;
-                SDL_zero(wanted);
-                wanted.freq = read_u32("w_audio_sample_rate");
-                if (wanted.freq == 0) wanted.freq = 44100;
-                wanted.format = AUDIO_F32;
-                wanted.channels = read_u32("w_audio_channels");
-                if (wanted.channels == 0) wanted.channels = 1;
-                wanted.samples = 1024;
-                wanted.callback = host_audio_callback;
-                audio_dev = SDL_OpenAudioDevice(NULL, 0, &wanted, NULL, 0);
-                if (audio_dev) SDL_PauseAudioDevice(audio_dev, 0);
-            }
-
-            write_u8("w_signal_update_window", 0);
-            write_u8("w_signal_update_audio", 0);
+            prev_W = W; prev_H = H; prev_BPP = BPP; prev_SCALE = SCALE;
         }
 
-        if (redraw) {
-            // Get VRAM pointer
-            IM3Global vram_global = m3_FindGlobal(g_module, "w_vram");
-            if (vram_global) {
-                M3TaggedValue value;
-                if (!m3_GetGlobal(vram_global, &value)) {
-                    uint32_t vram_ptr = value.value.i32;
-                    uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
-                    if (mem && vram_ptr) {
-                        // Convert to ABGR for SDL texture
-                        void* pixels;
-                        int pitch;
-                        SDL_LockTexture(texture, NULL, &pixels, &pitch);
+        if (audio_changed && audio_size > 0 && audio_dev == 0) {
+            SDL_AudioSpec wanted;
+            SDL_zero(wanted);
+            wanted.freq = cur_audio_rate;
+            if (wanted.freq == 0) wanted.freq = 44100;
+            wanted.format = AUDIO_F32;
+            wanted.channels = cur_audio_channels;
+            if (wanted.channels == 0) wanted.channels = 1;
+            wanted.samples = 1024;
+            wanted.callback = host_audio_callback;
+            audio_dev = SDL_OpenAudioDevice(NULL, 0, &wanted, NULL, 0);
+            if (audio_dev) SDL_PauseAudioDevice(audio_dev, 0);
+            prev_audio_size = cur_audio_size;
+            prev_audio_rate = cur_audio_rate;
+            prev_audio_bpp = cur_audio_bpp;
+            prev_audio_channels = cur_audio_channels;
+        }
 
-                        if (BPP == 16) {
-                            uint16_t* src = (uint16_t*)(mem + vram_ptr);
-                            uint32_t* dst = (uint32_t*)pixels;
-                            for (int i = 0; i < (int)(W * H); i++) {
-                                uint16_t p = src[i];
-                                uint32_t r = ((p >> 11) & 0x1F) * 255 / 31;
-                                uint32_t g = ((p >> 5) & 0x3F) * 255 / 63;
-                                uint32_t b = (p & 0x1F) * 255 / 31;
-                                dst[i] = 0xFF000000 | (b << 16) | (g << 8) | r;
-                            }
-                        } else if (BPP == 32) {
-                            memcpy(pixels, mem + vram_ptr, W * H * 4);
-                        } else if (BPP == 8) {
-                            uint8_t* src = mem + vram_ptr;
-                            uint32_t* dst = (uint32_t*)pixels;
-                            for (int i = 0; i < (int)(W * H); i++) {
-                                uint8_t p = src[i];
-                                uint32_t r = ((p >> 5) & 0x07) * 255 / 7;
-                                uint32_t g = ((p >> 2) & 0x07) * 255 / 7;
-                                uint32_t b = (p & 0x03) * 255 / 3;
-                                dst[i] = 0xFF000000 | (b << 16) | (g << 8) | r;
-                            }
+        // Get VRAM pointer
+        IM3Global vram_global = m3_FindGlobal(g_module, "w_vram");
+        uint8_t* vram = NULL;
+        if (vram_global) {
+            M3TaggedValue value;
+            if (!m3_GetGlobal(vram_global, &value)) {
+                vram = m3_GetMemory(g_runtime, NULL, 0) + value.value.i32;
+            }
+        }
+
+        // Handle dirty rectangles
+        uint32_t dirty_count = read_u32("w_dirty_count");
+        if (vram && dirty_count > 0) {
+            // Fast path: full screen update
+            if (dirty_count == 1) {
+                int rx, ry, rw, rh;
+                read_dirty_rect(0, &rx, &ry, &rw, &rh);
+                if (rx == 0 && ry == 0 && (uint32_t)rw == W && (uint32_t)rh == H) {
+                    // Full screen - direct copy
+                    void* pixels;
+                    int pitch;
+                    SDL_LockTexture(texture, NULL, &pixels, &pitch);
+                    if (BPP == 16) {
+                        uint16_t* src = (uint16_t*)vram;
+                        uint32_t* dst = (uint32_t*)pixels;
+                        for (int i = 0; i < (int)(W * H); i++) {
+                            uint16_t p = src[i];
+                            uint32_t r = ((p >> 11) & 0x1F) * 255 / 31;
+                            uint32_t g = ((p >> 5) & 0x3F) * 255 / 63;
+                            uint32_t b = (p & 0x1F) * 255 / 31;
+                            dst[i] = 0xFF000000 | (b << 16) | (g << 8) | r;
                         }
-
-                        SDL_UnlockTexture(texture);
+                    } else if (BPP == 32) {
+                        memcpy(pixels, vram, W * H * 4);
+                    } else if (BPP == 8) {
+                        uint8_t* src = vram;
+                        uint32_t* dst = (uint32_t*)pixels;
+                        for (int i = 0; i < (int)(W * H); i++) {
+                            uint8_t p = src[i];
+                            uint32_t r = ((p >> 5) & 0x07) * 255 / 7;
+                            uint32_t g = ((p >> 2) & 0x07) * 255 / 7;
+                            uint32_t b = (p & 0x03) * 255 / 3;
+                            dst[i] = 0xFF000000 | (b << 16) | (g << 8) | r;
+                        }
                     }
+                    SDL_UnlockTexture(texture);
+                } else {
+                    // Single rect, not full screen
+                    render_rect_to_texture(texture, vram, rx, ry, rw, rh, W, H, BPP);
+                }
+            } else {
+                // Multiple dirty rects
+                for (uint32_t i = 0; i < dirty_count && i < 32; i++) {
+                    int rx, ry, rw, rh;
+                    read_dirty_rect(i, &rx, &ry, &rw, &rh);
+                    render_rect_to_texture(texture, vram, rx, ry, rw, rh, W, H, BPP);
                 }
             }
 
@@ -407,8 +490,6 @@ int main(int argc, char** argv) {
             SDL_RenderClear(renderer);
             SDL_RenderCopy(renderer, texture, NULL, &dst);
             SDL_RenderPresent(renderer);
-
-            write_u8("w_signal_redraw", 0);
         }
 
         // Reset mouse wheel

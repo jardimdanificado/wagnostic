@@ -65,5 +65,5 @@ void wupdate() {
         vram[my * 70 + mx] = WHITE;
     }
 
-    w_signal_redraw = 1;
+    w_redraw();
 }

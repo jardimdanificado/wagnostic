@@ -80,7 +80,7 @@ static void init_audio() {
     w_audio_read = 0;
     
     // Signal audio update
-    w_signal_update_audio = 1;
+    // Audio config is set above, host auto-detects changes
     
     // Get audio buffer pointer
     audio_buffer = (uint8_t*)w_audio_ptr();

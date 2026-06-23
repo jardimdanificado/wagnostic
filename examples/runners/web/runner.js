@@ -13,6 +13,12 @@ let imageDataCache = null;
 let lastFrameTime = 0;
 const FRAME_MIN_TIME = 1000 / 60; // Target 60 FPS
 
+// Config change detection
+let lastWidth = 0;
+let lastHeight = 0;
+let lastScale = 0;
+let lastBpp = 0;
+
 // Audio State
 let audioCtx = null;
 let audioNode = null;
@@ -239,6 +245,13 @@ function gameLoop(now) {
     if (elapsed >= FRAME_MIN_TIME) {
         lastFrameTime = now - (elapsed % FRAME_MIN_TIME);
 
+        // Check w_running flag - if 0, quit
+        const running = readGlobalU32('w_running');
+        if (!running) {
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            return;
+        }
+
         // Update ticks
         writeGlobalU32('w_ticks', performance.now());
 
@@ -259,61 +272,157 @@ function gameLoop(now) {
         writeGlobalI32('w_mouse_wheel', input.mouse.wheel);
         input.mouse.wheel = 0; // Reset wheel
 
+        // Auto-detect config changes
+        detectConfigChanges();
+
         // Call ROM update function
         if (wasmInstance.exports.wupdate) wasmInstance.exports.wupdate();
         else if (wasmInstance.exports.frame) wasmInstance.exports.frame();
 
-        // Process signals from named globals
-        const redraw = readGlobalU8('w_signal_redraw');
-        const quit = readGlobalU8('w_signal_quit');
-        const updateWindow = readGlobalU8('w_signal_update_window');
-        const updateAudio = readGlobalU8('w_signal_update_audio');
-
-        if (quit) {
-            if (animationFrameId) cancelAnimationFrame(animationFrameId);
-            return;
-        }
-
-        if (updateWindow) {
-            // Re-read config from globals
-            const w = readGlobalU32('w_width') || 320;
-            const h = readGlobalU32('w_height') || 240;
-            const s = readGlobalU32('w_scale') || 1;
-            const title = readGlobalStr('w_title', 128);
-
-            canvas.width = w;
-            canvas.height = h;
-            canvas.style.width = (w * s) + 'px';
-            canvas.style.height = (h * s) + 'px';
-            canvas.style.imageRendering = 'pixelated';
-            if (title) document.title = title;
-
-            writeGlobalU8('w_signal_update_window', 0);
-        }
-
-        if (updateAudio) {
-            const audioSize = readGlobalU32('w_audio_size');
-            if (audioSize > 0 && !audioNode) {
-                const audioRate = readGlobalU32('w_audio_sample_rate');
-                const audioBpp = readGlobalU32('w_audio_bpp');
-                const audioChannels = readGlobalU32('w_audio_channels') || 1;
-                setupWebAudio(audioSize, audioRate, audioBpp, audioChannels);
-            }
-            writeGlobalU8('w_signal_update_audio', 0);
-        }
-
-        if (redraw) {
-            renderFrame();
-            writeGlobalU8('w_signal_redraw', 0);
+        // Read dirty count and render dirty regions
+        const dirtyCount = readGlobalU32('w_dirty_count');
+        if (dirtyCount > 0) {
+            renderDirtyRects(dirtyCount);
         }
     }
     animationFrameId = requestAnimationFrame(gameLoop);
 }
 
 // ============================================
-// Rendering (Canvas 2D, putImageData)
+// Config Change Detection
 // ============================================
 
+function detectConfigChanges() {
+    const w = readGlobalU32('w_width') || 320;
+    const h = readGlobalU32('w_height') || 240;
+    const s = readGlobalU32('w_scale') || 1;
+    const bpp = readGlobalU32('w_bpp') || 16;
+
+    if (w !== lastWidth || h !== lastHeight || s !== lastScale || bpp !== lastBpp) {
+        lastWidth = w;
+        lastHeight = h;
+        lastScale = s;
+        lastBpp = bpp;
+
+        canvas.width = w;
+        canvas.height = h;
+        canvas.style.width = (w * s) + 'px';
+        canvas.style.height = (h * s) + 'px';
+        canvas.style.imageRendering = 'pixelated';
+
+        // Invalidate image data cache so it's recreated on next render
+        imageDataCache = null;
+
+        // Check for title change
+        const title = readGlobalStr('w_title', 128);
+        if (title) document.title = title;
+    }
+}
+
+// ============================================
+// Rendering (Canvas 2D, dirty rectangles)
+// ============================================
+
+function renderDirtyRects(count) {
+    const w = readGlobalU32('w_width') || 320;
+    const h = readGlobalU32('w_height') || 240;
+    const bpp = readGlobalU32('w_bpp') || 16;
+    if (w === 0 || h === 0) return;
+
+    if (!imageDataCache || imageDataCache.width !== w || imageDataCache.height !== h) {
+        imageDataCache = ctx.createImageData(w, h);
+    }
+
+    // Get pointer to dirty_rects array (each rect = 16 bytes: x, y, w, h as int32)
+    const rectsPtr = getGlobalPtr('w_dirty_rects');
+    if (!rectsPtr) {
+        // Fallback: full screen render if dirty rects unavailable
+        renderFrame();
+        return;
+    }
+
+    const dv = new DataView(wasmMemory.buffer);
+
+    // Fast path: if single dirty rect covers entire screen, do full render
+    if (count === 1) {
+        const rx = dv.getInt32(rectsPtr, true);
+        const ry = dv.getInt32(rectsPtr + 4, true);
+        const rw = dv.getInt32(rectsPtr + 8, true);
+        const rh = dv.getInt32(rectsPtr + 12, true);
+        if (rx === 0 && ry === 0 && rw === w && rh === h) {
+            renderFrame();
+            return;
+        }
+    }
+
+    // General case: render each dirty rect
+    const vramPtr = getGlobalPtr('w_vram');
+    if (!vramPtr) return;
+
+    for (let i = 0; i < count && i < 32; i++) {
+        const offset = rectsPtr + i * 16;
+        const rx = dv.getInt32(offset, true);
+        const ry = dv.getInt32(offset + 4, true);
+        const rw = dv.getInt32(offset + 8, true);
+        const rh = dv.getInt32(offset + 12, true);
+
+        // Clamp to screen bounds
+        const sx = Math.max(0, rx);
+        const sy = Math.max(0, ry);
+        const ex = Math.min(w, rx + rw);
+        const ey = Math.min(h, ry + rh);
+        if (sx >= ex || sy >= ey) continue;
+
+        renderRegion(sx, sy, ex - sx, ey - sy, vramPtr, w, bpp);
+    }
+
+    // Flush to canvas
+    ctx.putImageData(imageDataCache, 0, 0);
+}
+
+function renderRegion(sx, sy, rw, rh, vramPtr, w, bpp) {
+    const data32 = new Uint32Array(imageDataCache.data.buffer);
+
+    if (bpp === 32) {
+        for (let y = sy; y < sy + rh; y++) {
+            const srcStart = y * w + sx;
+            let di = y * w + sx;
+            const src32 = new Uint32Array(wasmMemory.buffer, vramPtr + srcStart * 4, rw);
+            for (let si = 0; si < rw; si++) {
+                data32[di++] = src32[si];
+            }
+        }
+    } else if (bpp === 8) {
+        const frame8 = new Uint8Array(wasmMemory.buffer, vramPtr);
+        for (let y = sy; y < sy + rh; y++) {
+            let di = y * w + sx;
+            let si = y * w + sx;
+            for (let x = 0; x < rw; x++) {
+                const c = frame8[si++];
+                const r = ((c >> 5) & 0x07) * 255 / 7;
+                const g = ((c >> 2) & 0x07) * 255 / 7;
+                const b = (c & 0x03) * 255 / 3;
+                data32[di++] = (255 << 24) | (b << 16) | (g << 8) | r;
+            }
+        }
+    } else {
+        // 16bpp (RGB565)
+        const frame16 = new Uint16Array(wasmMemory.buffer, vramPtr);
+        for (let y = sy; y < sy + rh; y++) {
+            let di = y * w + sx;
+            let si = y * w + sx;
+            for (let x = 0; x < rw; x++) {
+                const c = frame16[si++];
+                const r = ((c >> 11) & 0x1f) * 255 / 31;
+                const g = ((c >> 5) & 0x3f) * 255 / 63;
+                const b = (c & 0x1f) * 255 / 31;
+                data32[di++] = (255 << 24) | (b << 16) | (g << 8) | r;
+            }
+        }
+    }
+}
+
+// Full screen render (used by fast path)
 function renderFrame() {
     const w = readGlobalU32('w_width') || 320;
     const h = readGlobalU32('w_height') || 240;

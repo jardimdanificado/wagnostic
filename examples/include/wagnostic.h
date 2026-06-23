@@ -4,7 +4,7 @@
 /**
  * Wagnostic - WASM Multimedia Runtime
  * 
- * New API: ROMs export named global variables that the host reads/writes.
+ * API based on named globals. ROMs export globals that the host reads/writes.
  * No fixed memory offsets. No special compilation flags needed.
  * Works with any language that compiles to WASM.
  * 
@@ -14,6 +14,17 @@
  */
 
 #include <stdint.h>
+
+// ============================================
+// TYPES
+// ============================================
+
+#ifndef WAGNOSTIC_RECT_DEFINED
+#define WAGNOSTIC_RECT_DEFINED
+typedef struct {
+    int x, y, w, h;
+} Rect;
+#endif
 
 // ============================================
 // GAMEPAD BUTTON CONSTANTS
@@ -35,17 +46,6 @@
 #define W_BTN_R2     (1 << 13)
 
 // ============================================
-// SIGNAL CONSTANTS
-// ============================================
-
-#define W_SIG_REDRAW        1
-#define W_SIG_QUIT          2
-#define W_SIG_UPDATE_TITLE  3
-#define W_SIG_UPDATE_WINDOW 4
-#define W_SIG_UPDATE_AUDIO  5
-#define W_SIG_LOG_INFO      6
-
-// ============================================
 // COLOR CONVERSION MACROS
 // ============================================
 
@@ -54,20 +54,33 @@
 #define W_RGB332(r, g, b) (uint8_t)(((r) & 0xE0) | (((g) & 0xE0) >> 3) | (((b) & 0xC0) >> 6))
 
 // ============================================
+// DIRTY RECTANGLE CONSTANTS
+// ============================================
+
+#define W_MAX_DIRTY_RECTS 32
+
+// ============================================
 // GLOBAL DECLARATIONS
 // ============================================
 
-// --- Screen Configuration (ROM writes, host reads) ---
+// --- Control (ROM writes, Host reads) ---
+extern uint32_t w_running;
+
+// --- Screen Configuration (ROM writes, Host reads) ---
 extern uint32_t w_width;
 extern uint32_t w_height;
 extern uint32_t w_bpp;
 extern uint32_t w_scale;
 extern char w_title[128];
 
-// --- VRAM (ROM writes, host reads) ---
+// --- VRAM (ROM writes, Host reads) ---
 extern uint8_t w_vram[];
 
-// --- Input (host writes, ROM reads) ---
+// --- Dirty Rectangles (ROM writes, Host reads) ---
+extern uint32_t w_dirty_count;  // 0=nothing, N=render N rects, always render when ROM writes
+extern Rect w_dirty_rects[W_MAX_DIRTY_RECTS];
+
+// --- Input (Host writes, ROM reads) ---
 extern int32_t w_mouse_x;
 extern int32_t w_mouse_y;
 extern uint32_t w_mouse_buttons;
@@ -75,10 +88,10 @@ extern int32_t w_mouse_wheel;
 extern uint8_t w_keys[256];
 extern uint32_t w_gamepad_buttons;
 
-// --- Timing (host writes, ROM reads) ---
+// --- Timing (Host writes, ROM reads) ---
 extern uint32_t w_ticks;
 
-// --- Audio (ROM writes, host reads) ---
+// --- Audio (ROM writes, Host reads) ---
 extern uint32_t w_audio_size;
 extern uint32_t w_audio_sample_rate;
 extern uint32_t w_audio_bpp;
@@ -86,12 +99,6 @@ extern uint32_t w_audio_channels;
 extern uint32_t w_audio_write;
 extern uint32_t w_audio_read;
 extern uint8_t w_audio_buffer[];
-
-// --- Signals (ROM writes, host reads) ---
-extern uint8_t w_signal_redraw;
-extern uint8_t w_signal_quit;
-extern uint8_t w_signal_update_window;
-extern uint8_t w_signal_update_audio;
 
 // ============================================
 // HELPER FUNCTIONS (inline)
@@ -113,7 +120,22 @@ static inline void w_setup(const char* title, int width, int height, int bpp, in
 }
 
 static inline void w_redraw() {
-    w_signal_redraw = 1;
+    // Mark full screen as dirty
+    w_dirty_count = 1;
+    w_dirty_rects[0].x = 0;
+    w_dirty_rects[0].y = 0;
+    w_dirty_rects[0].w = w_width;
+    w_dirty_rects[0].h = w_height;
+}
+
+static inline void w_redraw_rect(int x, int y, int w, int h) {
+    if (w_dirty_count < W_MAX_DIRTY_RECTS) {
+        w_dirty_rects[w_dirty_count].x = x;
+        w_dirty_rects[w_dirty_count].y = y;
+        w_dirty_rects[w_dirty_count].w = w;
+        w_dirty_rects[w_dirty_count].h = h;
+        w_dirty_count++;
+    }
 }
 
 static inline void* w_audio_ptr() {
@@ -134,41 +156,42 @@ static inline void* w_audio_ptr() {
 
 #ifdef WAGNOSTIC_IMPLEMENTATION
 
+// --- Control ---
+__attribute__((used)) uint32_t w_running = 1;
+
 // --- Screen ---
-uint32_t w_width = 320;
-uint32_t w_height = 240;
-uint32_t w_bpp = 16;
-uint32_t w_scale = 4;
-char w_title[128] = "Wagnostic";
+__attribute__((used)) uint32_t w_width = 320;
+__attribute__((used)) uint32_t w_height = 240;
+__attribute__((used)) uint32_t w_bpp = 16;
+__attribute__((used)) uint32_t w_scale = 4;
+__attribute__((used)) char w_title[128] = "Wagnostic";
 
 // --- VRAM ---
-uint8_t w_vram[320 * 240 * 2];
+__attribute__((used)) uint8_t w_vram[320 * 240 * 2];
+
+// --- Dirty Rectangles ---
+__attribute__((used)) uint32_t w_dirty_count = 0;
+__attribute__((used)) Rect w_dirty_rects[W_MAX_DIRTY_RECTS];
 
 // --- Input ---
-int32_t w_mouse_x = 0;
-int32_t w_mouse_y = 0;
-uint32_t w_mouse_buttons = 0;
-int32_t w_mouse_wheel = 0;
-uint8_t w_keys[256] = {0};
-uint32_t w_gamepad_buttons = 0;
+__attribute__((used)) int32_t w_mouse_x = 0;
+__attribute__((used)) int32_t w_mouse_y = 0;
+__attribute__((used)) uint32_t w_mouse_buttons = 0;
+__attribute__((used)) int32_t w_mouse_wheel = 0;
+__attribute__((used)) uint8_t w_keys[256] = {0};
+__attribute__((used)) uint32_t w_gamepad_buttons = 0;
 
 // --- Timing ---
-uint32_t w_ticks = 0;
+__attribute__((used)) uint32_t w_ticks = 0;
 
 // --- Audio ---
-uint32_t w_audio_size = 0;
-uint32_t w_audio_sample_rate = 44100;
-uint32_t w_audio_bpp = 16;
-uint32_t w_audio_channels = 1;
-uint32_t w_audio_write = 0;
-uint32_t w_audio_read = 0;
-uint8_t w_audio_buffer[8192];
-
-// --- Signals ---
-uint8_t w_signal_redraw = 0;
-uint8_t w_signal_quit = 0;
-uint8_t w_signal_update_window = 0;
-uint8_t w_signal_update_audio = 0;
+__attribute__((used)) uint32_t w_audio_size = 0;
+__attribute__((used)) uint32_t w_audio_sample_rate = 44100;
+__attribute__((used)) uint32_t w_audio_bpp = 16;
+__attribute__((used)) uint32_t w_audio_channels = 1;
+__attribute__((used)) uint32_t w_audio_write = 0;
+__attribute__((used)) uint32_t w_audio_read = 0;
+__attribute__((used)) uint8_t w_audio_buffer[8192];
 
 #endif // WAGNOSTIC_IMPLEMENTATION
 

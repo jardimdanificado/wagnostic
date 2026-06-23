@@ -77,10 +77,9 @@ static uint32_t gptr_audio_channels   = 0;
 static uint32_t gptr_audio_write      = 0;
 static uint32_t gptr_audio_read       = 0;
 static uint32_t gptr_audio_buffer     = 0;
-static uint32_t gptr_signal_redraw    = 0;
-static uint32_t gptr_signal_quit      = 0;
-static uint32_t gptr_signal_update_window = 0;
-static uint32_t gptr_signal_update_audio  = 0;
+static uint32_t gptr_running      = 0;
+static uint32_t gptr_dirty_count  = 0;
+static uint32_t gptr_dirty_rects  = 0;
 
 // ============================================================
 // Direct memory read / write helpers
@@ -110,6 +109,22 @@ static inline void mem_str(uint32_t ptr, char* dst, int max) {
     if (!wasm_memory || ptr == 0) { dst[0] = '\0'; return; }
     strncpy(dst, (const char*)(wasm_memory + ptr), max - 1);
     dst[max - 1] = '\0';
+}
+
+// ============================================================
+// Dirty rectangle struct (matches WASM Rect)
+// ============================================================
+
+typedef struct { int x, y, w, h; } Rect;
+
+static inline Rect mem_rect(uint32_t base, int index) {
+    uint32_t off = base + (uint32_t)index * 16; // 4 x int32 = 16 bytes
+    Rect r;
+    r.x = mem_i32(off);
+    r.y = mem_i32(off + 4);
+    r.w = mem_i32(off + 8);
+    r.h = mem_i32(off + 12);
+    return r;
 }
 
 // ============================================================
@@ -257,6 +272,32 @@ static void upload_and_render() {
 
     tex_idx = (tex_idx + 1) % 3;
     pbo_idx = 1 - pbo_idx;
+}
+
+// Upload a sub-region of VRAM to the texture (partial dirty rect).
+// Uses GL_UNPACK_ROW_LENGTH to skip untouched rows.
+static void upload_dirty_rect(const Rect& r) {
+    int x = r.x, y = r.y, w = r.w, h = r.h;
+    // Clamp to texture bounds
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > (int)W) w = (int)W - x;
+    if (y + h > (int)H) h = (int)H - y;
+    if (w <= 0 || h <= 0) return;
+
+    uint8_t* vram = wasm_memory + gptr_vram;
+    GLenum fmt = (BPP == 8) ? GL_RED : (BPP == 16) ? GL_RG : GL_RGBA;
+    int bpp_bytes = BPP / 8;
+
+    // VRAM is tightly packed: (y * W + x) * bpp_bytes offset, stride = W * bpp_bytes
+    size_t src_offset = ((size_t)y * W + x) * bpp_bytes;
+
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, (GLint)W);
+    glBindTexture(GL_TEXTURE_2D, vram_textures[tex_idx]);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, fmt, GL_UNSIGNED_BYTE,
+                    vram + src_offset);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 }
 
 static void set_viewport_with_letterbox() {
@@ -517,8 +558,7 @@ int main(int argc, char** argv) {
             "  'w_audio_size','w_audio_sample_rate','w_audio_bpp',"
             "  'w_audio_channels','w_audio_write','w_audio_read',"
             "  'w_audio_buffer',"
-            "  'w_signal_redraw','w_signal_quit',"
-            "  'w_signal_update_window','w_signal_update_audio'"
+            "  'w_running','w_dirty_count','w_dirty_rects'"
             "];"
             "for (var i = 0; i < _gn.length; i++) {"
             "  var n = _gn[i];"
@@ -569,10 +609,9 @@ int main(int argc, char** argv) {
         gptr_audio_write        = get_gp(gpObj, "w_audio_write");
         gptr_audio_read         = get_gp(gpObj, "w_audio_read");
         gptr_audio_buffer       = get_gp(gpObj, "w_audio_buffer");
-        gptr_signal_redraw      = get_gp(gpObj, "w_signal_redraw");
-        gptr_signal_quit        = get_gp(gpObj, "w_signal_quit");
-        gptr_signal_update_window = get_gp(gpObj, "w_signal_update_window");
-        gptr_signal_update_audio  = get_gp(gpObj, "w_signal_update_audio");
+        gptr_running            = get_gp(gpObj, "w_running");
+        gptr_dirty_count        = get_gp(gpObj, "w_dirty_count");
+        gptr_dirty_rects        = get_gp(gpObj, "w_dirty_rects");
     }
 
     fprintf(stderr, "Globals: vram=%u  w=%u h=%u bpp=%u scale=%u\n",
@@ -584,16 +623,21 @@ int main(int argc, char** argv) {
     // ============================================================
     // Main loop
     // ============================================================
-    int running = 1;
-    while (running) {
+    // Previous config values for change detection
+    uint32_t prev_W = W, prev_H = H, prev_BPP = BPP, prev_SCALE = SCALE;
+
+    while (1) {
         if (!wasm_memory) { SDL_Delay(1); continue; }
+
+        // ---- Check w_running ----
+        if (mem_u32(gptr_running) == 0) break;
 
         // ---- Write input into WASM memory via named globals ----
         mem_u32(gptr_ticks, SDL_GetTicks());
 
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
-            if (ev.type == SDL_QUIT) running = 0;
+            if (ev.type == SDL_QUIT) { mem_u32(gptr_running, 0); break; }
 
             if (ev.type == SDL_KEYDOWN || ev.type == SDL_KEYUP) {
                 if (ev.key.keysym.scancode < 256 && gptr_keys) {
@@ -635,54 +679,75 @@ int main(int argc, char** argv) {
             }
             refresh_memory();
         }
-        if (!wasm_memory) { running = 0; break; }
+        if (!wasm_memory) { mem_u32(gptr_running, 0); break; }
 
-        // ---- Re-read config (ROM may have changed it) ----
-        W     = mem_u32(gptr_width);
-        H     = mem_u32(gptr_height);
-        BPP   = mem_u32(gptr_bpp);
-        SCALE = mem_u32(gptr_scale);
-        if (W == 0)     W = 320;
-        if (H == 0)     H = 240;
-        if (BPP == 0)   BPP = 16;
-        if (SCALE == 0) SCALE = 1;
-
-        // ---- Read signals ----
-        uint8_t sig_redraw    = mem_u8(gptr_signal_redraw);
-        uint8_t sig_quit      = mem_u8(gptr_signal_quit);
-        uint8_t sig_upd_win   = mem_u8(gptr_signal_update_window);
-        uint8_t sig_upd_audio = mem_u8(gptr_signal_update_audio);
-
-        // Clear signals and mouse wheel
-        mem_u8(gptr_signal_redraw, 0);
-        mem_u8(gptr_signal_quit, 0);
-        mem_u8(gptr_signal_update_window, 0);
-        mem_u8(gptr_signal_update_audio, 0);
-        mem_i32(gptr_mouse_wheel, 0);
-
-        if (sig_quit) running = 0;
-
-        // Handle window / audio re-init signals
-        if (sig_upd_win || sig_upd_audio) {
-            init_from_globals();
+        // ---- Auto-detect config changes ----
+        {
+            uint32_t cur_W     = mem_u32(gptr_width);
+            uint32_t cur_H     = mem_u32(gptr_height);
+            uint32_t cur_BPP   = mem_u32(gptr_bpp);
+            uint32_t cur_SCALE = mem_u32(gptr_scale);
+            if (cur_W == 0)     cur_W = 320;
+            if (cur_H == 0)     cur_H = 240;
+            if (cur_BPP == 0)   cur_BPP = 16;
+            if (cur_SCALE == 0) cur_SCALE = 1;
+            if (cur_W != prev_W || cur_H != prev_H ||
+                cur_BPP != prev_BPP || cur_SCALE != prev_SCALE) {
+                W = cur_W; H = cur_H; BPP = cur_BPP; SCALE = cur_SCALE;
+                prev_W = W; prev_H = H; prev_BPP = BPP; prev_SCALE = SCALE;
+                set_viewport_with_letterbox();
+                init_textures_and_pbos();
+            }
         }
 
-        // ---- Render VRAM to screen ----
-        if (sig_redraw) {
+        // Clear mouse wheel after consumption
+        mem_i32(gptr_mouse_wheel, 0);
+
+        // ---- Render dirty rectangles ----
+        uint32_t dirty_count = mem_u32(gptr_dirty_count);
+        if (dirty_count > 0) {
+            mem_u32(gptr_dirty_count, 0); // consume
+
             set_viewport_with_letterbox();
-            if (first_frame) {
-                uint8_t* vram = wasm_memory + gptr_vram;
-                GLenum fmt = (BPP == 8) ? GL_RED : (BPP == 16) ? GL_RG : GL_RGBA;
-                glBindTexture(GL_TEXTURE_2D, vram_textures[0]);
-                glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H,
-                                fmt, GL_UNSIGNED_BYTE, vram);
-                tex_idx = 1; first_frame = 0;
+
+            if (dirty_count == 1 && gptr_dirty_rects) {
+                // Fast path: check if single dirty rect covers full screen
+                Rect r = mem_rect(gptr_dirty_rects, 0);
+                if (r.x == 0 && r.y == 0 &&
+                    (uint32_t)r.w == W && (uint32_t)r.h == H) {
+                    if (first_frame) {
+                        uint8_t* vram = wasm_memory + gptr_vram;
+                        GLenum fmt = (BPP == 8) ? GL_RED :
+                                     (BPP == 16) ? GL_RG : GL_RGBA;
+                        glBindTexture(GL_TEXTURE_2D, vram_textures[0]);
+                        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+                        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H,
+                                        fmt, GL_UNSIGNED_BYTE, vram);
+                        tex_idx = 1; first_frame = 0;
+                        glClear(GL_COLOR_BUFFER_BIT);
+                        render_quad(vram_textures[0]);
+                        SDL_GL_SwapWindow(window);
+                    } else {
+                        upload_and_render();
+                    }
+                } else {
+                    // Single partial dirty rect
+                    upload_dirty_rect(r);
+                    glClear(GL_COLOR_BUFFER_BIT);
+                    render_quad(vram_textures[tex_idx]);
+                    SDL_GL_SwapWindow(window);
+                }
+            } else if (gptr_dirty_rects) {
+                // Multiple dirty rects: upload each sub-region
+                uint32_t count = dirty_count;
+                if (count > 32) count = 32; // safety cap
+                for (uint32_t i = 0; i < count; i++) {
+                    Rect r = mem_rect(gptr_dirty_rects, (int)i);
+                    upload_dirty_rect(r);
+                }
                 glClear(GL_COLOR_BUFFER_BIT);
-                render_quad(vram_textures[0]);
+                render_quad(vram_textures[tex_idx]);
                 SDL_GL_SwapWindow(window);
-            } else {
-                upload_and_render();
             }
         }
 

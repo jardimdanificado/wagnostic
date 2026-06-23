@@ -17,8 +17,7 @@ void winit() {
     w_audio_sample_rate = SAMPLE_RATE;
     w_audio_bpp = 2;
     w_audio_channels = 1;
-    
-    w_signal_update_audio = 1; 
+
     _audio_buf = (int16_t*)w_audio_buffer;
 }
 

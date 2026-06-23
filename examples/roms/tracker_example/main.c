@@ -860,7 +860,7 @@ void wupdate() {
     render();
 
     for (int i = 0; i < 256; i++) prev_keys[i] = w_keys[i];
-    w_signal_redraw = 1; // REDRAW signal
+    w_redraw();
 }
 
 void winit() {
@@ -868,7 +868,6 @@ void winit() {
     w_height = 240;
     w_bpp = 16;
     w_scale = 3;
-    // Signals are fixed now.
     w_audio_size = AUDIO_SIZE;
     w_audio_sample_rate = SAMPLE_RATE;
     w_audio_bpp = 2;
@@ -876,8 +875,7 @@ void winit() {
     _fb = (uint16_t*)w_vram;
     const char* t = "Chiputnik - Chiptune Tracker";
     for (int i = 0; i < 127 && t[i]; i++) w_title[i] = t[i];
-    w_signal_update_window = 1; // UPDATE_TITLE signal
-    
+
     init_data();
     last_ticks = w_ticks;
 }

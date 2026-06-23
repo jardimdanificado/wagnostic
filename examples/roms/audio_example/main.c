@@ -15,8 +15,7 @@ void winit() {
     w_audio_channels = 2;
     w_audio_write = 0;
     w_audio_read = 0;
-    
-    w_signal_update_audio = 1; 
+
     _audio_buf = (uint8_t*)w_audio_buffer;
 }
 

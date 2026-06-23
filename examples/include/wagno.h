@@ -47,9 +47,7 @@ typedef struct {
     uint8_t r, g, b, a;
 } Color;
 
-typedef struct {
-    int x, y, w, h;
-} Rect;
+// Rect is defined in wagnostic.h
 
 // ============================================
 // GLOBAL STATE (managed by WagnO)
@@ -342,6 +340,9 @@ void key_released(int key);
 
 #ifdef WAGNO_IMPLEMENTATION
 
+#ifndef WAGNOSTIC_IMPLEMENTATION
+#define WAGNOSTIC_IMPLEMENTATION
+#endif
 #include "wagnostic.h"
 #define OLIVEC_IMPLEMENTATION
 #include "olive.h"
