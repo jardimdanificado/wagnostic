@@ -55,6 +55,41 @@ static GLint bpp_uniform_loc = -1;
 
 static JSContext* gCx = NULL;
 
+static void convert_mouse_coords(int window_x, int window_y, int* rom_x, int* rom_y) {
+    int win_w, win_h;
+    SDL_GetWindowSize(window, &win_w, &win_h);
+    
+    float aspect_rom = (float)W / (float)H;
+    float aspect_win = (float)win_w / (float)win_h;
+    
+    // Calculate destination rectangle (same as rendering)
+    SDL_Rect dst;
+    if (aspect_win > aspect_rom) {
+        dst.h = win_h;
+        dst.w = (int)(win_h * aspect_rom);
+        dst.x = (win_w - dst.w) / 2;
+        dst.y = 0;
+    } else {
+        dst.w = win_w;
+        dst.h = (int)(win_w / aspect_rom);
+        dst.x = 0;
+        dst.y = (win_h - dst.h) / 2;
+    }
+    
+    // Convert window coordinates to ROM coordinates
+    float scale_x = (float)W / dst.w;
+    float scale_y = (float)H / dst.h;
+    
+    *rom_x = (int)((window_x - dst.x) * scale_x);
+    *rom_y = (int)((window_y - dst.y) * scale_y);
+    
+    // Clamp to ROM bounds
+    if (*rom_x < 0) *rom_x = 0;
+    if (*rom_x >= W) *rom_x = W - 1;
+    if (*rom_y < 0) *rom_y = 0;
+    if (*rom_y >= H) *rom_y = H - 1;
+}
+
 void host_audio_callback(void* userdata, Uint8* stream_ptr, int len_bytes) {
     if (!wasm_memory) return;
     SystemConfig* sys = (SystemConfig*)wasm_memory;
@@ -133,7 +168,7 @@ static void init_gpu_pipeline() {
     bpp_uniform_loc = glGetUniformLocation(render_program, "bpp");
 
     float quad[] = {
-        -1,-1, 0,0,  1,-1, 1,0,  -1,1, 0,1,  1,1, 1,1
+        -1,-1, 0,1,  1,-1, 1,1,  -1,1, 0,0,  1,1, 1,0
     };
     glGenVertexArrays(1, &vao);
     glGenBuffers(1, &vbo);
@@ -209,6 +244,30 @@ static void upload_and_render() {
     pbo_idx = 1 - pbo_idx;
 }
 
+static void set_viewport_with_letterbox() {
+    int win_w, win_h;
+    SDL_GetWindowSize(window, &win_w, &win_h);
+    
+    float aspect_rom = (float)W / (float)H;
+    float aspect_win = (float)win_w / (float)win_h;
+    
+    // Calculate destination rectangle (same as mouse conversion)
+    SDL_Rect dst;
+    if (aspect_win > aspect_rom) {
+        dst.h = win_h;
+        dst.w = (int)(win_h * aspect_rom);
+        dst.x = (win_w - dst.w) / 2;
+        dst.y = 0;
+    } else {
+        dst.w = win_w;
+        dst.h = (int)(win_w / aspect_rom);
+        dst.x = 0;
+        dst.y = (win_h - dst.h) / 2;
+    }
+    
+    glViewport(dst.x, dst.y, dst.w, dst.h);
+}
+
 static void init_sdl_from_header() {
     if (!wasm_memory) return;
     SystemConfig* sys = (SystemConfig*)wasm_memory;
@@ -230,7 +289,7 @@ static void init_sdl_from_header() {
     } else {
         SDL_SetWindowSize(window, W*SCALE, H*SCALE);
     }
-    glViewport(0, 0, W*SCALE, H*SCALE);
+    set_viewport_with_letterbox();
     init_textures_and_pbos();
 
     if (sys->audio_size > 0 && audio_dev == 0) {
@@ -325,7 +384,9 @@ int main(int argc, char** argv) {
             if (ev.type == SDL_KEYDOWN || ev.type == SDL_KEYUP) {
                 if (ev.key.keysym.scancode < 256) sys->keys[ev.key.keysym.scancode] = (ev.type == SDL_KEYDOWN);
             }
-            if (ev.type == SDL_MOUSEMOTION) { sys->mouse_x = ev.motion.x / SCALE; sys->mouse_y = ev.motion.y / SCALE; }
+            if (ev.type == SDL_MOUSEMOTION) {
+                convert_mouse_coords(ev.motion.x, ev.motion.y, &sys->mouse_x, &sys->mouse_y);
+            }
             if (ev.type == SDL_MOUSEBUTTONDOWN || ev.type == SDL_MOUSEBUTTONUP) {
                 int b = ev.button.button;
                 if (b == SDL_BUTTON_LEFT) sys->mouse_buttons = (ev.type == SDL_MOUSEBUTTONDOWN) ? (sys->mouse_buttons | 1) : (sys->mouse_buttons & ~1);
@@ -352,6 +413,7 @@ int main(int argc, char** argv) {
         sys->mouse_wheel = 0;
 
         if (redraw) {
+            set_viewport_with_letterbox();
             if (first_frame) {
                 uint8_t* vram = wasm_memory + 512;
                 GLenum fmt = (BPP == 8) ? GL_RED : (BPP == 16) ? GL_RG : GL_RGBA;

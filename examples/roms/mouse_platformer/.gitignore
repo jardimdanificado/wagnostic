@@ -1,0 +1,17 @@
+# Build artifacts
+*.wasm
+*.o
+*.raw
+*.rgb565.h
+*.rgb332.h
+*.rgba.h
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db

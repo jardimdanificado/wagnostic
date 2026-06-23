@@ -77,6 +77,7 @@ async function loadWasm(buffer) {
     canvas.height = h;
     canvas.style.width = (w * s) + 'px';
     canvas.style.height = (h * s) + 'px';
+    canvas.style.imageRendering = 'pixelated';
     if (emptyState) emptyState.style.display = 'none';
     canvas.focus();
 
@@ -186,6 +187,7 @@ function gameLoop(now) {
                 const s = dv.getUint32(sysOffset + 140, true) || 1;
                 canvas.width = w; canvas.height = h;
                 canvas.style.width = (w * s) + 'px'; canvas.style.height = (h * s) + 'px';
+                canvas.style.imageRendering = 'pixelated';
             } else if (sig === 6) {
                 const msg = new TextDecoder().decode(new Uint8Array(wasmMemory.buffer, 0, 128)).split('\0')[0];
                 console.info("ROM:", msg);

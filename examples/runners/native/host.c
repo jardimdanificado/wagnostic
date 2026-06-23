@@ -41,6 +41,41 @@ static SDL_AudioDeviceID audio_dev = 0;
 static uint32_t W=320, H=240, BPP=8, SCALE=1;
 static IM3Runtime runtime = NULL;
 
+static void convert_mouse_coords(int window_x, int window_y, int* rom_x, int* rom_y) {
+    int win_w, win_h;
+    SDL_GetWindowSize(window, &win_w, &win_h);
+    
+    float aspect_rom = (float)W / (float)H;
+    float aspect_win = (float)win_w / (float)win_h;
+    
+    // Calculate destination rectangle (same as rendering)
+    SDL_Rect dst;
+    if (aspect_win > aspect_rom) {
+        dst.h = win_h;
+        dst.w = (int)(win_h * aspect_rom);
+        dst.x = (win_w - dst.w) / 2;
+        dst.y = 0;
+    } else {
+        dst.w = win_w;
+        dst.h = (int)(win_w / aspect_rom);
+        dst.x = 0;
+        dst.y = (win_h - dst.h) / 2;
+    }
+    
+    // Convert window coordinates to ROM coordinates
+    float scale_x = (float)W / dst.w;
+    float scale_y = (float)H / dst.h;
+    
+    *rom_x = (int)((window_x - dst.x) * scale_x);
+    *rom_y = (int)((window_y - dst.y) * scale_y);
+    
+    // Clamp to ROM bounds
+    if (*rom_x < 0) *rom_x = 0;
+    if (*rom_x >= W) *rom_x = W - 1;
+    if (*rom_y < 0) *rom_y = 0;
+    if (*rom_y >= H) *rom_y = H - 1;
+}
+
 void host_audio_callback(void* userdata, Uint8* stream_ptr, int len_bytes) {
     uint8_t* mem = m3_GetMemory(runtime, NULL, 0);
     if (!mem) return;
@@ -191,8 +226,7 @@ int main(int argc, char** argv) {
                     sys->keys[ev.key.keysym.scancode] = (ev.type == SDL_KEYDOWN);
             }
             if (ev.type == SDL_MOUSEMOTION) {
-                sys->mouse_x = ev.motion.x / SCALE;
-                sys->mouse_y = ev.motion.y / SCALE;
+                convert_mouse_coords(ev.motion.x, ev.motion.y, &sys->mouse_x, &sys->mouse_y);
             }
             if (ev.type == SDL_MOUSEBUTTONDOWN || ev.type == SDL_MOUSEBUTTONUP) {
                 int b = ev.button.button;
@@ -241,8 +275,30 @@ int main(int argc, char** argv) {
 
             SDL_UnlockTexture(screen_textures[cur_tex]);
 
+            // Calculate aspect-ratio-correct destination rectangle
+            int win_w, win_h;
+            SDL_GetWindowSize(window, &win_w, &win_h);
+            
+            float aspect_rom = (float)W / (float)H;
+            float aspect_win = (float)win_w / (float)win_h;
+            
+            SDL_Rect dst;
+            if (aspect_win > aspect_rom) {
+                // Window is wider than ROM - fit height, letterbox sides
+                dst.h = win_h;
+                dst.w = (int)(win_h * aspect_rom);
+                dst.x = (win_w - dst.w) / 2;
+                dst.y = 0;
+            } else {
+                // Window is taller than ROM - fit width, letterbox top/bottom
+                dst.w = win_w;
+                dst.h = (int)(win_w / aspect_rom);
+                dst.x = 0;
+                dst.y = (win_h - dst.h) / 2;
+            }
+
             SDL_RenderClear(renderer);
-            SDL_RenderCopy(renderer, screen_textures[cur_tex], NULL, NULL);
+            SDL_RenderCopy(renderer, screen_textures[cur_tex], NULL, &dst);
             SDL_RenderPresent(renderer);
         }
 
