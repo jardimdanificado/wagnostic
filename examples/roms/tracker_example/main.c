@@ -11,10 +11,9 @@
 //    Esc          = clear selection
 // ============================================================
 
+#define WAGNOSTIC_IMPLEMENTATION
 #include "wagnostic.h"
 
-#define _sys W_SYS
-#define _sig W_SIGNALS
 static uint16_t* _fb;
 
 // SDL scancodes we care about
@@ -289,12 +288,11 @@ static void advance_row() {
 
 // ---- Fill audio buffer ----
 static void fill_audio() {
-    uint8_t* mem = (uint8_t*)0;
-    uint8_t* audio_buf = mem + 512 + (_sys->width * _sys->height * 2);
+    uint8_t* audio_buf = (uint8_t*)w_audio_buffer;
 
-    uint32_t r = _sys->audio_read;
-    uint32_t w = _sys->audio_write;
-    uint32_t size = _sys->audio_size;
+    uint32_t r = w_audio_read;
+    uint32_t w = w_audio_write;
+    uint32_t size = w_audio_size;
 
     int avail = (r > w) ? (int)(r - w - 1) : (int)(size - w + r - 1);
     if (avail < 0) avail = 0;
@@ -323,7 +321,7 @@ static void fill_audio() {
         out[0] = s16;
         out[1] = s16;
     }
-    _sys->audio_write = (w + (uint32_t)to_write * 4) % size;
+    w_audio_write = (w + (uint32_t)to_write * 4) % size;
 }
 
 // ---- Drawing helpers ----
@@ -436,7 +434,7 @@ static void note_str(uint8_t note, char* out) {
 
 // ---- Key edge detection ----
 static int key_pressed(int sc) {
-    return _sys->keys[sc] && !prev_keys[sc];
+    return w_keys[sc] && !prev_keys[sc];
 }
 
 // ---- Channel colors ----
@@ -790,7 +788,7 @@ static void handle_input() {
                 voices[ch].env_vol = 0.0f;
             }
             // Drain the ring buffer so SDL stops playing stale audio
-            _sys->audio_read = _sys->audio_write;
+            w_audio_read = w_audio_write;
         }
     }
 
@@ -798,10 +796,10 @@ static void handle_input() {
     if (key_pressed(KEY_S)) step_record ^= 1;
 
     // BPM adjust: + and - via [ and ]
-    if (_sys->keys[47] && !prev_keys[47]) { // - key (scancode 45)
+    if (w_keys[47] && !prev_keys[47]) { // - key (scancode 45)
         ticks_per_row++;
     }
-    if (_sys->keys[45] && !prev_keys[45]) { // = key (scancode 46)
+    if (w_keys[45] && !prev_keys[45]) { // = key (scancode 46)
         if (ticks_per_row > 1) ticks_per_row--;
     }
 
@@ -861,25 +859,25 @@ void wupdate() {
     fill_audio();
     render();
 
-    for (int i = 0; i < 256; i++) prev_keys[i] = _sys->keys[i];
-    _sig[0] = 1; // REDRAW signal
+    for (int i = 0; i < 256; i++) prev_keys[i] = w_keys[i];
+    w_signal_redraw = 1; // REDRAW signal
 }
 
 void winit() {
-    _sys->width = 320;
-    _sys->height = 240;
-    _sys->bpp = 16;
-    _sys->scale = 3;
+    w_width = 320;
+    w_height = 240;
+    w_bpp = 16;
+    w_scale = 3;
     // Signals are fixed now.
-    _sys->audio_size = AUDIO_SIZE;
-    _sys->audio_sample_rate = SAMPLE_RATE;
-    _sys->audio_bpp = 2;
-    _sys->audio_channels = 2;
-    _fb = (uint16_t*)(512);
+    w_audio_size = AUDIO_SIZE;
+    w_audio_sample_rate = SAMPLE_RATE;
+    w_audio_bpp = 2;
+    w_audio_channels = 2;
+    _fb = (uint16_t*)w_vram;
     const char* t = "Chiputnik - Chiptune Tracker";
-    for (int i = 0; i < 127 && t[i]; i++) ((char*)_sys->message)[i] = t[i];
-    _sig[1] = 3; // UPDATE_TITLE signal
+    for (int i = 0; i < 127 && t[i]; i++) w_title[i] = t[i];
+    w_signal_update_window = 1; // UPDATE_TITLE signal
     
     init_data();
-    last_ticks = W_SYS->ticks;
+    last_ticks = w_ticks;
 }

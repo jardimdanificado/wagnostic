@@ -1,3 +1,4 @@
+#define WAGNOSTIC_IMPLEMENTATION
 #include "wagnostic.h"
 #define OLIVEC_IMPLEMENTATION
 #include "olive.h"
@@ -71,15 +72,15 @@ static uint32_t prev_buttons = 0;
 
 void winit() {
     w_setup("Wagnostic SDK - Roguelike", 320, 240, 16, 4, 8);
-    _oc = olivec_canvas(W_FB_PTR, 320, 240, 320, 16);
+    _oc = olivec_canvas(w_vram, 320, 240, 320, 16);
     _sheet = olivec_canvas((uint16_t*)image_raw, image_width, image_height, image_width, 16);
     generate_map();
 }
 
 __attribute__((visibility("default")))
 void wupdate() {
-    uint32_t pressed = W_SYS->gamepad_buttons & ~prev_buttons;
-    prev_buttons = W_SYS->gamepad_buttons;
+    uint32_t pressed = w_gamepad_buttons & ~prev_buttons;
+    prev_buttons = w_gamepad_buttons;
     
     int dx = 0, dy = 0;
     if (pressed & W_BTN_LEFT) dx = -1; if (pressed & W_BTN_RIGHT) dx = 1;

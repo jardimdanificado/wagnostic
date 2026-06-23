@@ -72,15 +72,15 @@ static int audio_write_pos = 0;
 
 static void init_audio() {
     // Setup audio buffer in WASM memory
-    W_SYS->audio_size = 8192;
-    W_SYS->audio_sample_rate = 44100;
-    W_SYS->audio_bpp = 1;  // 8-bit mono
-    W_SYS->audio_channels = 1;
-    W_SYS->audio_write = 0;
-    W_SYS->audio_read = 0;
+    w_audio_size = 8192;
+    w_audio_sample_rate = 44100;
+    w_audio_bpp = 1;  // 8-bit mono
+    w_audio_channels = 1;
+    w_audio_write = 0;
+    w_audio_read = 0;
     
     // Signal audio update
-    W_SIGNALS[2] = W_SIG_UPDATE_AUDIO;
+    w_signal_update_audio = 1;
     
     // Get audio buffer pointer
     audio_buffer = (uint8_t*)w_audio_ptr();
@@ -89,8 +89,8 @@ static void init_audio() {
 static void play_sound(const short* data, int size) {
     if (!audio_buffer) return;
     
-    uint32_t w = W_SYS->audio_write;
-    uint32_t audio_size = W_SYS->audio_size;
+    uint32_t w = w_audio_write;
+    uint32_t audio_size = w_audio_size;
     
     for (int i = 0; i < size; i++) {
         // Convert 16-bit to 8-bit unsigned
@@ -99,7 +99,7 @@ static void play_sound(const short* data, int size) {
         audio_buffer[w] = out;
         w = (w + 1) % audio_size;
     }
-    W_SYS->audio_write = w;
+    w_audio_write = w;
 }
 
 // ============================================

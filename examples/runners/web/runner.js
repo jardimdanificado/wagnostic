@@ -1,3 +1,5 @@
+// Wagnostic Web Runner - Named Globals Version
+// Reads/writes WASM globals by name instead of fixed memory offsets.
 
 // UI Elements
 const canvas = document.getElementById('gameCanvas');
@@ -11,12 +13,11 @@ let imageDataCache = null;
 let lastFrameTime = 0;
 const FRAME_MIN_TIME = 1000 / 60; // Target 60 FPS
 
-const sysOffset = 0;
-
 // Audio State
 let audioCtx = null;
 let audioNode = null;
 
+// Input state
 const input = {
     keys: new Uint8Array(256),
     buttons: 0,
@@ -26,7 +27,7 @@ const input = {
 // USB HID Scancodes (approximate mapping for web)
 const keyMap = {
     'KeyA': 4, 'KeyB': 5, 'KeyC': 6, 'KeyD': 7, 'KeyE': 8, 'KeyF': 9, 'KeyG': 10, 'KeyH': 11,
-    'KeyI': 12, 'KeyJ': 13, 'KeyK': 14, 'KeyL': 15, 'KeyM': 16, 'KeyN': 17, 'KeyO': 18, 'KeyP': 19,
+    'KeyI': 12, 'KeyJ': 13, 'KeyJ': 13, 'KeyK': 14, 'KeyL': 15, 'KeyM': 16, 'KeyN': 17, 'KeyO': 18, 'KeyP': 19,
     'KeyQ': 20, 'KeyR': 21, 'KeyS': 22, 'KeyT': 23, 'KeyU': 24, 'KeyV': 25, 'KeyW': 26, 'KeyX': 27,
     'KeyY': 28, 'KeyZ': 29, 'Digit1': 30, 'Digit2': 31, 'Digit3': 32, 'Digit4': 33, 'Digit5': 34,
     'Digit6': 35, 'Digit7': 36, 'Digit8': 37, 'Digit9': 38, 'Digit0': 39, 'Enter': 40, 'Escape': 41,
@@ -49,6 +50,74 @@ wasmInput.addEventListener('change', async (e) => {
     await loadCartridge(buffer);
 });
 
+// ============================================
+// Global Read/Write Helpers
+// These read/write WASM globals by name.
+// Each global holds a pointer (i32) to the actual
+// data location in linear memory.
+// ============================================
+
+function readGlobalU32(name) {
+    const g = wasmInstance.exports[name];
+    if (!g || g.value === 0) return 0;
+    const dv = new DataView(wasmMemory.buffer);
+    return dv.getUint32(g.value, true);
+}
+
+function writeGlobalU32(name, val) {
+    const g = wasmInstance.exports[name];
+    if (!g || g.value === 0) return;
+    const dv = new DataView(wasmMemory.buffer);
+    dv.setUint32(g.value, val, true);
+}
+
+function readGlobalI32(name) {
+    const g = wasmInstance.exports[name];
+    if (!g || g.value === 0) return 0;
+    const dv = new DataView(wasmMemory.buffer);
+    return dv.getInt32(g.value, true);
+}
+
+function writeGlobalI32(name, val) {
+    const g = wasmInstance.exports[name];
+    if (!g || g.value === 0) return;
+    const dv = new DataView(wasmMemory.buffer);
+    dv.setInt32(g.value, val, true);
+}
+
+function readGlobalU8(name) {
+    const g = wasmInstance.exports[name];
+    if (!g || g.value === 0) return 0;
+    const mem8 = new Uint8Array(wasmMemory.buffer);
+    return mem8[g.value];
+}
+
+function writeGlobalU8(name, val) {
+    const g = wasmInstance.exports[name];
+    if (!g || g.value === 0) return;
+    const mem8 = new Uint8Array(wasmMemory.buffer);
+    mem8[g.value] = val;
+}
+
+function readGlobalStr(name, maxLen) {
+    const g = wasmInstance.exports[name];
+    if (!g || g.value === 0) return '';
+    const mem8 = new Uint8Array(wasmMemory.buffer);
+    let len = 0;
+    while (len < maxLen - 1 && mem8[g.value + len] !== 0) len++;
+    return new TextDecoder().decode(new Uint8Array(wasmMemory.buffer, g.value, len));
+}
+
+// Get pointer to array data from a global (for w_vram, w_keys, w_audio_buffer)
+function getGlobalPtr(name) {
+    const g = wasmInstance.exports[name];
+    if (!g || g.value === 0) return 0;
+    return g.value;
+}
+
+// ============================================
+// Cartridge Loading
+// ============================================
 
 async function loadCartridge(buffer) {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -61,7 +130,7 @@ async function loadWasm(buffer) {
     if (audioNode) { audioNode.disconnect(); audioNode = null; }
 
     let instance = null;
-    const importObject = { 
+    const importObject = {
         env: {
             strlen: function(ptr) {
                 const buf = new Uint8Array(instance.exports.memory.buffer);
@@ -71,18 +140,19 @@ async function loadWasm(buffer) {
             }
         }
     };
-    
+
     const result = await WebAssembly.instantiate(buffer, importObject);
     instance = result.instance;
     wasmInstance = instance;
     wasmMemory = instance.exports.memory;
 
+    // Call winit if present
     if (instance.exports.winit) instance.exports.winit();
 
-    const dv = new DataView(wasmMemory.buffer);
-    const w = dv.getUint32(sysOffset + 128, true);
-    const h = dv.getUint32(sysOffset + 132, true);
-    const s = dv.getUint32(sysOffset + 140, true) || 1;
+    // Read config from named globals
+    const w = readGlobalU32('w_width') || 320;
+    const h = readGlobalU32('w_height') || 240;
+    const s = readGlobalU32('w_scale') || 1;
 
     canvas.width = w;
     canvas.height = h;
@@ -92,37 +162,38 @@ async function loadWasm(buffer) {
     if (emptyState) emptyState.style.display = 'none';
     canvas.focus();
 
-    const audioSize = dv.getUint32(sysOffset + 144, true);
+    // Set up audio if needed
+    const audioSize = readGlobalU32('w_audio_size');
     if (audioSize > 0) {
-        const audioRate = dv.getUint32(sysOffset + 156, true);
-        const audioBpp = dv.getUint32(sysOffset + 160, true);
-        const audioChannels = dv.getUint32(sysOffset + 164, true);
-        setupWebAudio(audioSize, audioRate, audioBpp, audioChannels || 1);
+        const audioRate = readGlobalU32('w_audio_sample_rate');
+        const audioBpp = readGlobalU32('w_audio_bpp');
+        const audioChannels = readGlobalU32('w_audio_channels') || 1;
+        setupWebAudio(audioSize, audioRate, audioBpp, audioChannels);
     }
-    
+
     lastFrameTime = performance.now();
     animationFrameId = requestAnimationFrame(gameLoop);
 }
 
+// ============================================
+// Audio
+// ============================================
+
 function setupWebAudio(size, rate, bpp, channels) {
     if (audioCtx.sampleRate !== rate) {
-        // Note: Sample rate change in Web Audio is tricky, usually requires new context
         console.warn("ROM requested different sample rate than AudioContext:", rate);
     }
     audioNode = audioCtx.createScriptProcessor(2048, 0, channels);
-    
+
     audioNode.onaudioprocess = (e) => {
         if (!wasmMemory) return;
-        const dv = new DataView(wasmMemory.buffer);
-        let r = dv.getUint32(sysOffset + 152, true);
-        const w = dv.getUint32(sysOffset + 148, true);
-        const s = dv.getUint32(sysOffset + 144, true);
-        
-        const width = dv.getUint32(sysOffset + 128, true);
-        const height = dv.getUint32(sysOffset + 132, true);
-        const videoBpp = dv.getUint32(sysOffset + 136, true);
-        const vramSize = width * height * (videoBpp / 8);
-        const audioBufPtr = 512 + vramSize;
+
+        let r = readGlobalU32('w_audio_read');
+        const w = readGlobalU32('w_audio_write');
+        const s = readGlobalU32('w_audio_size');
+        const audioBpp = readGlobalU32('w_audio_bpp');
+        const audioBufPtr = getGlobalPtr('w_audio_buffer');
+        if (!audioBufPtr) return;
 
         const frameCount = e.outputBuffer.length;
         const outChannels = [];
@@ -139,10 +210,10 @@ function setupWebAudio(size, rate, bpp, channels) {
             }
             for (let ch = 0; ch < channels; ch++) {
                 let sample = 0;
-                if (bpp === 1) {
+                if (audioBpp === 1) {
                     sample = (mem8[audioBufPtr + r] - 128) / 128;
                     r = (r + 1) % s;
-                } else if (bpp === 4) {
+                } else if (audioBpp === 4) {
                     sample = memF32[(audioBufPtr + r) / 4];
                     r = (r + 4) % s;
                 } else {
@@ -152,10 +223,14 @@ function setupWebAudio(size, rate, bpp, channels) {
                 outChannels[ch][i] = sample;
             }
         }
-        dv.setUint32(sysOffset + 152, r, true);
+        writeGlobalU32('w_audio_read', r);
     };
     audioNode.connect(audioCtx.destination);
 }
+
+// ============================================
+// Game Loop
+// ============================================
 
 function gameLoop(now) {
     if (!wasmInstance) return;
@@ -163,67 +238,96 @@ function gameLoop(now) {
 
     if (elapsed >= FRAME_MIN_TIME) {
         lastFrameTime = now - (elapsed % FRAME_MIN_TIME);
-        const dv = new DataView(wasmMemory.buffer);
 
-        // Update Ticks (Offset 168)
-        dv.setUint32(sysOffset + 168, performance.now(), true);
+        // Update ticks
+        writeGlobalU32('w_ticks', performance.now());
 
-        // Update Inputs
-        const wasmKeys = new Uint8Array(wasmMemory.buffer, sysOffset + 192, 256);
-        wasmKeys.set(input.keys);
-        dv.setUint32(sysOffset + 172, input.buttons, true);
-        dv.setInt32(sysOffset + 448, input.mouse.x, true);
-        dv.setInt32(sysOffset + 452, input.mouse.y, true);
-        dv.setUint32(sysOffset + 456, input.mouse.buttons, true);
-        dv.setInt32(sysOffset + 460, input.mouse.wheel, true);
+        // Update keyboard input - write to w_keys array
+        const keysPtr = getGlobalPtr('w_keys');
+        if (keysPtr) {
+            const wasmKeys = new Uint8Array(wasmMemory.buffer, keysPtr, 256);
+            wasmKeys.set(input.keys);
+        }
+
+        // Update gamepad buttons
+        writeGlobalU32('w_gamepad_buttons', input.buttons);
+
+        // Update mouse
+        writeGlobalI32('w_mouse_x', input.mouse.x);
+        writeGlobalI32('w_mouse_y', input.mouse.y);
+        writeGlobalU32('w_mouse_buttons', input.mouse.buttons);
+        writeGlobalI32('w_mouse_wheel', input.mouse.wheel);
         input.mouse.wheel = 0; // Reset wheel
 
+        // Call ROM update function
         if (wasmInstance.exports.wupdate) wasmInstance.exports.wupdate();
         else if (wasmInstance.exports.frame) wasmInstance.exports.frame();
 
-        // Process 4 Signals (Offset 464)
-        const signals = new Uint8Array(wasmMemory.buffer, sysOffset + 464, 4);
-        let shouldRedraw = false;
-        for (let i = 0; i < 4; i++) {
-            const sig = signals[i];
-            if (sig === 0) continue;
-            if (sig === 1) shouldRedraw = true;
-            else if (sig === 2) { window.close(); return; }
-            else if (sig === 3) {
-                const msg = new TextDecoder().decode(new Uint8Array(wasmMemory.buffer, 0, 128)).split('\0')[0];
-                document.title = msg;
-            } else if (sig === 4) {
-                const w = dv.getUint32(sysOffset + 128, true);
-                const h = dv.getUint32(sysOffset + 132, true);
-                const s = dv.getUint32(sysOffset + 140, true) || 1;
-                canvas.width = w; canvas.height = h;
-                canvas.style.width = (w * s) + 'px'; canvas.style.height = (h * s) + 'px';
-                canvas.style.imageRendering = 'pixelated';
-            } else if (sig === 6) {
-                const msg = new TextDecoder().decode(new Uint8Array(wasmMemory.buffer, 0, 128)).split('\0')[0];
-                console.info("ROM:", msg);
-            }
-            signals[i] = 0;
+        // Process signals from named globals
+        const redraw = readGlobalU8('w_signal_redraw');
+        const quit = readGlobalU8('w_signal_quit');
+        const updateWindow = readGlobalU8('w_signal_update_window');
+        const updateAudio = readGlobalU8('w_signal_update_audio');
+
+        if (quit) {
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            return;
         }
 
-        if (shouldRedraw) renderFrame(dv);
+        if (updateWindow) {
+            // Re-read config from globals
+            const w = readGlobalU32('w_width') || 320;
+            const h = readGlobalU32('w_height') || 240;
+            const s = readGlobalU32('w_scale') || 1;
+            const title = readGlobalStr('w_title', 128);
+
+            canvas.width = w;
+            canvas.height = h;
+            canvas.style.width = (w * s) + 'px';
+            canvas.style.height = (h * s) + 'px';
+            canvas.style.imageRendering = 'pixelated';
+            if (title) document.title = title;
+
+            writeGlobalU8('w_signal_update_window', 0);
+        }
+
+        if (updateAudio) {
+            const audioSize = readGlobalU32('w_audio_size');
+            if (audioSize > 0 && !audioNode) {
+                const audioRate = readGlobalU32('w_audio_sample_rate');
+                const audioBpp = readGlobalU32('w_audio_bpp');
+                const audioChannels = readGlobalU32('w_audio_channels') || 1;
+                setupWebAudio(audioSize, audioRate, audioBpp, audioChannels);
+            }
+            writeGlobalU8('w_signal_update_audio', 0);
+        }
+
+        if (redraw) {
+            renderFrame();
+            writeGlobalU8('w_signal_redraw', 0);
+        }
     }
     animationFrameId = requestAnimationFrame(gameLoop);
 }
 
-function renderFrame(dv) {
-    const w = dv.getUint32(sysOffset + 128, true);
-    const h = dv.getUint32(sysOffset + 132, true);
-    const bpp = dv.getUint32(sysOffset + 136, true);
+// ============================================
+// Rendering (Canvas 2D, putImageData)
+// ============================================
+
+function renderFrame() {
+    const w = readGlobalU32('w_width') || 320;
+    const h = readGlobalU32('w_height') || 240;
+    const bpp = readGlobalU32('w_bpp') || 16;
     if (w === 0 || h === 0) return;
 
     if (!imageDataCache || imageDataCache.width !== w || imageDataCache.height !== h) {
         imageDataCache = ctx.createImageData(w, h);
     }
-    
+
     const data32 = new Uint32Array(imageDataCache.data.buffer);
-    const vramPtr = 512;
-    
+    const vramPtr = getGlobalPtr('w_vram');
+    if (!vramPtr) return;
+
     if (bpp === 32) {
         data32.set(new Uint32Array(wasmMemory.buffer, vramPtr, w * h));
     } else if (bpp === 8) {
@@ -236,6 +340,7 @@ function renderFrame(dv) {
             data32[i] = (255 << 24) | (b << 16) | (g << 8) | r;
         }
     } else {
+        // 16bpp (RGB565)
         const frame16 = new Uint16Array(wasmMemory.buffer, vramPtr, w * h);
         for (let i = 0; i < w * h; i++) {
             const c = frame16[i];
@@ -247,6 +352,10 @@ function renderFrame(dv) {
     }
     ctx.putImageData(imageDataCache, 0, 0);
 }
+
+// ============================================
+// Input Event Handlers
+// ============================================
 
 canvas.addEventListener('mousemove', e => {
     const r = canvas.getBoundingClientRect();

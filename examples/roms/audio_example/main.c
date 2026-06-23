@@ -1,3 +1,4 @@
+#define WAGNOSTIC_IMPLEMENTATION
 #include "wagnostic.h"
 #include "audio_data.h"
 
@@ -6,23 +7,23 @@ static uint8_t* _audio_buf;
 
 void winit() {
     w_setup("Wagnostic - Audio Player", 320, 240, 16, 4, 0);
-    _fb = (uint16_t*)W_FB_PTR;
+    _fb = (uint16_t*)w_vram;
     
-    W_SYS->audio_size = music_size;
-    W_SYS->audio_sample_rate = 44100;
-    W_SYS->audio_bpp = 2;
-    W_SYS->audio_channels = 2;
-    W_SYS->audio_write = 0;
-    W_SYS->audio_read = 0;
+    w_audio_size = music_size;
+    w_audio_sample_rate = 44100;
+    w_audio_bpp = 2;
+    w_audio_channels = 2;
+    w_audio_write = 0;
+    w_audio_read = 0;
     
-    W_SIGNALS[2] = W_SIG_UPDATE_AUDIO; 
-    _audio_buf = (uint8_t*)w_audio_ptr();
+    w_signal_update_audio = 1; 
+    _audio_buf = (uint8_t*)w_audio_buffer;
 }
 
 void fill_audio() {
-    uint32_t r = W_SYS->audio_read;
-    uint32_t w = W_SYS->audio_write;
-    uint32_t size = W_SYS->audio_size;
+    uint32_t r = w_audio_read;
+    uint32_t w = w_audio_write;
+    uint32_t size = w_audio_size;
 
     // Calculate occupied space
     uint32_t occupied;
@@ -42,7 +43,7 @@ void fill_audio() {
         _audio_buf[w] = music_data[w];
         w = (w + 1) % size;
     }
-    W_SYS->audio_write = w;
+    w_audio_write = w;
 }
 
 __attribute__((visibility("default")))
@@ -50,9 +51,9 @@ void wupdate() {
     static uint32_t last_tick = 0;
     static uint16_t color = 0;
     
-    uint32_t now = W_SYS->ticks;
+    uint32_t now = w_ticks;
     if (now - last_tick > 1000) {
-        color = (uint16_t)((W_SYS->audio_write >> 8) & 0xFFFF);
+        color = (uint16_t)((w_audio_write >> 8) & 0xFFFF);
         last_tick = now;
     }
 

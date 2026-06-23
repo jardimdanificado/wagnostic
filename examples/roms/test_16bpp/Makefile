@@ -1,6 +1,6 @@
 CLANG = clang
 CFLAGS = --target=wasm32 -nostdlib -fno-delete-null-pointer-checks -O3 -w -I../../include -I../images_example
-LDFLAGS = -Wl,--no-entry -Wl,--export-all -Wl,--allow-undefined -Wl,--global-base=1048576
+LDFLAGS = -Wl,--no-entry -Wl,--export-all -Wl,--allow-undefined
 MEM_FLAGS = -Wl,--initial-memory=8388608
 
 TARGET = ../../test_16bpp.wasm

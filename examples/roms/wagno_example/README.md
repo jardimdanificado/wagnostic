@@ -244,7 +244,7 @@ static float player_x = 100;
 
 void winit() {
     w_setup("Game", 320, 240, 16, 4, 0);
-    _oc = olivec_canvas(W_FB_PTR, 320, 240, 320, 16);
+    _oc = olivec_canvas(w_vram, 320, 240, 320, 16);
 }
 
 void wupdate() {
@@ -255,7 +255,7 @@ void wupdate() {
     }
     
     // Manual input handling
-    if (W_SYS->mouse_buttons & 1) {
+    if (w_mouse_buttons & 1) {
         player_x += 3;
     }
     

@@ -702,7 +702,7 @@ void winit() {
     
     // Setup Wagnostic
     w_setup("WagnO Game", wagno.width, wagno.height, wagno.bpp, wagno.scale, 0);
-    wagno.canvas_pixels = W_FB_PTR;
+    wagno.canvas_pixels = w_vram;
     
     // Call user setup
     setup();
@@ -712,7 +712,7 @@ __attribute__((visibility("default")))
 void wupdate() {
     // Update time
     static uint32_t last_ticks = 0;
-    uint32_t current_ticks = W_SYS->ticks;
+    uint32_t current_ticks = w_ticks;
     if (last_ticks > 0) {
         wagno.delta_time = (current_ticks - last_ticks) / 1000.0f;
     }
@@ -721,10 +721,10 @@ void wupdate() {
     
     // Update input state
     wagno.pmouse = wagno.mouse;
-    wagno.mouse = wagno_vec2(W_SYS->mouse_x, W_SYS->mouse_y);
+    wagno.mouse = wagno_vec2(w_mouse_x, w_mouse_y);
     
     // Detect mouse press/release
-    bool current_mouse_down = (W_SYS->mouse_buttons & 1) != 0;
+    bool current_mouse_down = (w_mouse_buttons & 1) != 0;
     wagno.mouse_pressed = current_mouse_down && !wagno.mouse_down;
     wagno.mouse_released = !current_mouse_down && wagno.mouse_down;
     wagno.mouse_down = current_mouse_down;
@@ -732,7 +732,7 @@ void wupdate() {
     
     // Detect key press/release
     for (int i = 0; i < 256; i++) {
-        bool current_key = W_SYS->keys[i] != 0;
+        bool current_key = w_keys[i] != 0;
         wagno.keys_pressed[i] = current_key && !wagno.keys[i];
         wagno.keys_released[i] = !current_key && wagno.keys[i];
         wagno.keys[i] = current_key;

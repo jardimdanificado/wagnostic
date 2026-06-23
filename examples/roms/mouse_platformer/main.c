@@ -1,3 +1,4 @@
+#define WAGNOSTIC_IMPLEMENTATION
 #include "wagnostic.h"
 #define OLIVEC_IMPLEMENTATION
 #include "olive.h"
@@ -262,7 +263,7 @@ void create_particles(float x, float y, uint16_t color, int count) {
 // Initialize game
 void winit() {
     w_setup("Mouse Platformer", SCREEN_W, SCREEN_H, 16, 4, 0);
-    _oc = olivec_canvas(W_FB_PTR, SCREEN_W, SCREEN_H, SCREEN_W, 16);
+    _oc = olivec_canvas(w_vram, SCREEN_W, SCREEN_H, SCREEN_W, 16);
     
     // Initialize player
     player.x = 100;
@@ -305,9 +306,9 @@ void wupdate() {
     frame_count++;
     
     // Handle mouse input
-    int mouse_x = W_SYS->mouse_x;
-    int mouse_y = W_SYS->mouse_y;
-    int mouse_clicked = W_SYS->mouse_buttons & 1;
+    int mouse_x = w_mouse_x;
+    int mouse_y = w_mouse_y;
+    int mouse_clicked = w_mouse_buttons & 1;
     
     // Convert mouse to world coordinates
     int target_x = mouse_x + camera_x;

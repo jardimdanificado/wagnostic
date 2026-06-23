@@ -8,22 +8,25 @@ This directory contains everything needed to build and run Wagnostic ROMs, inclu
 examples/
 ├── Makefile          # Build all ROMs and the native host
 ├── README.md         # This file
+├── BENCHMARK.md      # Benchmark results
 ├── include/          # Helper headers for ROM development
-│   ├── wagnostic.h   # System helpers and constants
+│   ├── wagnostic.h   # Main API (globals-based)
 │   └── olive.h       # Drawing library
-├── rom/              # Example ROM source code
-│   ├── audio/        # Audio playback example
-│   ├── draw/         # Drawing primitives example
-│   ├── images/       # Image loading example
-│   ├── roguelike/    # Roguelike game example
-│   ├── tracker/      # Music tracker example
-│   └── *.c           # Simple test ROMs
+├── roms/             # Example ROM source code
+│   ├── audio_example/    # Audio playback example
+│   ├── draw_example/     # Drawing primitives example
+│   ├── images_example/   # Image loading example
+│   ├── roguelike_example/ # Roguelike game example
+│   ├── tracker_example/  # Music tracker example
+│   ├── mouse_platformer/ # Platformer with mouse control
+│   ├── wagno_example/    # High-level WagnO API example
+│   └── *.c               # Simple test ROMs
 ├── runners/          # Host implementations
-│   ├── native/       # SDL2 + OpenGL host
-│   ├── web/          # Browser-based host
-│   └── love/         # LÖVE2D host
+│   ├── native/       # wasm3 interpreter host
+│   ├── native-spidermonkey/ # SpiderMonkey C++ host
+│   └── web/          # Browser-based host
 └── tools/            # Build utilities
-    ├── img2wasm.sh   # Convert images to C headers (.rgba.h, .rgb565.h, .rgb332.h)
+    ├── img2wasm.sh   # Convert images to C headers
     └── audio2pcm.py  # Convert audio to PCM data
 ```
 
@@ -47,43 +50,64 @@ make -C examples audio
 
 ### wagnostic.h
 
-Optional helper header that provides convenient macros and functions for ROM development. A ROM can be written without it by directly manipulating memory.
+Main API header for ROM development. Uses named globals instead of fixed memory offsets.
 
 **Key components:**
 
 ```c
-// System pointer (mapped at address 0)
-#define W_SYS ((volatile Wagnostic_System*)0)
+#define WAGNOSTIC_IMPLEMENTATION
+#include "wagnostic.h"
 
-// Framebuffer pointer (VRAM starts at 512)
-#define W_FB_PTR ((void*)512)
+// Screen configuration (ROM writes, Host reads)
+uint32_t w_width;      // Screen width
+uint32_t w_height;     // Screen height
+uint32_t w_bpp;        // Bits per pixel (8, 16, 32)
+uint32_t w_scale;      // Window scale
+char w_title[128];     // Window title
 
-// Audio buffer pointer (dynamic, based on video config)
-static inline void* w_audio_ptr();
+// VRAM (ROM writes, Host reads)
+uint8_t w_vram[];      // Pixel buffer
 
-// Signal opcodes
-#define W_SIG_REDRAW        1
-#define W_SIG_QUIT          2
-#define W_SIG_UPDATE_TITLE  3
-#define W_SIG_UPDATE_WINDOW 4
-#define W_SIG_UPDATE_AUDIO  5
-#define W_SIG_LOG_INFO      6
-#define W_SIG_LOG_WARN      7
-#define W_SIG_LOG_ERR       8
+// Input (Host writes, ROM reads)
+int32_t w_mouse_x;     // Mouse X
+int32_t w_mouse_y;     // Mouse Y
+uint32_t w_mouse_buttons; // Mouse buttons
+int32_t w_mouse_wheel; // Mouse wheel
+uint8_t w_keys[256];   // Keyboard state
+uint32_t w_gamepad_buttons; // Gamepad buttons
 
-// Gamepad buttons
-#define W_BTN_UP     (1 << 0)
-#define W_BTN_DOWN   (1 << 1)
-// ... etc
+// Timing (Host writes, ROM reads)
+uint32_t w_ticks;      // Time in ms
 
-// Convenience functions
-static inline void w_setup(const char* title, int w, int h, int bpp, int scale, int unused);
-static inline void w_redraw();
+// Audio (ROM writes, Host reads)
+uint32_t w_audio_size;
+uint32_t w_audio_sample_rate;
+uint32_t w_audio_bpp;
+uint32_t w_audio_channels;
+uint32_t w_audio_write;
+uint32_t w_audio_read;
+uint8_t w_audio_buffer[];
 
-// Color encoding macros
-#define W_RGB332(r, g, b)  (uint8_t)(((r) & 0xE0) | (((g) & 0xE0) >> 3) | (((b) & 0xC0) >> 6))
-#define W_RGB565(r, g, b)  (uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3))
-#define W_RGBA(r, g, b, a) (uint32_t)(((a) << 24) | ((b) << 16) | ((g) << 8) | (r))
+// Signals (ROM writes, Host reads)
+uint8_t w_signal_redraw;
+uint8_t w_signal_quit;
+uint8_t w_signal_update_window;
+uint8_t w_signal_update_audio;
+
+// Helper functions
+void w_setup(const char* title, int w, int h, int bpp, int scale, int unused);
+void w_redraw();
+void* w_audio_ptr();
+
+// Color macros
+#define W_RGB565(r, g, b)
+#define W_RGBA(r, g, b, a)
+#define W_RGB332(r, g, b)
+
+// Gamepad constants
+#define W_BTN_UP, W_BTN_DOWN, W_BTN_LEFT, W_BTN_RIGHT
+#define W_BTN_A, W_BTN_B, W_BTN_X, W_BTN_Y
+#define W_BTN_L1, W_BTN_R1, W_BTN_START, W_BTN_SELECT
 ```
 
 ### olive.h
@@ -96,36 +120,25 @@ A single-header drawing library adapted from olive.c. Provides 2D primitives for
 #include "olive.h"
 
 // Create canvas from framebuffer
-Olivec_Canvas oc = olivec_canvas(W_FB_PTR, W_SYS->width, W_SYS->height, W_SYS->width, W_SYS->bpp);
+Olivec_Canvas oc = olivec_canvas(w_vram, w_width, w_height, w_width, w_bpp);
 
 // Draw primitives
-olivec_fill(oc, W_RGB565(0, 0, 0));           // Clear to black
-olivec_rect(oc, 10, 10, 50, 30, W_RGB565(255, 0, 0));  // Red rectangle
-olivec_circle(oc, 100, 100, 25, W_RGB565(0, 255, 0));  // Green circle
-olivec_line(oc, 0, 0, 320, 240, W_RGB565(0, 0, 255)); // Blue line
+olivec_fill(oc, W_RGB565(0, 0, 0));
+olivec_rect(oc, 10, 10, 50, 30, W_RGB565(255, 0, 0));
+olivec_circle(oc, 100, 100, 25, W_RGB565(0, 255, 0));
+olivec_line(oc, 0, 0, 320, 240, W_RGB565(0, 0, 255));
 olivec_text(oc, "Hello!", 10, 10, olivec_default_font, 1, W_RGB565(255, 255, 255));
-olivec_triangle(oc, x1, y1, x2, y2, x3, y3, color);
-olivec_triangle3uv(oc, ...);  // Textured triangle
-olivec_sprite_copy(dst, x, y, w, h, src);
 ```
 
 ## Tools
 
 ### img2wasm.sh
 
-Converts any image to a C header with raw pixel data. The extension says the format:
-
-| Extension | Format | C type | Bits |
-|---|---|---|---|
-| `.rgba.h` | RGBA32 (little-endian) | `uint32_t` | 32 |
-| `.rgb565.h` | RGB565 | `uint16_t` | 16 |
-| `.rgb332.h` | RGB332 | `uint8_t` | 8 |
+Converts any image to a C header with raw pixel data.
 
 ```bash
-# Usage: img2wasm.sh <input_image> [--rgba|--rgb565|--rgb332] [-o <prefix>]
 ./tools/img2wasm.sh image.webp --rgb565   # → image.rgb565.h
 ./tools/img2wasm.sh photo.jpg --rgba      # → photo.rgba.h
-./tools/img2wasm.sh photo.jpg --rgba -o sprites/player  # → sprites/player.rgba.h
 ```
 
 ### audio2pcm.py
@@ -133,13 +146,37 @@ Converts any image to a C header with raw pixel data. The extension says the for
 Converts audio files to PCM data as C header files.
 
 ```bash
-# Usage: audio2pcm.py <input_audio> <output_header> [--name <name>]
 ./tools/audio2pcm.py music.mp3 audio_data.h --name music
 ```
 
-Requires `ffmpeg` to be installed.
-
 ## Creating a ROM
+
+### Minimal ROM example
+
+```c
+#define WAGNOSTIC_IMPLEMENTATION
+#include "wagnostic.h"
+
+void winit() {
+    w_setup("My ROM", 320, 240, 16, 2, 0);
+}
+
+void wupdate() {
+    uint16_t* vram = (uint16_t*)w_vram;
+    
+    // Clear screen
+    for (int i = 0; i < w_width * w_height; i++) {
+        vram[i] = W_RGB565(0, 0, 128);
+    }
+    
+    // Draw based on input
+    if (w_gamepad_buttons & W_BTN_A) {
+        vram[100 * w_width + 100] = W_RGB565(255, 255, 0);
+    }
+    
+    w_redraw();
+}
+```
 
 ### Compilation flags
 
@@ -152,84 +189,27 @@ clang --target=wasm32 \
     -Wl,--no-entry \
     -Wl,--export-all \
     -Wl,--allow-undefined \
-    -Wl,--global-base=1048576 \
     -Wl,--initial-memory=8388608 \
     main.c -o output.wasm
 ```
 
-**Key flags:**
-- `--target=wasm32`: Compile to WebAssembly
-- `-nostdlib`: No standard library (bare metal)
-- `-Wl,--no-entry`: No main() required
-- `-Wl,--export-all`: Export winit and wupdate
-- `-Wl,--global-base=1048576`: Start memory at 1MB (0x100000)
-- `-Wl,--initial-memory=8388608`: 8MB initial memory
-
-### Minimal ROM example
-
-```c
-#include "wagnostic.h"
-
-void winit() {
-    w_setup("My ROM", 320, 240, 16, 2, 0);
-}
-
-void wupdate() {
-    uint16_t* vram = (uint16_t*)W_FB_PTR;
-    
-    // Clear screen
-    for (int i = 0; i < 320 * 240; i++) {
-        vram[i] = W_RGB565(0, 0, 128);
-    }
-    
-    // Draw based on input
-    if (W_SYS->gamepad_buttons & W_BTN_A) {
-        vram[100 * 320 + 100] = W_RGB565(255, 255, 0);
-    }
-    
-    w_redraw();
-}
-```
-
 ## Runners
 
-### Native wasm3 (SDL2 + OpenGL)
-
-Full-featured desktop runner using the wasm3 interpreter, with audio, gamepad, and mouse support.
+### Native wasm3 (SDL2)
 
 ```bash
 ./examples/wagnostic rom.wasm
 ```
 
-### Native GPU (SDL2 + OpenGL 3.3+ Core)
-
-Wasmtime JIT-powered GPU-accelerated runner with triple buffer + PBO async uploads and GLSL pixel format conversion.
+### Native SpiderMonkey (SDL2 + OpenGL)
 
 ```bash
-make -C examples host-gpu
-./examples/wagnostic-gpu rom.wasm
+./examples/wagnostic-sm rom.wasm
 ```
-
-**Features:**
-- Wasmtime Cranelift JIT (3-10x faster than wasm3)
-- GPU shader handles RGB332, RGB565, and RGBA8888 conversion
-- PBO async texture uploads (no CPU-GPU stalls)
-- Triple buffering for maximum throughput
-- Nearest-neighbor texture filtering for pixel-perfect scaling
 
 ### Web (Canvas 2D)
 
-Simpler browser-based runner using Canvas 2D API.
-
 Open `examples/runners/web/index.html`.
-
-### LÖVE2D
-
-Requires LÖVE2D and the wasm3 shared library.
-
-```bash
-love examples/runners/love rom.wasm
-```
 
 ## Example ROMs
 
@@ -247,3 +227,10 @@ love examples/runners/love rom.wasm
 | `roguelike_example.wasm` | Roguelike game |
 | `tracker_example.wasm` | Music tracker |
 | `audio_example.wasm` | Full audio demo |
+| `mouse_platformer.wasm` | Platformer with mouse control |
+| `wagno_example.wasm` | High-level WagnO API example |
+| `benchmark_cpu.wasm` | CPU benchmark (Mandelbrot) |
+| `benchmark_vram.wasm` | VRAM bandwidth benchmark |
+| `benchmark_audio.wasm` | Audio processing benchmark |
+| `benchmark_particles.wasm` | Particle system benchmark |
+| `benchmark_all.wasm` | Combined benchmark |

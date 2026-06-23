@@ -1,3 +1,4 @@
+#define WAGNOSTIC_IMPLEMENTATION
 #include "wagnostic.h"
 #define OLIVEC_IMPLEMENTATION
 #include "olive.h"
@@ -8,7 +9,7 @@ static Olivec_Canvas _img;
 
 void winit() {
     w_setup("Wagnostic Test - 32bpp", 320, 240, 32, 2, 4);
-    _oc = olivec_canvas(W_FB_PTR, 320, 240, 320, 32);
+    _oc = olivec_canvas(w_vram, 320, 240, 320, 32);
     _img = olivec_canvas((uint32_t*)image_pixels, image_width, image_height, image_width, 32);
 }
 

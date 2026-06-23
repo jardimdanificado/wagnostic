@@ -1,3 +1,4 @@
+#define WAGNOSTIC_IMPLEMENTATION
 #include "wagnostic.h"
 #define OLIVEC_IMPLEMENTATION
 #include "olive.h"
@@ -27,7 +28,7 @@ static void int_to_str(int n, char* str) {
 void winit() {
     w_setup("Wagnostic SDK - Draw", 320, 240, 16, 4, 8);
     
-    _oc = olivec_canvas(W_FB_PTR, 320, 240, 320, 16);
+    _oc = olivec_canvas(w_vram, 320, 240, 320, 16);
     _img_sprite = olivec_canvas((uint16_t*)image_pixels, image_width, image_height, image_width, 16);
 
     for (int i = 0; i < SPRITE_COUNT; i++) {
@@ -36,12 +37,12 @@ void winit() {
         _sprites[i].vx = (float)((rand_u32() % 4) + 1); _sprites[i].vy = (float)((rand_u32() % 4) + 1);
         if (rand_u32() % 2) _sprites[i].vx *= -1; if (rand_u32() % 2) _sprites[i].vy *= -1;
     }
-    _last_time = W_SYS->ticks;
+    _last_time = w_ticks;
 }
 
 __attribute__((visibility("default")))
 void wupdate() {
-    uint32_t now = W_SYS->ticks; _frame_count++;
+    uint32_t now = w_ticks; _frame_count++;
     if (now - _last_time >= 1000) {
         _fps = _frame_count; _frame_count = 0; _last_time = now;
         char num[16]; int_to_str(_fps, num);

@@ -1,3 +1,4 @@
+#define WAGNOSTIC_IMPLEMENTATION
 #include "wagnostic.h"
 
 #define SAMPLE_RATE 44100
@@ -10,22 +11,22 @@ static uint32_t frame_count = 0;
 __attribute__((visibility("default")))
 void winit() {
     w_setup("Wagnostic - Audio Test", 320, 240, 16, 2, 8);
-    _fb = (uint16_t*)W_FB_PTR;
+    _fb = (uint16_t*)w_vram;
     
-    W_SYS->audio_size = 16384;
-    W_SYS->audio_sample_rate = SAMPLE_RATE;
-    W_SYS->audio_bpp = 2;
-    W_SYS->audio_channels = 1;
+    w_audio_size = 16384;
+    w_audio_sample_rate = SAMPLE_RATE;
+    w_audio_bpp = 2;
+    w_audio_channels = 1;
     
-    W_SIGNALS[2] = W_SIG_UPDATE_AUDIO; 
-    _audio_buf = (int16_t*)w_audio_ptr();
+    w_signal_update_audio = 1; 
+    _audio_buf = (int16_t*)w_audio_buffer;
 }
 
 __attribute__((visibility("default")))
 void wupdate() {
-    uint32_t write_ptr = W_SYS->audio_write;
-    uint32_t read_ptr = W_SYS->audio_read;
-    uint32_t size = W_SYS->audio_size;
+    uint32_t write_ptr = w_audio_write;
+    uint32_t read_ptr = w_audio_read;
+    uint32_t size = w_audio_size;
 
     uint32_t free_space;
     if (write_ptr >= read_ptr) {
@@ -43,7 +44,7 @@ void wupdate() {
         phase += 440.0f / SAMPLE_RATE;
         if (phase > 1.0f) phase -= 1.0f;
     }
-    W_SYS->audio_write = (write_ptr + to_write) % size;
+    w_audio_write = (write_ptr + to_write) % size;
 
     // Slow visual feedback: color changes every 30 frames (~0.5s)
     frame_count++;

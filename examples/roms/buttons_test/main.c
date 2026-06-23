@@ -1,3 +1,4 @@
+#define WAGNOSTIC_IMPLEMENTATION
 #include "wagnostic.h"
 
 static uint16_t* _fb;
@@ -5,7 +6,7 @@ static uint16_t* _fb;
 __attribute__((visibility("default")))
 void winit() {
     w_setup("Wagnostic - Buttons & Mouse Test", 320, 240, 16, 4, 0);
-    _fb = (uint16_t*)W_FB_PTR;
+    _fb = (uint16_t*)w_vram;
 }
 
 void draw_rect(int x, int y, int w, int h, uint16_t color) {
@@ -33,14 +34,14 @@ void wupdate() {
         int px = margin_x + cx * cell_w, py = margin_y + cy * cell_h;
         
         uint16_t col = W_RGB565(119, 119, 119);
-        if (W_SYS->keys[i]) col = W_RGB565(0, 204, 85);
+        if (w_keys[i]) col = W_RGB565(0, 204, 85);
         
         draw_rect(px, py, cell_w - 1, cell_h - 1, col);
     }
     
     // Draw mouse cursor
-    draw_rect(W_SYS->mouse_x - 2, W_SYS->mouse_y - 2, 5, 5, W_RGB565(255, 255, 255));
-    if (W_SYS->mouse_buttons & 1) draw_rect(W_SYS->mouse_x - 4, W_SYS->mouse_y - 4, 9, 9, W_RGB565(255, 0, 0));
+    draw_rect(w_mouse_x - 2, w_mouse_y - 2, 5, 5, W_RGB565(255, 255, 255));
+    if (w_mouse_buttons & 1) draw_rect(w_mouse_x - 4, w_mouse_y - 4, 9, 9, W_RGB565(255, 0, 0));
 
     w_redraw();
 }
