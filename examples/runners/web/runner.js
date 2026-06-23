@@ -60,9 +60,20 @@ async function loadWasm(buffer) {
     if (animationFrameId) cancelAnimationFrame(animationFrameId);
     if (audioNode) { audioNode.disconnect(); audioNode = null; }
 
-    const importObject = { env: {} }; // Pure shared memory, no imports needed
-
-    const { instance } = await WebAssembly.instantiate(buffer, importObject);
+    let instance = null;
+    const importObject = { 
+        env: {
+            strlen: function(ptr) {
+                const buf = new Uint8Array(instance.exports.memory.buffer);
+                let s = 0;
+                while (buf[ptr + s] !== 0) s++;
+                return s;
+            }
+        }
+    };
+    
+    const result = await WebAssembly.instantiate(buffer, importObject);
+    instance = result.instance;
     wasmInstance = instance;
     wasmMemory = instance.exports.memory;
 

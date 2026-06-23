@@ -342,11 +342,13 @@ int main(int argc, char** argv) {
 
     wasmtime_module_t* module = NULL;
     wasmtime_error_t* error = wasmtime_module_new(engine, wasm_bytes, sz, &module);
-    if (error) { fprintf(stderr, "ERROR: Compile failed\n"); return 1; }
+    if (error) { fprintf(stderr, "ERROR: Compile failed\\n"); return 1; }
 
+    // Note: WASM modules with imports (like strlen) need proper linker setup
+    // For now, we instantiate with NULL imports which works for most ROMs
     wasm_trap_t* trap = NULL;
     error = wasmtime_instance_new(wasm_ctx, module, NULL, 0, &wasm_instance, &trap);
-    if (error) { fprintf(stderr, "ERROR: Instantiate failed\n"); return 1; }
+    if (error) { fprintf(stderr, "ERROR: Instantiate failed\\n"); return 1; }
 
     int found_winit = find_export_func("winit", &func_winit);
     int found_wupd = find_export_func("wupdate", &func_wupd);

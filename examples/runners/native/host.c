@@ -6,6 +6,7 @@
 
 #include "wasm3.h"
 #include "m3_env.h"
+#include "m3_api_libc.h"
 
 #pragma pack(push, 1)
 typedef struct {
@@ -40,6 +41,18 @@ static int tex_idx = 0;
 static SDL_AudioDeviceID audio_dev = 0;
 static uint32_t W=320, H=240, BPP=8, SCALE=1;
 static IM3Runtime runtime = NULL;
+
+// strlen implementation for wasm3
+m3ApiRawFunction(m3_libc_strlen)
+{
+    m3ApiReturnType (int32_t)
+    m3ApiGetArgMem  (const char*, str)
+    
+    int32_t len = 0;
+    while (str[len] != 0) len++;
+    
+    m3ApiReturn(len);
+}
 
 static void convert_mouse_coords(int window_x, int window_y, int* rom_x, int* rom_y) {
     int win_w, win_h;
@@ -197,17 +210,33 @@ int main(int argc, char** argv) {
     IM3Module module;
     m3_ParseModule(env, &module, wasm_data, sz);
     m3_LoadModule(runtime, module);
+    
+    // Link libc functions (memset, memcpy, etc.)
+    M3Result linkResult = m3_LinkLibC(module);
+    if (linkResult) {
+        fprintf(stderr, "Warning: m3_LinkLibC failed: %s\n", linkResult);
+    }
+    
+    // Link strlen manually (not provided by m3_LinkLibC)
+    {
+        static const char* env_name = "env";
+        linkResult = m3_LinkRawFunction(module, env_name, "strlen", "i(i)", &m3_libc_strlen);
+        if (linkResult) {
+            fprintf(stderr, "Warning: m3_Link strlen failed: %s\n", linkResult);
+        }
+    }
 
     IM3Function f_init = NULL, f_upd = NULL;
     m3_FindFunction(&f_init, runtime, "winit");
     m3_FindFunction(&f_upd, runtime, "wupdate");
 
-    if (f_init) m3_CallV(f_init);
-
+    // Initialize SDL before calling winit (which may set window properties)
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
         fprintf(stderr, "SDL init failed: %s\n", SDL_GetError());
         return 1;
     }
+
+    if (f_init) m3_CallV(f_init);
 
     init_sdl_from_header();
 

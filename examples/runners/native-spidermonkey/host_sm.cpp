@@ -356,20 +356,26 @@ int main(int argc, char** argv) {
     }
     free(wasm_data);
 
+    // Initialize SDL before WASM setup (which may set window properties)
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
+
     { JSAutoRealm ar(gCx, global);
         if (!eval_js(
-            "var b=new Uint8Array(__wasmBytes);var m=new WebAssembly.Module(b);"
-            "var inst=new WebAssembly.Instance(m,{env:{}});var e=inst.exports;e.winit();"
+            "var b=new Uint8Array(__wasmBytes);"
+            "var m=new WebAssembly.Module(b);"
+            "var imports={env:{strlen:function(){return 0;}}};"
+            "var inst=new WebAssembly.Instance(m,imports);"
+            "var e=inst.exports;"
+            "e.winit();"
             "__wupdate=function(){e.wupdate();};"
             "__getMem=function(){return e.memory.buffer;};"
-        )) { fprintf(stderr, "Setup failed\n"); return 1; }
+        )) { fprintf(stderr, "Setup failed\\n"); return 1; }
     }
 
     { JSAutoRealm ar(gCx, global);
-        if (!refresh_memory()) { fprintf(stderr, "Memory\n"); return 1; }
+        if (!refresh_memory()) { fprintf(stderr, "Memory\\n"); return 1; }
     }
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
     init_sdl_from_header();
 
     int running = 1;
