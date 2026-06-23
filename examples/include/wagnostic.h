@@ -5,8 +5,6 @@
  * Wagnostic - WASM Multimedia Runtime
  * 
  * API based on named globals. ROMs export globals that the host reads/writes.
- * No fixed memory offsets. No special compilation flags needed.
- * Works with any language that compiles to WASM.
  * 
  * Usage:
  *   #define WAGNOSTIC_IMPLEMENTATION
@@ -77,7 +75,7 @@ extern char w_title[128];
 extern uint8_t w_vram[];
 
 // --- Dirty Rectangles (ROM writes, Host reads) ---
-extern uint32_t w_dirty_count;  // 0=nothing, N=render N rects, always render when ROM writes
+extern uint32_t w_dirty_count;
 extern Rect w_dirty_rects[W_MAX_DIRTY_RECTS];
 
 // --- Input (Host writes, ROM reads) ---
@@ -120,7 +118,6 @@ static inline void w_setup(const char* title, int width, int height, int bpp, in
 }
 
 static inline void w_redraw() {
-    // Mark full screen as dirty
     w_dirty_count = 1;
     w_dirty_rects[0].x = 0;
     w_dirty_rects[0].y = 0;
@@ -136,10 +133,6 @@ static inline void w_redraw_rect(int x, int y, int w, int h) {
         w_dirty_rects[w_dirty_count].h = h;
         w_dirty_count++;
     }
-}
-
-static inline void* w_audio_ptr() {
-    return w_audio_buffer;
 }
 
 // ============================================
@@ -167,7 +160,7 @@ __attribute__((used)) uint32_t w_scale = 4;
 __attribute__((used)) char w_title[128] = "Wagnostic";
 
 // --- VRAM ---
-__attribute__((used)) uint8_t w_vram[320 * 240 * 2];
+__attribute__((used)) uint8_t w_vram[320 * 240 * 4];
 
 // --- Dirty Rectangles ---
 __attribute__((used)) uint32_t w_dirty_count = 0;

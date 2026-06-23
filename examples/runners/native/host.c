@@ -85,7 +85,6 @@ static void read_dirty_rect(int idx, int* x, int* y, int* w, int* h) {
     uint32_t ptr = value.value.i32;
     uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
     if (!mem || ptr == 0) { *x = *y = *w = *h = 0; return; }
-    // Rect is 4 int32s (x, y, w, h) = 16 bytes each
     uint32_t* rect = (uint32_t*)(mem + ptr + idx * 16);
     *x = (int)rect[0];
     *y = (int)rect[1];
@@ -108,13 +107,16 @@ static void host_audio_callback(void* userdata, Uint8* stream_ptr, int len_bytes
 
     if (size == 0) return;
 
-    uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
+    // Get audio buffer pointer from global
     IM3Global buf_global = m3_FindGlobal(g_module, "w_audio_buffer");
-    if (!buf_global || !mem) return;
+    if (!buf_global) return;
     M3TaggedValue buf_val;
     if (m3_GetGlobal(buf_global, &buf_val)) return;
     uint32_t buf_ptr = buf_val.value.i32;
     if (buf_ptr == 0) return;
+    
+    uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
+    if (!mem) return;
     uint8_t* audio_buf = mem + buf_ptr;
 
     for (int i = 0; i < ns; i++) {
@@ -364,19 +366,11 @@ int main(int argc, char** argv) {
         if (W == 0) W = 320; if (H == 0) H = 240; if (BPP == 0) BPP = 16; if (SCALE == 0) SCALE = 1;
 
         // Detect config changes
-        int config_changed = (W != prev_W || H != prev_H || BPP != BPP || SCALE != prev_SCALE);
+        int config_changed = (W != prev_W || H != prev_H || BPP != prev_BPP || SCALE != prev_SCALE);
         int title_changed = 0;
         char new_title[128];
         read_str("w_title", new_title, 128);
         if (strcmp(new_title, title) != 0) title_changed = 1;
-
-        // Detect audio config changes
-        uint32_t cur_audio_size = read_u32("w_audio_size");
-        uint32_t cur_audio_rate = read_u32("w_audio_sample_rate");
-        uint32_t cur_audio_bpp = read_u32("w_audio_bpp");
-        uint32_t cur_audio_channels = read_u32("w_audio_channels");
-        int audio_changed = (cur_audio_size != prev_audio_size || cur_audio_rate != prev_audio_rate ||
-                             cur_audio_bpp != prev_audio_bpp || cur_audio_channels != prev_audio_channels);
 
         // Handle config changes
         if (config_changed || title_changed) {
@@ -392,18 +386,32 @@ int main(int argc, char** argv) {
             prev_W = W; prev_H = H; prev_BPP = BPP; prev_SCALE = SCALE;
         }
 
-        if (audio_changed && audio_size > 0 && audio_dev == 0) {
-            SDL_AudioSpec wanted;
-            SDL_zero(wanted);
-            wanted.freq = cur_audio_rate;
-            if (wanted.freq == 0) wanted.freq = 44100;
-            wanted.format = AUDIO_F32;
-            wanted.channels = cur_audio_channels;
-            if (wanted.channels == 0) wanted.channels = 1;
-            wanted.samples = 1024;
-            wanted.callback = host_audio_callback;
-            audio_dev = SDL_OpenAudioDevice(NULL, 0, &wanted, NULL, 0);
-            if (audio_dev) SDL_PauseAudioDevice(audio_dev, 0);
+        // Detect audio config changes
+        uint32_t cur_audio_size = read_u32("w_audio_size");
+        uint32_t cur_audio_rate = read_u32("w_audio_sample_rate");
+        uint32_t cur_audio_bpp = read_u32("w_audio_bpp");
+        uint32_t cur_audio_channels = read_u32("w_audio_channels");
+        
+        if (cur_audio_size != prev_audio_size || cur_audio_rate != prev_audio_rate ||
+            cur_audio_bpp != prev_audio_bpp || cur_audio_channels != prev_audio_channels) {
+            // Audio config changed - reinit
+            if (audio_dev) SDL_CloseAudioDevice(audio_dev);
+            audio_dev = 0;
+            
+            if (cur_audio_size > 0) {
+                SDL_AudioSpec wanted;
+                SDL_zero(wanted);
+                wanted.freq = cur_audio_rate;
+                if (wanted.freq == 0) wanted.freq = 44100;
+                wanted.format = AUDIO_F32;
+                wanted.channels = cur_audio_channels;
+                if (wanted.channels == 0) wanted.channels = 1;
+                wanted.samples = 1024;
+                wanted.callback = host_audio_callback;
+                audio_dev = SDL_OpenAudioDevice(NULL, 0, &wanted, NULL, 0);
+                if (audio_dev) SDL_PauseAudioDevice(audio_dev, 0);
+            }
+            
             prev_audio_size = cur_audio_size;
             prev_audio_rate = cur_audio_rate;
             prev_audio_bpp = cur_audio_bpp;
@@ -416,7 +424,8 @@ int main(int argc, char** argv) {
         if (vram_global) {
             M3TaggedValue value;
             if (!m3_GetGlobal(vram_global, &value)) {
-                vram = m3_GetMemory(g_runtime, NULL, 0) + value.value.i32;
+                uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
+                if (mem) vram = mem + value.value.i32;
             }
         }
 

@@ -238,5 +238,18 @@ OLIVECDEF void olivec_sprite_copy(Olivec_Canvas dst, int x, int y, int w, int h,
     }
 }
 
+OLIVECDEF void olivec_sprite_copy_key(Olivec_Canvas dst, int x, int y, int w, int h, Olivec_Canvas src, uint32_t colorkey) {
+    for (int iy = 0; iy < h; ++iy) {
+        for (int ix = 0; ix < w; ++ix) {
+            int sx = ix * (int)src.width / w;
+            int sy = iy * (int)src.height / h;
+            uint32_t c = olivec_get_pixel(src, sx, sy);
+            if (c != colorkey) {
+                olivec_set_pixel(dst, x + ix, y + iy, c);
+            }
+        }
+    }
+}
+
 #endif // OLIVEC_IMPLEMENTATION
 #endif // OLIVE_H_

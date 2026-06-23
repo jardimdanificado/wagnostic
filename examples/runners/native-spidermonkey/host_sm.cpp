@@ -547,8 +547,8 @@ int main(int argc, char** argv) {
             "var _imports = {env: {strlen: function(){return 0;}}};"
             "var _inst = new WebAssembly.Instance(_m, _imports);"
             "var _e = _inst.exports;"
-            // Let the ROM set up its globals
-            "_e.winit();"
+            // Call winit only if it exists
+            "if (_e.winit) _e.winit();"
             // Cache every named global's pointer (i32 → linear memory offset)
             "var _gp = {};"
             "var _gn = ["
