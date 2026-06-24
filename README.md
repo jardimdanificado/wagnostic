@@ -4,31 +4,32 @@ Wagnostic is a minimalist, platform-agnostic specification and runtime for multi
 
 ## Quick Start
 
-```c
-#define WAGNOSTIC_IMPLEMENTATION
-#include "wagnostic.h"
-
-void winit() {
-    w_setup("Hello Wagnostic", 320, 240, 16, 4, 0);
-}
-
-void wupdate() {
-    int mx = w_mouse_x;
-    int my = w_mouse_y;
-    
-    uint16_t* vram = (uint16_t*)w_vram;
-    vram[my * w_width + mx] = W_RGB565(255, 0, 0);
-    
-    w_redraw();  // Mark full screen as dirty
-}
-```
-
-## Building
-
 ```bash
+# Build the host + ROMs
 make -C examples
 ./examples/wagnostic examples/buttons_test.wasm
 ```
+
+A ROM mais simples declara os globais que precisa e exporta `winit()` / `wupdate()`:
+
+```c
+#include <stdint.h>
+
+uint32_t w_width  = 320;
+uint32_t w_height = 240;
+uint32_t w_bpp    = 16;
+uint8_t w_vram[320 * 240 * 2];
+
+void winit() { }
+
+int wupdate() {
+    uint16_t* vram = (uint16_t*)w_vram;
+    vram[w_mouse_y * 320 + w_mouse_x] = 0xF800; // RGB565 red
+    return 1;
+}
+```
+
+Veja `examples/roms/` para exemplos completos.
 
 ---
 
@@ -42,20 +43,9 @@ A Wagnostic ROM is a WebAssembly binary that exports named globals. The Host rea
 
 ### Must export
 
-- `winit()` — called once after instantiation
-- `wupdate()` — called once per frame
-
-### Must define globals
-
-See Section 3 for the full list of globals.
+- `wupdate()` — called once per frame, returns 0 to quit
 
 ## 3. Global Variables
-
-### Control (ROM writes, Host reads)
-
-| Name | Type | Description |
-|------|------|-------------|
-| `w_running` | `uint32` | 1=running, 0=quit |
 
 ### Screen Configuration (ROM writes, Host reads)
 
@@ -170,8 +160,7 @@ Ring buffer at `w_audio_buffer`. Format determined by `w_audio_bpp`:
 
 The Host:
 1. Writes input to globals
-2. Calls `wupdate()`
-3. Checks `w_running` — exits if 0
-4. Auto-detects config changes (resizes window if needed)
-5. Reads `w_dirty_count` and renders dirty regions
-6. Resets `w_mouse_wheel` to 0
+2. Calls `wupdate()`, exits if return value is 0
+3. Auto-detects config changes (resizes window if needed)
+4. Reads `w_dirty_count` and renders dirty regions
+5. Resets `w_mouse_wheel` to 0

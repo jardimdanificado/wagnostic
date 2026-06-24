@@ -546,8 +546,6 @@ int main(int argc, char** argv) {
             "var _imports = {env: {strlen: function(){return 0;}}};"
             "var _inst = new WebAssembly.Instance(_m, _imports);"
             "var _e = _inst.exports;"
-            // Call winit only if it exists
-            "if (_e.winit) _e.winit();"
             // Cache every named global's pointer (i32 → linear memory offset)
             "var _gp = {};"
             "var _gn = ["
@@ -572,7 +570,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Refresh WASM memory pointer (winit may have grown memory)
+    // Cache global pointers and refresh memory
     {
         JSAutoRealm ar(gCx, global);
         if (!refresh_memory()) { fprintf(stderr, "Memory\n"); return 1; }

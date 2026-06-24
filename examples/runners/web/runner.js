@@ -152,9 +152,6 @@ async function loadWasm(buffer) {
     wasmInstance = instance;
     wasmMemory = instance.exports.memory;
 
-    // Call winit if present
-    if (instance.exports.winit) instance.exports.winit();
-
     // Read config from named globals
     const w = readGlobalU32('w_width') || 320;
     const h = readGlobalU32('w_height') || 240;

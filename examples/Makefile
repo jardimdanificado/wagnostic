@@ -31,14 +31,10 @@ RUNNER_DIRS_ALL    = \
 	runners/native-spidermonkey \
 	runners/native-js140
 
-# ── Tools ────────────────────────────────────────────────────────────────────
-IMG2WASM   = tools/img2wasm.sh
-AUDIO2PCM  = tools/audio2pcm.py
-
 # ── ROM compilation flags (exported so sub-Makefiles can use them) ───────────
 export CLANG = clang
-export CFLAGS = --target=wasm32 -nostdlib -fno-delete-null-pointer-checks -O3 -w -Iinclude
-export LDFLAGS = -Wl,--no-entry -Wl,--export-all -Wl,--allow-undefined -Wl,--global-base=1048576
+export CFLAGS = --target=wasm32 -nostdlib -fno-delete-null-pointer-checks -O3 -w
+export LDFLAGS = -Wl,--no-entry -Wl,--export-all -Wl,--allow-undefined
 export MEM_FLAGS = -Wl,--initial-memory=8388608
 
 # ── Host build flags ────────────────────────────────────────────────────────

@@ -1,24 +1,41 @@
-#define WAGNOSTIC_IMPLEMENTATION
-#include "wagnostic.h"
+#include <stdint.h>
 
+typedef struct { int x, y, w, h; } Rect;
 
-// Sem winit! O Host deve aplicar os defaults: 320x240, 8bpp, scale 1.
-__attribute__((visibility("default")))
+// Sem winit! O Host usa os defaults definidos abaixo.
+
+uint32_t w_width     = 320;
+uint32_t w_height    = 240;
+uint32_t w_bpp       = 8;
+uint32_t w_scale     = 1;
+char w_title[128]    = "Fallback Test";
+uint8_t w_vram[320 * 240 * 1];
+uint32_t w_dirty_count = 0;
+Rect w_dirty_rects[32];
+int32_t w_mouse_x      = 0;
+int32_t w_mouse_y      = 0;
+uint32_t w_mouse_buttons = 0;
+uint32_t w_ticks       = 0;
+uint8_t w_keys[256]    = {0};
+
+static void redraw() {
+    w_dirty_count = 1;
+    w_dirty_rects[0] = (Rect){0, 0, (int)w_width, (int)w_height};
+}
+
 int wupdate() {
     uint8_t* fb = (uint8_t*)w_vram;
     static uint32_t last_tick = 0;
     static uint8_t color = 0;
-    
+
     uint32_t now = w_ticks;
     if (now - last_tick > 1000) {
-        color += 32; // Muda a cor levemente a cada 1 segundo
+        color += 32;
         last_tick = now;
     }
-    
-    // Preenche a tela com a cor estática
-    for (int i = 0; i < 320 * 240; i++) {
+
+    for (int i = 0; i < 320 * 240; i++)
         fb[i] = color;
-    }
-    
-    w_redraw(); return 1;
+
+    redraw(); return 1;
 }

@@ -253,8 +253,7 @@ int main(int argc, char** argv) {
         if (lr) fprintf(stderr, "Warning: strlen link failed: %s\n", lr);
     }
 
-    IM3Function f_init = NULL, f_upd = NULL;
-    m3_FindFunction(&f_init, g_runtime, "winit");
+    IM3Function f_upd = NULL;
     m3_FindFunction(&f_upd, g_runtime, "wupdate");
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
@@ -262,10 +261,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Call winit
-    if (f_init) m3_CallV(f_init);
-
-    // Read config from globals
+    // Read config from globals (set by ROM's initializers)
     uint32_t W = read_u32("w_width");
     uint32_t H = read_u32("w_height");
     uint32_t BPP = read_u32("w_bpp");
