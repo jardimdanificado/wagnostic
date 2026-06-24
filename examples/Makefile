@@ -10,16 +10,7 @@
 ROM_DIRS = \
 	roms/buttons_test \
 	roms/fallback_test \
-	roms/terminal_test \
-	roms/audio_test \
-	roms/draw_example \
-	roms/images_example \
-	roms/roguelike_example \
-	roms/tracker_example \
-	roms/test_8bpp \
-	roms/test_16bpp \
-	roms/test_32bpp \
-	roms/audio_example
+	roms/terminal_test
 
 BENCHMARK_DIRS = \
 	roms/benchmark_cpu \
@@ -27,8 +18,6 @@ BENCHMARK_DIRS = \
 	roms/benchmark_audio \
 	roms/benchmark_particles \
 	roms/benchmark_all
-
-AUDIO_DIRS = roms/audio_test roms/audio_example
 
 # ── Runner directories ───────────────────────────────────────────────────────
 RUNNER_DIRS_NATIVE = runners/native
@@ -80,7 +69,7 @@ TARGET_HOST_SM = wagnostic-sm
 # ── Phony targets ────────────────────────────────────────────────────────────
 .PHONY: all help clean \
         host host-gpu host-wasmtime host-sm \
-        roms benchmarks audio \
+        roms benchmarks \
         host-bench host-bench-wasmtime host-bench-sm \
         portmaster
 
@@ -104,7 +93,6 @@ help:
 	@echo "    host-bench*      Build benchmark runners (see below)"
 	@echo "    roms             Build example ROMs"
 	@echo "    benchmarks       Build benchmark ROMs"
-	@echo "    audio            Build audio example ROMs"
 	@echo "    portmaster       Cross-compile for PortMaster"
 	@echo "    clean            Remove all build artifacts"
 	@echo ""
@@ -165,11 +153,6 @@ benchmarks:
 		$(MAKE) -C $$dir || exit 1; \
 	done
 
-audio:
-	@for dir in $(AUDIO_DIRS); do \
-		$(MAKE) -C $$dir || exit 1; \
-	done
-
 # ═════════════════════════════════════════════════════════════════════════════
 #  BENCHMARK RUNNERS
 # ═════════════════════════════════════════════════════════════════════════════
@@ -213,7 +196,7 @@ portmaster:
 # ═════════════════════════════════════════════════════════════════════════════
 clean:
 	# Clean ROMs
-	@for dir in $(ROM_DIRS) $(BENCHMARK_DIRS) $(AUDIO_DIRS); do \
+	@for dir in $(ROM_DIRS) $(BENCHMARK_DIRS); do \
 		$(MAKE) -C $$dir clean; \
 	done
 	# Clean built .wasm files at root
