@@ -853,14 +853,14 @@ static void handle_input() {
 }
 
 // ---- Main game loop ----
-void wupdate() {
+int wupdate() {
 
     handle_input();
     fill_audio();
     render();
 
     for (int i = 0; i < 256; i++) prev_keys[i] = w_keys[i];
-    w_redraw();
+    w_redraw(); return 1;
 }
 
 void winit() {

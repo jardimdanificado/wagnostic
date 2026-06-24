@@ -61,9 +61,6 @@ typedef struct {
 // GLOBAL DECLARATIONS
 // ============================================
 
-// --- Control (ROM writes, Host reads) ---
-extern uint32_t w_running;
-
 // --- Screen Configuration (ROM writes, Host reads) ---
 extern uint32_t w_width;
 extern uint32_t w_height;
@@ -148,9 +145,6 @@ static inline void w_redraw_rect(int x, int y, int w, int h) {
 // ============================================
 
 #ifdef WAGNOSTIC_IMPLEMENTATION
-
-// --- Control ---
-__attribute__((used)) uint32_t w_running = 1;
 
 // --- Screen ---
 __attribute__((used)) uint32_t w_width = 320;

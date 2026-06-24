@@ -16,7 +16,7 @@ void winit() {
 }
 
 __attribute__((visibility("default")))
-void wupdate() {
+int wupdate() {
     olivec_fill(_oc, 0);
 
     if (w_gamepad_buttons & W_BTN_LEFT)  pos_x -= 2;
@@ -30,5 +30,5 @@ void wupdate() {
     if (w_gamepad_buttons & W_BTN_A)     { scale_w = image_width; scale_h = image_height; }
 
     olivec_sprite_copy(_oc, pos_x, pos_y, scale_w, scale_h, _img);
-    w_redraw();
+    w_redraw(); return 1;
 }

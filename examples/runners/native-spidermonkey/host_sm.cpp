@@ -77,8 +77,7 @@ static uint32_t gptr_audio_channels   = 0;
 static uint32_t gptr_audio_write      = 0;
 static uint32_t gptr_audio_read       = 0;
 static uint32_t gptr_audio_buffer     = 0;
-static uint32_t gptr_running      = 0;
-static uint32_t gptr_dirty_count  = 0;
+static uint32_t gptr_dirty_count    = 0;
 static uint32_t gptr_dirty_rects  = 0;
 
 // ============================================================
@@ -558,14 +557,14 @@ int main(int argc, char** argv) {
             "  'w_audio_size','w_audio_sample_rate','w_audio_bpp',"
             "  'w_audio_channels','w_audio_write','w_audio_read',"
             "  'w_audio_buffer',"
-            "  'w_running','w_dirty_count','w_dirty_rects'"
+            "  'w_dirty_count','w_dirty_rects'"
             "];"
             "for (var i = 0; i < _gn.length; i++) {"
             "  var n = _gn[i];"
             "  _gp[n] = (_e[n] !== undefined) ? _e[n].value : 0;"
             "}"
             // Stash callable wrappers
-            "__wupdate = function() { _e.wupdate(); };"
+            "__wupdate = function() { return _e.wupdate(); };"
             "__getMem  = function() { return _e.memory.buffer; };"
         )) {
             fprintf(stderr, "WASM setup failed\n");
@@ -609,7 +608,6 @@ int main(int argc, char** argv) {
         gptr_audio_write        = get_gp(gpObj, "w_audio_write");
         gptr_audio_read         = get_gp(gpObj, "w_audio_read");
         gptr_audio_buffer       = get_gp(gpObj, "w_audio_buffer");
-        gptr_running            = get_gp(gpObj, "w_running");
         gptr_dirty_count        = get_gp(gpObj, "w_dirty_count");
         gptr_dirty_rects        = get_gp(gpObj, "w_dirty_rects");
     }
@@ -629,15 +627,12 @@ int main(int argc, char** argv) {
     while (1) {
         if (!wasm_memory) { SDL_Delay(1); continue; }
 
-        // ---- Check w_running ----
-        if (mem_u32(gptr_running) == 0) break;
-
         // ---- Write input into WASM memory via named globals ----
         mem_u32(gptr_ticks, SDL_GetTicks());
 
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
-            if (ev.type == SDL_QUIT) { mem_u32(gptr_running, 0); break; }
+            if (ev.type == SDL_QUIT) { break; }
 
             if (ev.type == SDL_KEYDOWN || ev.type == SDL_KEYUP) {
                 if (ev.key.keysym.scancode < 256 && gptr_keys) {
@@ -672,14 +667,17 @@ int main(int argc, char** argv) {
             JSAutoRealm ar(gCx, global);
             JS::RootedValue fn(gCx);
             JS::RootedObject g(gCx, JS::CurrentGlobalOrNull(gCx));
+            int32_t keep = 1;
             if (JS_GetProperty(gCx, g, "__wupdate", &fn) && fn.isObject()) {
                 JS::RootedValue rv(gCx);
                 JS_CallFunctionValue(gCx, g, fn,
                     JS::HandleValueArray::empty(), &rv);
+                if (rv.isInt32()) keep = rv.toInt32();
             }
             refresh_memory();
+            if (!keep) break;
         }
-        if (!wasm_memory) { mem_u32(gptr_running, 0); break; }
+        if (!wasm_memory) { break; }
 
         // ---- Auto-detect config changes ----
         {

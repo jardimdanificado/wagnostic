@@ -21,7 +21,7 @@ void draw_rect(int x, int y, int w, int h, uint16_t color) {
 }
 
 __attribute__((visibility("default")))
-void wupdate() {
+int wupdate() {
     // Fill screen with background
     for (int i = 0; i < 320 * 240; i++) _fb[i] = W_RGB565(51, 51, 51);
     
@@ -43,5 +43,5 @@ void wupdate() {
     draw_rect(w_mouse_x - 2, w_mouse_y - 2, 5, 5, W_RGB565(255, 255, 255));
     if (w_mouse_buttons & 1) draw_rect(w_mouse_x - 4, w_mouse_y - 4, 9, 9, W_RGB565(255, 0, 0));
 
-    w_redraw();
+    w_redraw(); return 1;
 }

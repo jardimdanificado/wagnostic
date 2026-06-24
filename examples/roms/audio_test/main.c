@@ -22,7 +22,7 @@ void winit() {
 }
 
 __attribute__((visibility("default")))
-void wupdate() {
+int wupdate() {
     uint32_t write_ptr = w_audio_write;
     uint32_t read_ptr = w_audio_read;
     uint32_t size = w_audio_size;
@@ -50,5 +50,5 @@ void wupdate() {
     uint16_t color = (frame_count / 30) % 2 ? 0x001F : 0x000F; // Deep Blue to Mid Blue
     for(int i=0; i<320*240; i++) _fb[i] = color;
     
-    w_redraw();
+    w_redraw(); return 1;
 }

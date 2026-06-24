@@ -30,7 +30,7 @@ static uint32_t read_u32(const char* name) {
     if (m3_GetGlobal(global, &value)) return 0;
     uint32_t ptr = value.value.i32;
     uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
-    if (!mem || ptr == 0) return 0;
+    if (!mem) return 0;
     return *(uint32_t*)(mem + ptr);
 }
 
@@ -41,7 +41,7 @@ static void write_u32(const char* name, uint32_t val) {
     if (m3_GetGlobal(global, &value)) return;
     uint32_t ptr = value.value.i32;
     uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
-    if (!mem || ptr == 0) return;
+    if (!mem) return;
     *(uint32_t*)(mem + ptr) = val;
 }
 
@@ -60,7 +60,7 @@ static uint8_t read_u8(const char* name) {
     if (m3_GetGlobal(global, &value)) return 0;
     uint32_t ptr = value.value.i32;
     uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
-    if (!mem || ptr == 0) return 0;
+    if (!mem) return 0;
     return mem[ptr];
 }
 
@@ -71,7 +71,7 @@ static void read_str(const char* name, char* dst, int max) {
     if (m3_GetGlobal(global, &value)) { dst[0] = '\0'; return; }
     uint32_t ptr = value.value.i32;
     uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
-    if (!mem || ptr == 0) { dst[0] = '\0'; return; }
+    if (!mem) { dst[0] = '\0'; return; }
     strncpy(dst, (char*)(mem + ptr), max - 1);
     dst[max - 1] = '\0';
 }
@@ -84,7 +84,7 @@ static void read_dirty_rect(int idx, int* x, int* y, int* w, int* h) {
     if (m3_GetGlobal(global, &value)) { *x = *y = *w = *h = 0; return; }
     uint32_t ptr = value.value.i32;
     uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
-    if (!mem || ptr == 0) { *x = *y = *w = *h = 0; return; }
+    if (!mem) { *x = *y = *w = *h = 0; return; }
     uint32_t* rect = (uint32_t*)(mem + ptr + idx * 16);
     *x = (int)rect[0];
     *y = (int)rect[1];
@@ -313,8 +313,13 @@ int main(int argc, char** argv) {
 
     int running = 1;
     while (running) {
-        // Check w_running
-        if (read_u32("w_running") == 0) running = 0;
+        // Call wupdate — returns 0 to quit
+        int32_t keep = 1;
+        if (f_upd) {
+            m3_CallV(f_upd);
+            m3_GetResultsV(f_upd, &keep);
+        }
+        if (!keep) running = 0;
 
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
@@ -354,9 +359,6 @@ int main(int argc, char** argv) {
 
         // Update ticks
         write_u32("w_ticks", SDL_GetTicks());
-
-        // Call wupdate
-        if (f_upd) m3_CallV(f_upd);
 
         // Read config (ROM may have changed it)
         W = read_u32("w_width");

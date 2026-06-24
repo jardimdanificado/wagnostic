@@ -245,13 +245,6 @@ function gameLoop(now) {
     if (elapsed >= FRAME_MIN_TIME) {
         lastFrameTime = now - (elapsed % FRAME_MIN_TIME);
 
-        // Check w_running flag - if 0, quit
-        const running = readGlobalU32('w_running');
-        if (!running) {
-            if (animationFrameId) cancelAnimationFrame(animationFrameId);
-            return;
-        }
-
         // Update ticks
         writeGlobalU32('w_ticks', performance.now());
 
@@ -275,9 +268,14 @@ function gameLoop(now) {
         // Auto-detect config changes
         detectConfigChanges();
 
-        // Call ROM update function
-        if (wasmInstance.exports.wupdate) wasmInstance.exports.wupdate();
+        // Call ROM update function — returns 0 to quit
+        let keep = 1;
+        if (wasmInstance.exports.wupdate) keep = wasmInstance.exports.wupdate();
         else if (wasmInstance.exports.frame) wasmInstance.exports.frame();
+        if (!keep) {
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            return;
+        }
 
         // Read dirty count and render dirty regions
         const dirtyCount = readGlobalU32('w_dirty_count');

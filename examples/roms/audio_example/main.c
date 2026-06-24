@@ -46,7 +46,7 @@ void fill_audio() {
 }
 
 __attribute__((visibility("default")))
-void wupdate() {
+int wupdate() {
     static uint32_t last_tick = 0;
     static uint16_t color = 0;
     
@@ -61,5 +61,5 @@ void wupdate() {
     }
 
     fill_audio();
-    w_redraw();
+    w_redraw(); return 1;
 }

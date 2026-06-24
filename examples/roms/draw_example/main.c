@@ -41,7 +41,7 @@ void winit() {
 }
 
 __attribute__((visibility("default")))
-void wupdate() {
+int wupdate() {
     uint32_t now = w_ticks; _frame_count++;
     if (now - _last_time >= 1000) {
         _fps = _frame_count; _frame_count = 0; _last_time = now;
@@ -62,5 +62,5 @@ void wupdate() {
     olivec_rect(_oc, 5, 220, 80, 15, W_RGB565(0, 0, 0));
     olivec_text(_oc, _fps_text, 10, 222, olivec_default_font, 1, W_RGB565(255, 255, 255));
     
-    w_redraw();
+    w_redraw(); return 1;
 }

@@ -14,11 +14,11 @@ void winit() {
 }
 
 __attribute__((visibility("default")))
-void wupdate() {
+int wupdate() {
     olivec_fill(_oc, 0);
     int x = (320 - (int)image_width) / 2;
     int y = (240 - (int)image_height) / 2;
     olivec_sprite_copy(_oc, x, y, image_width, image_height, _img);
     olivec_text(_oc, "16BPP MODE (RGB565)", 10, 10, olivec_default_font, 2, 0xFFFF);
-    w_redraw();
+    w_redraw(); return 1;
 }

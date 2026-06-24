@@ -302,7 +302,7 @@ void winit() {
 
 // Update game state
 __attribute__((visibility("default")))
-void wupdate() {
+int wupdate() {
     frame_count++;
     
     // Handle mouse input
@@ -451,5 +451,5 @@ void wupdate() {
         draw_rect(mouse_x - 4, mouse_y - 4, 9, 9, W_RGB565(255, 0, 0));
     }
     
-    w_redraw();
+    w_redraw(); return 1;
 }

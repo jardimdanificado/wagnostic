@@ -29,7 +29,7 @@ void winit() {
     w_scale = 1;
 }
 
-void wupdate() {
+int wupdate() {
     uint8_t* vram = (uint8_t*)w_vram;
     
     // 1. Limpa Fundo
@@ -65,5 +65,5 @@ void wupdate() {
         vram[my * 70 + mx] = WHITE;
     }
 
-    w_redraw();
+    w_redraw(); return 1;
 }

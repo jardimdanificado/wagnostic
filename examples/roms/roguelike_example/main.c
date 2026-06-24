@@ -78,7 +78,7 @@ void winit() {
 }
 
 __attribute__((visibility("default")))
-void wupdate() {
+int wupdate() {
     uint32_t pressed = w_gamepad_buttons & ~prev_buttons;
     prev_buttons = w_gamepad_buttons;
     
@@ -124,5 +124,5 @@ void wupdate() {
         }
     }
     
-    w_redraw();
+    w_redraw(); return 1;
 }
