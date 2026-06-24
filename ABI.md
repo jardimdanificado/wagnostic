@@ -6,9 +6,6 @@ ROMs export named globals. The Host finds them by name and reads/writes their va
 
 ## Core Globals
 
-### Control
-- `w_running` (uint32) — 1=running, 0=quit
-
 ### Screen
 - `w_width`, `w_height`, `w_bpp`, `w_scale` (uint32)
 - `w_title` (char[128])
@@ -35,49 +32,49 @@ ROMs export named globals. The Host finds them by name and reads/writes their va
 - `w_audio_write`, `w_audio_read` (uint32)
 - `w_audio_buffer` (uint8[])
 
-## Helper Functions
+## Functions
 
-```c
-w_setup(title, width, height, bpp, scale, unused);  // Set screen config
-w_redraw();                                          // Mark full screen dirty
-w_redraw_rect(x, y, w, h);                          // Add dirty rectangle
-w_audio_ptr();                                       // Get audio buffer pointer
-```
+| Export | Signature | Description |
+|--------|-----------|-------------|
+| `wupdate` | `int wupdate()` | Called each frame. Return 0 to quit. |
 
 ## Examples
 
-### C
+### C (no helpers — self-contained)
+
 ```c
-#define WAGNOSTIC_IMPLEMENTATION
-#include "wagnostic.h"
+#include <stdint.h>
+uint32_t w_width  = 320;
+uint32_t w_height = 240;
+uint32_t w_bpp    = 16;
+uint8_t  w_vram[320 * 240 * 2];
 
-void winit() {
-    w_setup("Game", 320, 240, 16, 4, 0);
-}
-
-void wupdate() {
+int wupdate() {
     uint16_t* vram = (uint16_t*)w_vram;
-    vram[w_mouse_y * w_width + w_mouse_x] = W_RGB565(255, 0, 0);
-    w_redraw();
+    vram[w_mouse_y * w_width + w_mouse_x] = 0xF800;
+    return 1;
 }
 ```
 
 ### Rust
+
 ```rust
 #[no_mangle] pub static mut w_width: u32 = 320;
 #[no_mangle] pub static mut w_height: u32 = 240;
+#[no_mangle] pub static mut w_bpp: u32 = 16;
 #[no_mangle] pub static mut w_vram: [u8; 320*240*2] = [0; 320*240*2];
-#[no_mangle] pub static mut w_running: u32 = 1;
 #[no_mangle] pub static mut w_dirty_count: u32 = 0;
 
-#[no_mangle] pub extern "C" fn winit() { unsafe { w_width = 320; w_height = 240; } }
-#[no_mangle] pub extern "C" fn wupdate() { unsafe { w_dirty_count = 1; } }
+#[no_mangle] pub extern "C" fn wupdate() -> i32 {
+    unsafe { w_dirty_count = 1; }
+    1
+}
 ```
 
 ## Compilation
 
 ```bash
-clang --target=wasm32 -nostdlib -O3 -Iinclude \
+clang --target=wasm32 -nostdlib -O3 \
     -Wl,--no-entry -Wl,--export-all -Wl,--allow-undefined \
     -Wl,--initial-memory=8388608 main.c -o rom.wasm
 ```

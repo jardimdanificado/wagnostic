@@ -4,15 +4,14 @@
 
 ```
 examples/
-├── include/
-│   ├── wagnostic.h   # Main API (globals + dirty rectangles)
-│   └── olive.h       # Drawing library
 ├── roms/             # Example ROMs
-├── runners/
-│   ├── native/       # wasm3 host
-│   ├── native-spidermonkey/ # SpiderMonkey host
-│   └── web/          # Browser host
-└── tools/            # Build utilities
+│   ├── buttons_test
+│   ├── fallback_test
+│   └── terminal_test
+└── runners/
+    ├── native/       # wasm3 host
+    ├── native-spidermonkey/ # SpiderMonkey host
+    └── web/          # Browser host
 ```
 
 ## Building
@@ -25,57 +24,53 @@ make -C examples roms     # ROMs only
 
 ## API
 
+A ROM exports global variables and a single function `wupdate()`:
+
 ```c
-#define WAGNOSTIC_IMPLEMENTATION
-#include "wagnostic.h"
+#include <stdint.h>
 
-void winit() {
-    w_setup("Game", 320, 240, 16, 4, 0);
-}
+uint32_t w_width  = 320;
+uint32_t w_height = 240;
+uint32_t w_bpp    = 16;
+uint8_t  w_vram[320 * 240 * 2];
 
-void wupdate() {
-    // Read input
-    int mx = w_mouse_x;
-    int my = w_mouse_y;
-    
-    // Draw to w_vram
+int wupdate() {
     uint16_t* vram = (uint16_t*)w_vram;
-    vram[my * w_width + mx] = W_RGB565(255, 0, 0);
-    
-    // Mark dirty region
-    w_redraw();  // or w_redraw_rect(x, y, w, h)
+    vram[w_mouse_y * w_width + w_mouse_x] = 0xF800;
+    return 1;  // return 0 to quit
 }
 ```
 
+No `winit()`. No helper headers. Each ROM declares exactly what it needs.
+
 ## Dirty Rectangles
 
-Instead of redrawing everything, mark only what changed:
-
 ```c
-w_dirty_count = 0;                    // Skip rendering
-w_dirty_count = 1;                    // One rect
-w_dirty_rects[0] = (Rect){x, y, w, h};
-w_redraw();                           // Full screen
-w_redraw_rect(x, y, w, h);           // Add rect
+w_dirty_count = 1;
+w_dirty_rects[0] = (Rect){0, 0, w_width, w_height};
+```
+
+Or use the inline helper (define locally):
+```c
+static void redraw() {
+    w_dirty_count = 1;
+    w_dirty_rects[0] = (Rect){0, 0, (int)w_width, (int)w_height};
+}
 ```
 
 ## Running
 
 ```bash
-./wagnostic rom.wasm           # wasm3 host
-./wagnostic-sm rom.wasm        # SpiderMonkey host
-# Open runners/web/index.html  # Web host
+./wagnostic roms/buttons_test.wasm     # wasm3 host
+./wagnostic-sm rom.wasm                # SpiderMonkey host
 ```
 
 ## Example ROMs
 
 | ROM | Description |
 |-----|-------------|
-| `buttons_test` | Input test |
-| `draw_example` | Drawing primitives |
-| `mouse_platformer` | Platformer with mouse |
-| `images_example` | Image loading |
-| `audio_example` | Audio playback |
-| `roguelike_example` | Roguelike game |
-| `tracker_example` | Music tracker |
-| `benchmark_*` | Performance benchmarks |
+| `buttons_test` | Keyboard/mouse input grid |
+| `fallback_test` | No winit — tests host defaults |
+| `terminal_test` | 8bpp terminal-style rendering |
+
+For high-level examples (sprites, audio, images, wagn0 API), see the [wagn0](https://github.com/jardimdanificado/wagn0) repository.

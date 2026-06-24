@@ -115,8 +115,7 @@ Instead of redrawing the entire screen every frame, the ROM specifies which regi
 
 - `w_dirty_count = 0` → nothing changed, host skips rendering
 - `w_dirty_count = N` (1-32) → host renders N dirty rectangles
-- Use `w_redraw()` to mark full screen as dirty
-- Use `w_redraw_rect(x, y, w, h)` to add a dirty rectangle
+- Set `w_dirty_count = 1` and `w_dirty_rects[0]` for full-screen redraw
 
 ### Example
 
