@@ -17,7 +17,6 @@ add_executable(wagnostic ${SOURCES})
 
 target_include_directories(wagnostic PRIVATE 
     examples/runners/lib/wasm3
-    examples/include
     ${SDL2_INCLUDE_DIRS}
 )
 

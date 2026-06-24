@@ -534,7 +534,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // ---- Instantiate WASM, call winit(), cache global pointers ----
+    // ---- Instantiate WASM and cache global pointers ----
     {
         JSAutoRealm ar(gCx, global);
 

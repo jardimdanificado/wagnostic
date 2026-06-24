@@ -12,24 +12,10 @@ ROM_DIRS = \
 	roms/fallback_test \
 	roms/terminal_test
 
-BENCHMARK_DIRS = \
-	roms/benchmark_cpu \
-	roms/benchmark_vram \
-	roms/benchmark_audio \
-	roms/benchmark_particles \
-	roms/benchmark_all
+BENCHMARK_DIRS =
 
 # ── Runner directories ───────────────────────────────────────────────────────
-RUNNER_DIRS_NATIVE = runners/native
-RUNNER_DIRS_GPU    = runners/native_gpu
-RUNNER_DIRS_ALL    = \
-	runners/native \
-	runners/native_gpu \
-	runners/native-wasmtime \
-	runners/native-v8 \
-	runners/native-node \
-	runners/native-spidermonkey \
-	runners/native-js140
+RUNNER_DIRS = runners/native runners/native-spidermonkey
 
 # ── ROM compilation flags (exported so sub-Makefiles can use them) ───────────
 export CLANG = clang
@@ -64,10 +50,8 @@ TARGET_HOST_SM = wagnostic-sm
 
 # ── Phony targets ────────────────────────────────────────────────────────────
 .PHONY: all help clean \
-        host host-gpu host-wasmtime host-sm \
-        roms benchmarks \
-        host-bench host-bench-wasmtime host-bench-sm \
-        portmaster
+        host host-wasmtime host-sm \
+        roms
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  DEFAULT TARGET
@@ -83,27 +67,16 @@ help:
 	@echo "  Targets:"
 	@echo "    all              Build native host + example ROMs (default)"
 	@echo "    host             Build native host (wasm3 + SDL2)"
-	@echo "    host-gpu         Build GPU-accelerated host"
 	@echo "    host-wasmtime    Build Wasmtime JIT host"
 	@echo "    host-sm          Build SpiderMonkey host (SDL2+OpenGL)"
-	@echo "    host-bench*      Build benchmark runners (see below)"
 	@echo "    roms             Build example ROMs"
-	@echo "    benchmarks       Build benchmark ROMs"
-	@echo "    portmaster       Cross-compile for PortMaster"
 	@echo "    clean            Remove all build artifacts"
-	@echo ""
-	@echo "  Benchmark runners:"
-	@echo "    host-bench              wasm3 interpreter"
-	@echo "    host-bench-wasmtime     Wasmtime JIT"
-	@echo "    host-bench-sm           SpiderMonkey C++"
 	@echo ""
 	@echo "  Build individual ROM:  make -C roms/<name>"
 	@echo "  Build individual runner:  make -C runners/<name>"
-	@echo "  Run benchmarks:  bash benchmark.sh [num_frames]"
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  HOST TARGETS  (simple targets — compile directly, not via sub-Makefiles)
-# ═════════════════════════════════════════════════════════════════════════════
 WASM3_SRC = $(WASM3_DIR)/m3_api_libc.c \
             $(WASM3_DIR)/m3_bind.c \
             $(WASM3_DIR)/m3_code.c \
@@ -150,58 +123,19 @@ benchmarks:
 	done
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  BENCHMARK RUNNERS
-# ═════════════════════════════════════════════════════════════════════════════
-host-bench: $(TARGET_HOST_BENCH)
-
-$(TARGET_HOST_BENCH): runners/native/host_benchmark.c
-	$(CC) $(HOST_CFLAGS) $< $(WASM3_SRC) -o $@ -lm
-
-host-bench-wasmtime: $(TARGET_HOST_BENCH_WASMTIME)
-
-$(TARGET_HOST_BENCH_WASMTIME): runners/native-wasmtime/host_benchmark.c
-	$(CC) $(HOST_CFLAGS) $(WASMTIME_CFLAGS) $< -o $@ $(WASMTIME_LDFLAGS) $(HOST_LDFLAGS)
-
-host-bench-sm: $(TARGET_HOST_BENCH_SM)
-
-$(TARGET_HOST_BENCH_SM): runners/native-spidermonkey/host_benchmark_sm.cpp
-	$(CXX) -std=c++17 $(SM_CXXFLAGS) $< -o $@ $(SM_LDFLAGS) -O2
-
-# ═════════════════════════════════════════════════════════════════════════════
-#  CROSS-COMPILE (PortMaster)
-# ═════════════════════════════════════════════════════════════════════════════
-CC_AARCH64 = aarch64-linux-gnu-gcc
-CFLAGS_AARCH64 = -Irunners/lib/wasm3 -O2 -DPORTMASTER
-LDFLAGS_AARCH64 = -lSDL2 -lGLESv2 -lm
-
-portmaster:
-	mkdir -p wagnostic
-	@echo "Cross-compiling for PortMaster in Docker..."
-	@sudo docker run --rm -e DEBIAN_FRONTEND=noninteractive -v $(PWD):/bld -w /bld ubuntu:20.04 bash -c " \
-		sed -i 's/^deb /deb [arch=amd64] /g' /etc/apt/sources.list && \
-		echo 'deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ focal main restricted universe multiverse' >> /etc/apt/sources.list && \
-		echo 'deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ focal-updates main restricted universe multiverse' >> /etc/apt/sources.list && \
-		dpkg --add-architecture arm64 && apt-get update -qq && \
-		apt-get install -yq --no-install-recommends gcc-aarch64-linux-gnu libsdl2-dev:arm64 libgles2-mesa-dev:arm64 && \
-		$(CC_AARCH64) $(CFLAGS_AARCH64) runners/native/host.c $(WASM3_SRC) -o wagnostic/$(TARGET_HOST) $(LDFLAGS_AARCH64) \
-	"
-	@echo "PortMaster build complete! ZIP with: zip -r wagnostic_port.zip wagnostic wagnostic.sh"
-
-# ═════════════════════════════════════════════════════════════════════════════
 #  CLEAN
 # ═════════════════════════════════════════════════════════════════════════════
 clean:
 	# Clean ROMs
-	@for dir in $(ROM_DIRS) $(BENCHMARK_DIRS); do \
+	@for dir in $(ROM_DIRS); do \
 		$(MAKE) -C $$dir clean; \
 	done
 	# Clean built .wasm files at root
 	rm -f *.wasm
 	# Clean host binaries
-	rm -f $(TARGET_HOST) $(TARGET_HOST_GPU) $(TARGET_HOST_WASMTIME) $(TARGET_HOST_SM) \
-	      wagnostic-bench wagnostic-bench-wasmtime \
-	      wagnostic-bench-sm
+	rm -f $(TARGET_HOST) $(TARGET_HOST_WASMTIME) $(TARGET_HOST_SM)
 	# Clean other legacy artifacts
+	rm -f wagnostic-bench wagnostic-bench-wasmtime wagnostic-bench-sm
 	rm -f wagnostic-bench-wamr wagnostic-bench-native wagnostic-bench-gpu wagnostic-wasmtime
 	# Clean benchmark dir
 	rm -rf roms/benchmark

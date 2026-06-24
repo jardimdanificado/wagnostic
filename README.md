@@ -1,16 +1,15 @@
 # Wagnostic
 
-Wagnostic is a minimalist, platform-agnostic specification and runtime for multimedia applications.
+Minimalist, platform-agnostic WASM runtime for multimedia apps.
 
 ## Quick Start
 
 ```bash
-# Build the host + ROMs
 make -C examples
 ./examples/wagnostic examples/buttons_test.wasm
 ```
 
-A ROM mais simples declara os globais que precisa e exporta `winit()` / `wupdate()`:
+A ROM exports globals for the screen, input, and audio, plus a single function:
 
 ```c
 #include <stdint.h>
@@ -18,22 +17,14 @@ A ROM mais simples declara os globais que precisa e exporta `winit()` / `wupdate
 uint32_t w_width  = 320;
 uint32_t w_height = 240;
 uint32_t w_bpp    = 16;
-uint8_t w_vram[320 * 240 * 2];
-
-void winit() { }
+uint8_t  w_vram[320 * 240 * 2];
 
 int wupdate() {
     uint16_t* vram = (uint16_t*)w_vram;
-    vram[w_mouse_y * 320 + w_mouse_x] = 0xF800; // RGB565 red
-    return 1;
+    vram[w_mouse_y * w_width + w_mouse_x] = 0xF800;
+    return 1;  // return 0 to quit
 }
 ```
-
-Veja `examples/roms/` para exemplos completos.
-
----
-
-# Full Specification
 
 ## 1. Overview
 
@@ -120,7 +111,7 @@ Instead of redrawing the entire screen every frame, the ROM specifies which regi
 ### Example
 
 ```c
-void wupdate() {
+int wupdate() {
     // Move player
     player_x += 1;
     
@@ -128,6 +119,7 @@ void wupdate() {
     w_dirty_count = 2;
     w_dirty_rects[0] = (Rect){old_x, player_y, 20, 24};
     w_dirty_rects[1] = (Rect){player_x, player_y, 20, 24};
+    return 1;
 }
 ```
 

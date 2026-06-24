@@ -2,7 +2,7 @@
 
 typedef struct { int x, y, w, h; } Rect;
 
-// Sem winit! O Host usa os defaults definidos abaixo.
+// No winit — globals initialized at definition with defaults above.
 
 uint32_t w_width     = 320;
 uint32_t w_height    = 240;
