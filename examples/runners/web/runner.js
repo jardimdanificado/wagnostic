@@ -103,16 +103,17 @@
 
   // ── Helpers ────────────────────────────────────────────────────────────
 
-  // clang for wasm32 emits C globals as memory-backed: the global's
-  // .value is the address of the variable in linear memory, with the
-  // actual value stored at that address. (Both for `uint32_t x = 5;`
-  // scalars and `uint8_t arr[100];` arrays.) So we always dereference
-  // the address — and the browser accepts the memory write even for
-  // globals it exports as `mutable=0` (where the .value = setter would
-  // throw a TypeError).
+  // clang for wasm32 emits C globals as memory-backed: the global's value
+  // is the ADDRESS of the variable's storage in linear memory. Scalars
+  // (uint32_t x = 5) need a dereference to read the int32; arrays
+  // (uint8_t arr[100]) use the address directly as a pointer to the
+  // first byte. Memory writes work even for globals the browser exports
+  // as `mutable=0` (the .value = setter would throw on those).
   function readGlobal(name) {
-    const offset = wasmExports[name] | 0;
-    return new DataView(wasmMemory.buffer).getInt32(offset, true);
+    return wasmExports[name] | 0;
+  }
+  function readScalar(name) {
+    return new DataView(wasmMemory.buffer).getInt32(wasmExports[name] | 0, true);
   }
   function writeGlobal(name, value) {
     const offset = wasmExports[name] | 0;
@@ -121,24 +122,24 @@
 
   function readGlobals() {
     return {
-      w:            readGlobal('w_width')             || DEFAULT_WIDTH,
-      h:            readGlobal('w_height')            || DEFAULT_HEIGHT,
-      bpp:          readGlobal('w_bpp')               || DEFAULT_BPP,
-      scale:        readGlobal('w_scale')             || DEFAULT_SCALE,
+      w:            readScalar('w_width')             || DEFAULT_WIDTH,
+      h:            readScalar('w_height')            || DEFAULT_HEIGHT,
+      bpp:          readScalar('w_bpp')               || DEFAULT_BPP,
+      scale:        readScalar('w_scale')             || DEFAULT_SCALE,
       vram:         readGlobal('w_vram'),
-      dirtyCount:   readGlobal('w_dirty_count'),
+      dirtyCount:   readScalar('w_dirty_count'),
       dirtyRects:   readGlobal('w_dirty_rects'),
-      mouseX:       readGlobal('w_mouse_x'),
-      mouseY:       readGlobal('w_mouse_y'),
-      mouseButtons: readGlobal('w_mouse_buttons'),
-      mouseWheel:   readGlobal('w_mouse_wheel'),
-      ticks:        readGlobal('w_ticks'),
-      audioSize:        readGlobal('w_audio_size'),
-      audioSampleRate: readGlobal('w_audio_sample_rate'),
-      audioBpp:         readGlobal('w_audio_bpp'),
-      audioChannels:    readGlobal('w_audio_channels'),
-      audioWrite:       readGlobal('w_audio_write'),
-      audioRead:        readGlobal('w_audio_read'),
+      mouseX:       readScalar('w_mouse_x'),
+      mouseY:       readScalar('w_mouse_y'),
+      mouseButtons: readScalar('w_mouse_buttons'),
+      mouseWheel:   readScalar('w_mouse_wheel'),
+      ticks:        readScalar('w_ticks'),
+      audioSize:        readScalar('w_audio_size'),
+      audioSampleRate: readScalar('w_audio_sample_rate'),
+      audioBpp:         readScalar('w_audio_bpp'),
+      audioChannels:    readScalar('w_audio_channels'),
+      audioWrite:       readScalar('w_audio_write'),
+      audioRead:        readScalar('w_audio_read'),
       audioBuffer:      readGlobal('w_audio_buffer')
     };
   }
@@ -442,8 +443,8 @@
       const g = readGlobals();
       if (g.audioSize === 0 || g.audioBpp === 0) return;
 
-      const writePtr = readGlobal('w_audio_write');
-      const readPtr  = readGlobal('w_audio_read');
+      const writePtr = readScalar('w_audio_write');
+      let   readPtr  = readScalar('w_audio_read');
       const bufPtr   = g.audioBuffer;
       const size     = g.audioSize;
       const bpp      = g.audioBpp;
@@ -578,13 +579,27 @@
     mouseButtons = 0;
     mouseWheel = 0;
 
+    // env imports: libm funcs some ROMs need (audio_ogg = stb_vorbis
+    // MDCT imports sin/cos/exp/log/pow/ldexp). Harmless to provide
+    // when the ROM doesn't need them.
+    var wasmImports = {
+      env: {
+        sin:   Math.sin,
+        cos:   Math.cos,
+        exp:   Math.exp,
+        log:   Math.log,
+        pow:   Math.pow,
+        ldexp: function (x, n) { return x * Math.pow(2, n); }
+      }
+    };
+
     // Some browser polyfills choke on instantiateStreaming without an
     // explicit imports object. Pass an empty one and fall back to
     // instantiate if streaming fails.
     var instantiatePromise = WebAssembly.instantiateStreaming
-      ? WebAssembly.instantiateStreaming(fetch(wasmUrl), {})
+      ? WebAssembly.instantiateStreaming(fetch(wasmUrl), wasmImports)
       : fetch(wasmUrl).then(function (r) { return r.arrayBuffer(); })
-            .then(function (buf) { return WebAssembly.instantiate(buf, {}); });
+            .then(function (buf) { return WebAssembly.instantiate(buf, wasmImports); });
 
     instantiatePromise.then(function (result) {
       wasmInstance = result.instance;

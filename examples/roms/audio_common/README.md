@@ -115,3 +115,71 @@ ROM/gen_audio; o terceiro está no **host** e foi o que mais custou pra achar.
    acessar `w_audio_buffer` simultaneamente. Serializado com
    `SDL_mutex` (criado no main, lock no callback inteiro + lock em volta
    de `m3_CallV(wupdate)`).
+
+5. **State por runner:**
+
+   | Runner | max_bytes cap | mutex | status |
+   |--------|---------------|-------|--------|
+   | `native` (host.c, wasm3) | corrigido: `nsamples * bpp` | SDL_mutex | ✅ 0 abnormal jumps em WAV/MP3/OGG |
+   | `native-spidermonkey` (host_sm.cpp) | já correto (lê 1 s16/iter) | SDL_mutex + math imports | ✅ WAV/MP3/OGG rodam |
+   | `web` (runner.js, JS) | já correto | desnecessário (JS single-threaded) | ✅ corrigido bugs preexistentes: memory-backed globals + fallback instantiate + bounds check canvas + underrun byte math |
+
+6. **Bugs preexistentes do web runner consertados:**
+
+   - **Memory-backed globals — scalar vs array** (a causa raiz da maioria
+     dos sintomas): o clang para wasm32 emite C globals com o `.value`
+     sendo o **endereço** da variável no linear memory, não o valor.
+     Para `uint32_t w_width = 320;` o endereço aponta pra um slot de 4
+     bytes com o valor 320. Para `uint8_t w_vram[153600];` o endereço
+     aponta pro primeiro byte do array. A regra:
+       - **Scalar** (`uint32_t`, `int32_t`, etc.) → dereferenciar int32
+         no endereço pra obter o valor
+       - **Array** (`uint8_t arr[N]`, `char str[N]`, `Rect rs[N]`) → usar
+         o endereço direto como ponteiro pros dados
+     O runner agora tem `readScalar(name)` (dereferencia) e
+     `readGlobal(name)` (retorna o endereço). Chamadas de escrita
+     (`writeGlobal`) escrevem via memória no endereço do global, o que
+     funciona mesmo em globals `mutable=0` (onde o setter `.value =`
+     do browser lança TypeError). Sintomas que isso causa se mal
+     implementado:
+       - `Screen: 65536x65540` (lê o endereço como dimensões)
+       - `createScriptProcessor: number of output channels (133900)
+         exceeds maximum (32)` (lê o endereço de w_audio_channels)
+       - `RangeError: Invalid typed array length: 128` no `readTitle`
+         (lê os 4 primeiros bytes da string como ponteiro)
+
+   - **OGG sem imports `env`**: stb_vorbis importa `sin/cos/exp/log/pow/
+     ldexp` do módulo `env`. Sem prover esses imports o browser falha
+     com `TypeError: Import #0 "env": module is not an object or
+     function`. Fix: `loadRom()` agora passa um objeto `wasmImports` com
+     as 6 funções de math, mapeando `Math.sin/cos/exp/log/pow` e um
+     `ldexp` inline (`x * Math.pow(2, n)`). ROMs que não precisam
+     desses imports (WAV/MP3) ignoram o objeto extra sem problema.
+
+   - **`WebAssembly.instantiate(): Imports argument must be present`**:
+     Polyfills ou wrappers podem exigir o segundo argumento. Fix: passar
+     o `wasmImports` como imports e fazer fallback de
+     `instantiateStreaming` para `WebAssembly.instantiate(bytes, ...)`.
+
+   - **`createImageData` "Out of memory"**:
+     ROM com bug ou mal carregado pode dar dimensões NaN/0. Fix: clamp em
+     `resizeCanvas` para 1..8192 em ambos w e h antes de `createImageData`.
+
+   - **Underrun byte math** (`available` em bytes, mas decrementava 1/sample):
+     `available` é calculado em bytes (`writePtr - readPtr`), mas o loop
+     interno decrementava por 1 por sample, não por `bpp` bytes. Para
+     s16 mono (bpp=2, ch=1) detectava underrun 2× cedo, parando a leitura
+     no meio de uma sample. Fix: `available -= bpp` no loop.
+
+   - **Auto-load via `?rom=`**:
+     Adicionado suporte a `?rom=name` na URL pra auto-carregar
+     `name.wasm` (mesmo dir do `index.html`). Permite testar diretamente
+     via Playwright/curl/links sem upload.
+
+7. **Bugs preexistentes do SM runner consertados:**
+
+   - **`audio_ogg` falhava no setup** com "WASM instantiation/setup JS failed".
+     O setup do SM só provia `strlen` no `{env}`. OGG precisa de
+     `sin/cos/exp/log/pow/ldexp/fabs/floor/ceil` (stb_vorbis MDCT em float).
+     Fix: adicionado os 9 imports math no objeto JS `_imports`, mapeando
+     para `Math.*` do SpiderMonkey e um `ldexp` inline (`x * Math.pow(2, n)`).
