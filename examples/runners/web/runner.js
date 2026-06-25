@@ -103,33 +103,48 @@
 
   // ── Helpers ────────────────────────────────────────────────────────────
 
+  // clang for wasm32 emits C globals as memory-backed: the global's
+  // .value is the address of the variable in linear memory, with the
+  // actual value stored at that address. (Both for `uint32_t x = 5;`
+  // scalars and `uint8_t arr[100];` arrays.) So we always dereference
+  // the address — and the browser accepts the memory write even for
+  // globals it exports as `mutable=0` (where the .value = setter would
+  // throw a TypeError).
+  function readGlobal(name) {
+    const offset = wasmExports[name] | 0;
+    return new DataView(wasmMemory.buffer).getInt32(offset, true);
+  }
+  function writeGlobal(name, value) {
+    const offset = wasmExports[name] | 0;
+    new DataView(wasmMemory.buffer).setInt32(offset, value | 0, true);
+  }
+
   function readGlobals() {
-    const e = wasmExports;
     return {
-      w:  e.w_width.value  || DEFAULT_WIDTH,
-      h:  e.w_height.value || DEFAULT_HEIGHT,
-      bpp: e.w_bpp.value   || DEFAULT_BPP,
-      scale: e.w_scale.value || DEFAULT_SCALE,
-      vram: e.w_vram.value,
-      dirtyCount: e.w_dirty_count.value,
-      dirtyRects: e.w_dirty_rects.value,
-      mouseX: e.w_mouse_x.value,
-      mouseY: e.w_mouse_y.value,
-      mouseButtons: e.w_mouse_buttons.value,
-      mouseWheel: e.w_mouse_wheel.value,
-      ticks: e.w_ticks.value,
-      audioSize: e.w_audio_size.value,
-      audioSampleRate: e.w_audio_sample_rate.value,
-      audioBpp: e.w_audio_bpp.value,
-      audioChannels: e.w_audio_channels.value,
-      audioWrite: e.w_audio_write.value,
-      audioRead: e.w_audio_read.value,
-      audioBuffer: e.w_audio_buffer.value
+      w:            readGlobal('w_width')             || DEFAULT_WIDTH,
+      h:            readGlobal('w_height')            || DEFAULT_HEIGHT,
+      bpp:          readGlobal('w_bpp')               || DEFAULT_BPP,
+      scale:        readGlobal('w_scale')             || DEFAULT_SCALE,
+      vram:         readGlobal('w_vram'),
+      dirtyCount:   readGlobal('w_dirty_count'),
+      dirtyRects:   readGlobal('w_dirty_rects'),
+      mouseX:       readGlobal('w_mouse_x'),
+      mouseY:       readGlobal('w_mouse_y'),
+      mouseButtons: readGlobal('w_mouse_buttons'),
+      mouseWheel:   readGlobal('w_mouse_wheel'),
+      ticks:        readGlobal('w_ticks'),
+      audioSize:        readGlobal('w_audio_size'),
+      audioSampleRate: readGlobal('w_audio_sample_rate'),
+      audioBpp:         readGlobal('w_audio_bpp'),
+      audioChannels:    readGlobal('w_audio_channels'),
+      audioWrite:       readGlobal('w_audio_write'),
+      audioRead:        readGlobal('w_audio_read'),
+      audioBuffer:      readGlobal('w_audio_buffer')
     };
   }
 
   function readTitle() {
-    const ptr = wasmExports.w_title.value;
+    const ptr = readGlobal('w_title');
     const u8 = new Uint8Array(wasmMemory.buffer, ptr, TITLE_MAX);
     let end = 0;
     while (end < TITLE_MAX && u8[end] !== 0) end++;
@@ -139,6 +154,14 @@
   // ── Canvas / Screen ────────────────────────────────────────────────────
 
   function resizeCanvas(w, h, scale) {
+    // Defensive: a bad or absent ROM could give us zero/NaN dimensions,
+    // which would make createImageData throw "Out of memory". Clamp to
+    // sane bounds before doing anything.
+    if (!Number.isFinite(w) || w <= 0)   w = DEFAULT_WIDTH;
+    if (!Number.isFinite(h) || h <= 0)   h = DEFAULT_HEIGHT;
+    if (!Number.isFinite(scale) || scale <= 0) scale = 1;
+    if (w > 8192) w = 8192;
+    if (h > 8192) h = 8192;
     canvas.width  = w;
     canvas.height = h;
     canvas.style.width  = (w * scale) + 'px';
@@ -282,23 +305,22 @@
   // ── Input ──────────────────────────────────────────────────────────────
 
   function writeInputToGlobals() {
-    const e = wasmExports;
-    e.w_mouse_x.value = mouseX;
-    e.w_mouse_y.value = mouseY;
-    e.w_mouse_buttons.value = mouseButtons;
-    e.w_mouse_wheel.value = mouseWheel;
-    e.w_gamepad_buttons.value = gamepadBtns;
-    e.w_ticks.value = (performance.now() - startTime) | 0;
+    writeGlobal('w_mouse_x',          mouseX);
+    writeGlobal('w_mouse_y',          mouseY);
+    writeGlobal('w_mouse_buttons',    mouseButtons);
+    writeGlobal('w_mouse_wheel',      mouseWheel);
+    writeGlobal('w_gamepad_buttons',  gamepadBtns);
+    writeGlobal('w_ticks',            (performance.now() - startTime) | 0);
 
-    // Write key states
-    const keysPtr = e.w_keys.value;
+    // Write key states — w_keys is a byte array, write directly to memory.
+    const keysPtr = readGlobal('w_keys');
     const keysMem = new Uint8Array(wasmMemory.buffer, keysPtr, KEYS_COUNT);
     keysMem.set(keysDown);
   }
 
   function resetInput() {
     mouseWheel = 0;
-    wasmExports.w_mouse_wheel.value = 0;
+    writeGlobal('w_mouse_wheel', 0);
   }
 
   // ── Keyboard ───────────────────────────────────────────────────────────
@@ -420,15 +442,19 @@
       const g = readGlobals();
       if (g.audioSize === 0 || g.audioBpp === 0) return;
 
-      const writePtr = wasmExports.w_audio_write.value;
-      const readPtr  = wasmExports.w_audio_read.value;
+      const writePtr = readGlobal('w_audio_write');
+      const readPtr  = readGlobal('w_audio_read');
       const bufPtr   = g.audioBuffer;
       const size     = g.audioSize;
       const bpp      = g.audioBpp;
       const channels = g.audioChannels || 1;
       const sampleRate = g.audioSampleRate || audioCtx.sampleRate;
 
-      // Calculate available samples in ring buffer
+      // Calculate available BYTES in the ring buffer. This callback
+      // runs on the JS event loop, same as frame() that calls wupdate,
+      // so there is no concurrency — no mutex needed. (Unlike the C
+      // runners, which need SDL_mutex because SDL's audio thread is
+      // real and can preempt the main thread on multi-core.)
       let available = writePtr - readPtr;
       if (available < 0) available += size;
 
@@ -438,7 +464,7 @@
       for (let ch = 0; ch < outputChannels; ch++) {
         const output = e.outputBuffer.getChannelData(ch);
         for (let i = 0; i < framesPerBuffer; i++) {
-          if (available <= 0) {
+          if (available < bpp) {
             output[i] = 0;
             continue;
           }
@@ -465,12 +491,14 @@
           // Advance read pointer by one interleaved sample frame
           readPtr += bpp * channels;
           readPtr %= size;
-          available--;
+          available -= bpp;
         }
       }
 
-      // Update the read pointer in WASM memory
-      wasmExports.w_audio_read.value = readPtr;
+      // Update the read pointer in WASM memory. Atomic from JS's
+      // single-threaded perspective; the next frame() that calls
+      // wupdate will see the new value.
+      writeGlobal('w_audio_read', readPtr);
     };
 
     audioProcessor.connect(audioCtx.destination);
@@ -528,7 +556,7 @@
     if (g.dirtyCount > 0) {
       renderDirtyRects(w, h, bpp, g.vram, g.dirtyCount, g.dirtyRects);
       // Reset dirty count
-      wasmExports.w_dirty_count.value = 0;
+      writeGlobal('w_dirty_count', 0);
     }
 
     // 5. Reset mouse wheel
@@ -550,7 +578,15 @@
     mouseButtons = 0;
     mouseWheel = 0;
 
-    WebAssembly.instantiateStreaming(fetch(wasmUrl)).then(function (result) {
+    // Some browser polyfills choke on instantiateStreaming without an
+    // explicit imports object. Pass an empty one and fall back to
+    // instantiate if streaming fails.
+    var instantiatePromise = WebAssembly.instantiateStreaming
+      ? WebAssembly.instantiateStreaming(fetch(wasmUrl), {})
+      : fetch(wasmUrl).then(function (r) { return r.arrayBuffer(); })
+            .then(function (buf) { return WebAssembly.instantiate(buf, {}); });
+
+    instantiatePromise.then(function (result) {
       wasmInstance = result.instance;
       wasmExports  = wasmInstance.exports;
       wasmMemory   = wasmExports.memory || wasmExports.linear_memory;
@@ -648,4 +684,11 @@
   canvas.style.imageRendering = 'pixelated';
 
   console.log('Wagnostic Web Runner ready. Load a .wasm ROM to begin.');
+
+  const urlParams = new URLSearchParams(window.location.search);
+  const autoRom = urlParams.get('rom');
+  if (autoRom) {
+    const romUrl = autoRom.endsWith('.wasm') ? autoRom : autoRom + '.wasm';
+    loadRom(romUrl);
+  }
 })();

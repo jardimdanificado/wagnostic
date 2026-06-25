@@ -20,6 +20,7 @@
 #include <cmath>
 
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_mutex.h>
 #define GL_GLEXT_PROTOTYPES 1
 #include <SDL2/SDL_opengl.h>
 
@@ -96,6 +97,16 @@ static uint32_t gptr_audio_read        = 0;
 static uint32_t gptr_audio_buffer      = 0;
 static uint32_t gptr_dirty_count       = 0;
 static uint32_t gptr_dirty_rects       = 0;
+
+/* Audio buffer lock. wupdate() (in the main thread, via SpiderMonkey)
+ * writes the audio buffer, and host_audio_callback() (in SDL's audio
+ * thread) reads it. On multi-core systems those two threads can run
+ * truly concurrently, and a torn read by the audio thread shows up as
+ * a sample-amplitude pop. We serialize with this mutex — the main
+ * thread holds it around the wupdate() JS call, the audio thread holds
+ * it for the whole callback. Writes are short (a few KB memcpy), so
+ * the audio thread only ever blocks briefly. */
+static SDL_mutex *g_audio_mutex = NULL;
 
 // ============================================================
 // Direct memory read / write helpers
@@ -405,6 +416,10 @@ static void convert_mouse_coords(int window_x, int window_y, int* rom_x, int* ro
 static void host_audio_callback(void* userdata, Uint8* stream_ptr, int len_bytes) {
     if (!wasm_memory) return;
 
+    /* Block the main thread from writing the audio buffer while we
+     * read it. See g_audio_mutex declaration. */
+    if (g_audio_mutex) SDL_LockMutex(g_audio_mutex);
+
     uint32_t r   = mem_u32(gptr_audio_read);
     uint32_t w   = mem_u32(gptr_audio_write);
     uint32_t sz  = mem_u32(gptr_audio_size);
@@ -436,6 +451,9 @@ static void host_audio_callback(void* userdata, Uint8* stream_ptr, int len_bytes
         stream[i] = s;
     }
     mem_u32(gptr_audio_read, r);
+
+    /* Release the audio buffer lock so the main thread can write again. */
+    if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
 }
 
 // ============================================================
@@ -671,6 +689,17 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    /* Create the audio buffer mutex after SDL_Init so SDL_CreateMutex
+     * is available. We check for NULL in the callback and main loop
+     * so an early audio callback (before we get here) just runs without
+     * locking instead of crashing. */
+    g_audio_mutex = SDL_CreateMutex();
+    if (!g_audio_mutex) {
+        fprintf(stderr, "SDL_CreateMutex: %s\n", SDL_GetError());
+        SDL_Quit();
+        return 1;
+    }
+
     // ---- Instantiate WASM and cache global pointers via JS ----
     {
         JSAutoRealm ar(gCx, global);
@@ -680,7 +709,22 @@ int main(int argc, char** argv) {
             // Instantiate the WASM module
             "var _b = new Uint8Array(__wasmBytes);\n"
             "var _m = new WebAssembly.Module(_b);\n"
-            "var _imports = {env: {strlen: function(){return 0;}}};\n"
+            "var _imports = {env: {\n"
+            "  strlen: function(){return 0;},\n"
+            // Math primitives needed by ROMs that decode compressed audio
+            // (e.g. stb_vorbis in audio_ogg). SpiderMonkey's Math.* are
+            // f64 which matches WASM f64. ldexp has no JS Math equivalent
+            // so it's implemented inline.
+            "  sin:   Math.sin,\n"
+            "  cos:   Math.cos,\n"
+            "  exp:   Math.exp,\n"
+            "  log:   Math.log,\n"
+            "  pow:   Math.pow,\n"
+            "  ldexp: function(x, n) { return x * Math.pow(2, n); },\n"
+            "  fabs:  Math.abs,\n"
+            "  floor: Math.floor,\n"
+            "  ceil:  Math.ceil\n"
+            "}};\n"
             "var _inst = new WebAssembly.Instance(_m, _imports);\n"
             "var _e = _inst.exports;\n"
             // Cache every named global's pointer (i32 -> linear memory offset)
@@ -815,17 +859,24 @@ int main(int argc, char** argv) {
         // ---- 2. Call wupdate(), exit if 0 ----
         int32_t keep = 1;
         {
-            JSAutoRealm ar(gCx, global);
-            JS::RootedObject g(gCx, gGlobal);
-            JS::RootedValue fn(gCx);
-            if (JS_GetProperty(gCx, g, "__wupdate", &fn) && fn.isObject()) {
-                JS::RootedValue rv(gCx);
-                JS_CallFunctionValue(gCx, g, fn,
-                    JS::HandleValueArray::empty(), &rv);
-                if (rv.isInt32()) keep = rv.toInt32();
+            /* Hold the audio mutex for the whole wupdate call so the
+             * audio thread can't read the buffer while the ROM's
+             * fill_audio is writing to it. See g_audio_mutex. */
+            if (g_audio_mutex) SDL_LockMutex(g_audio_mutex);
+            {
+                JSAutoRealm ar(gCx, global);
+                JS::RootedObject g(gCx, gGlobal);
+                JS::RootedValue fn(gCx);
+                if (JS_GetProperty(gCx, g, "__wupdate", &fn) && fn.isObject()) {
+                    JS::RootedValue rv(gCx);
+                    JS_CallFunctionValue(gCx, g, fn,
+                        JS::HandleValueArray::empty(), &rv);
+                    if (rv.isInt32()) keep = rv.toInt32();
+                }
+                // Memory may grow after wupdate(), refresh pointer
+                refresh_memory();
             }
-            // Memory may grow after wupdate(), refresh pointer
-            refresh_memory();
+            if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
         }
         if (!keep || !wasm_memory) break;
 
@@ -918,6 +969,12 @@ int main(int argc, char** argv) {
     glDeleteBuffers(1, &vbo);
     if (gl_ctx) SDL_GL_DeleteContext(gl_ctx);
     if (window) SDL_DestroyWindow(window);
+
+    /* Audio callback has been paused (SDL_CloseAudioDevice was called
+     * above), so no other thread holds the mutex. Safe to destroy. */
+    if (g_audio_mutex) SDL_DestroyMutex(g_audio_mutex);
+    g_audio_mutex = NULL;
+
     SDL_Quit();
 
     // Release JS global reference
