@@ -8,6 +8,12 @@
 
 # ── ROM directories ──────────────────────────────────────────────────────────
 ROM_DIRS = \
+	roms/display_test \
+	roms/input_test \
+	roms/audio_wav \
+	roms/audio_mp3 \
+	roms/audio_ogg \
+	roms/full_test \
 	roms/buttons_test \
 	roms/fallback_test \
 	roms/terminal_test

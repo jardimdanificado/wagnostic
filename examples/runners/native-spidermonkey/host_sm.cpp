@@ -9,7 +9,8 @@
  * the host dereferences that pointer to read/write the actual value.
  *
  * Build:
- *   g++ host_sm.cpp $(pkg-config --cflags --libs mozjs-140) -O2 -lSDL2 -lGL -o wagnostic-sm
+ *   g++ -std=c++17 $(pkg-config --cflags --libs mozjs-140) -O2 -lSDL2 -lGL \
+ *       host_sm.cpp -o wagnostic-sm
  */
 
 #include <cstdio>
@@ -17,6 +18,7 @@
 #include <cstring>
 #include <cstdint>
 #include <cmath>
+
 #include <SDL2/SDL.h>
 #define GL_GLEXT_PROTOTYPES 1
 #include <SDL2/SDL_opengl.h>
@@ -30,14 +32,28 @@
 #include "js/Utility.h"
 
 // ============================================================
-// State
+// Rect struct (matches WASM Rect: { int x, y, w, h; } = 16 bytes)
 // ============================================================
 
-static SDL_Window*    window  = NULL;
-static SDL_GLContext  gl_ctx  = NULL;
-static SDL_AudioDeviceID audio_dev = 0;
-static uint32_t W = 320, H = 240, BPP = 8, SCALE = 1;
-static uint8_t* wasm_memory = NULL;   // raw pointer into WASM linear memory
+typedef struct { int x, y, w, h; } Rect;
+
+// ============================================================
+// Global state
+// ============================================================
+
+static SDL_Window*          window     = NULL;
+static SDL_GLContext        gl_ctx     = NULL;
+static SDL_AudioDeviceID    audio_dev  = 0;
+static uint8_t*             wasm_memory = NULL;
+
+// Video config (read from WASM globals after wupdate())
+static uint32_t W = 320, H = 240, BPP = 16, SCALE = 1;
+
+// Previous-frame config for change detection
+static uint32_t prev_W = 0, prev_H = 0, prev_BPP = 0, prev_SCALE = 0;
+
+// Previous audio config for change detection
+static uint32_t prev_audio_rate = 0, prev_audio_channels = 0, prev_audio_size = 0;
 
 // GPU pipeline state
 static GLuint render_program = 0;
@@ -49,6 +65,7 @@ static GLint bpp_uniform_loc = -1;
 
 // SpiderMonkey
 static JSContext* gCx = NULL;
+static JS::Heap<JSObject*> gGlobal;
 
 // ============================================================
 // Global pointer cache
@@ -57,28 +74,28 @@ static JSContext* gCx = NULL;
 // We cache these pointers so we can read/write the actual values
 // directly from C++ without crossing into JS on every access.
 
-static uint32_t gptr_width            = 0;
-static uint32_t gptr_height           = 0;
-static uint32_t gptr_bpp              = 0;
-static uint32_t gptr_scale            = 0;
-static uint32_t gptr_title            = 0;
-static uint32_t gptr_vram             = 0;
-static uint32_t gptr_mouse_x          = 0;
-static uint32_t gptr_mouse_y          = 0;
-static uint32_t gptr_mouse_buttons    = 0;
-static uint32_t gptr_mouse_wheel      = 0;
-static uint32_t gptr_keys             = 0;
-static uint32_t gptr_gamepad_buttons  = 0;
-static uint32_t gptr_ticks            = 0;
-static uint32_t gptr_audio_size       = 0;
-static uint32_t gptr_audio_sample_rate= 0;
-static uint32_t gptr_audio_bpp        = 0;
-static uint32_t gptr_audio_channels   = 0;
-static uint32_t gptr_audio_write      = 0;
-static uint32_t gptr_audio_read       = 0;
-static uint32_t gptr_audio_buffer     = 0;
-static uint32_t gptr_dirty_count    = 0;
-static uint32_t gptr_dirty_rects  = 0;
+static uint32_t gptr_width             = 0;
+static uint32_t gptr_height            = 0;
+static uint32_t gptr_bpp               = 0;
+static uint32_t gptr_scale             = 0;
+static uint32_t gptr_title             = 0;
+static uint32_t gptr_vram              = 0;
+static uint32_t gptr_mouse_x           = 0;
+static uint32_t gptr_mouse_y           = 0;
+static uint32_t gptr_mouse_buttons     = 0;
+static uint32_t gptr_mouse_wheel       = 0;
+static uint32_t gptr_keys              = 0;
+static uint32_t gptr_gamepad_buttons   = 0;
+static uint32_t gptr_ticks             = 0;
+static uint32_t gptr_audio_size        = 0;
+static uint32_t gptr_audio_sample_rate = 0;
+static uint32_t gptr_audio_bpp         = 0;
+static uint32_t gptr_audio_channels    = 0;
+static uint32_t gptr_audio_write       = 0;
+static uint32_t gptr_audio_read        = 0;
+static uint32_t gptr_audio_buffer      = 0;
+static uint32_t gptr_dirty_count       = 0;
+static uint32_t gptr_dirty_rects       = 0;
 
 // ============================================================
 // Direct memory read / write helpers
@@ -88,33 +105,33 @@ static inline uint32_t mem_u32(uint32_t ptr) {
     if (!wasm_memory || ptr == 0) return 0;
     return *(const uint32_t*)(wasm_memory + ptr);
 }
+
 static inline void mem_u32(uint32_t ptr, uint32_t v) {
     if (wasm_memory && ptr) *(uint32_t*)(wasm_memory + ptr) = v;
 }
+
 static inline int32_t mem_i32(uint32_t ptr) {
     return (int32_t)mem_u32(ptr);
 }
+
 static inline void mem_i32(uint32_t ptr, int32_t v) {
     mem_u32(ptr, (uint32_t)v);
 }
+
 static inline uint8_t mem_u8(uint32_t ptr) {
     if (!wasm_memory || ptr == 0) return 0;
     return wasm_memory[ptr];
 }
+
 static inline void mem_u8(uint32_t ptr, uint8_t v) {
     if (wasm_memory && ptr) wasm_memory[ptr] = v;
 }
+
 static inline void mem_str(uint32_t ptr, char* dst, int max) {
     if (!wasm_memory || ptr == 0) { dst[0] = '\0'; return; }
     strncpy(dst, (const char*)(wasm_memory + ptr), max - 1);
     dst[max - 1] = '\0';
 }
-
-// ============================================================
-// Dirty rectangle struct (matches WASM Rect)
-// ============================================================
-
-typedef struct { int x, y, w, h; } Rect;
 
 static inline Rect mem_rect(uint32_t base, int index) {
     uint32_t off = base + (uint32_t)index * 16; // 4 x int32 = 16 bytes
@@ -127,7 +144,7 @@ static inline Rect mem_rect(uint32_t base, int index) {
 }
 
 // ============================================================
-// GLSL 130 shaders (unchanged)
+// GLSL 130 shaders
 // ============================================================
 
 static const char* vertex_shader_src =
@@ -167,7 +184,7 @@ static const char* fragment_shader_src =
     "}\n";
 
 // ============================================================
-// GPU pipeline (unchanged except VRAM pointer)
+// GPU pipeline
 // ============================================================
 
 static GLuint compile_shader(GLenum type, const char* source) {
@@ -179,7 +196,7 @@ static GLuint compile_shader(GLenum type, const char* source) {
     if (!ok) {
         char log[512];
         glGetShaderInfoLog(sh, 512, NULL, log);
-        fprintf(stderr, "Shader error: %s\n", log);
+        fprintf(stderr, "Shader compile error: %s\n", log);
     }
     return sh;
 }
@@ -191,12 +208,26 @@ static void init_gpu_pipeline() {
     glAttachShader(render_program, vs);
     glAttachShader(render_program, fs);
     glLinkProgram(render_program);
+
+    GLint linked;
+    glGetProgramiv(render_program, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        char log[512];
+        glGetProgramInfoLog(render_program, 512, NULL, log);
+        fprintf(stderr, "Program link error: %s\n", log);
+    }
+
     glDeleteShader(vs);
     glDeleteShader(fs);
     bpp_uniform_loc = glGetUniformLocation(render_program, "bpp");
 
+    // Fullscreen quad: position (x,y) + texcoord (u,v)
+    // UV origin at bottom-left so texture reads top-to-bottom as expected
     float quad[] = {
-        -1,-1, 0,1,  1,-1, 1,1,  -1,1, 0,0,  1,1, 1,0
+        -1, -1,  0, 1,   // bottom-left
+         1, -1,  1, 1,   // bottom-right
+        -1,  1,  0, 0,   // top-left
+         1,  1,  1, 0,   // top-right
     };
     glGenVertexArrays(1, &vao);
     glGenBuffers(1, &vbo);
@@ -204,13 +235,14 @@ static void init_gpu_pipeline() {
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4*4, 0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4*4, (void*)(2*4));
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
     glBindVertexArray(0);
 }
 
 static void init_textures_and_pbos() {
+    // Create / recreate triple-buffered textures
     for (int i = 0; i < 3; i++) {
         if (vram_textures[i]) glDeleteTextures(1, &vram_textures[i]);
         glGenTextures(1, &vram_textures[i]);
@@ -223,15 +255,19 @@ static void init_textures_and_pbos() {
         GLenum base = (BPP == 8) ? GL_RED : (BPP == 16) ? GL_RG : GL_RGBA;
         glTexImage2D(GL_TEXTURE_2D, 0, ifmt, W, H, 0, base, GL_UNSIGNED_BYTE, NULL);
     }
+
+    // Create / recreate double-buffered PBOs for async upload
     if (pbos[0]) glDeleteBuffers(2, pbos);
     glGenBuffers(2, pbos);
-    size_t vb = (size_t)W * H * (BPP / 8);
+    size_t vram_bytes = (size_t)W * H * (BPP / 8);
     for (int i = 0; i < 2; i++) {
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbos[i]);
-        glBufferData(GL_PIXEL_UNPACK_BUFFER, vb, NULL, GL_STREAM_DRAW);
+        glBufferData(GL_PIXEL_UNPACK_BUFFER, vram_bytes, NULL, GL_STREAM_DRAW);
     }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-    tex_idx = 0; pbo_idx = 0; first_frame = 1;
+    tex_idx = 0;
+    pbo_idx = 0;
+    first_frame = 1;
 }
 
 static void render_quad(GLuint tex_id) {
@@ -247,24 +283,26 @@ static void render_quad(GLuint tex_id) {
 }
 
 static void upload_and_render() {
-    // Read VRAM from the named global pointer (not a fixed offset)
     uint8_t* vram = wasm_memory + gptr_vram;
-    size_t vb = (size_t)W * H * (BPP / 8);
+    size_t vram_bytes = (size_t)W * H * (BPP / 8);
     GLenum fmt = (BPP == 8) ? GL_RED : (BPP == 16) ? GL_RG : GL_RGBA;
     int cur = pbo_idx, prev = 1 - pbo_idx;
     int rtex = (tex_idx + 2) % 3, utex = tex_idx;
 
+    // Upload: map current PBO, copy VRAM, unmap
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbos[cur]);
-    void* ptr = glMapBufferARB(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY_ARB);
-    if (ptr) memcpy(ptr, vram, vb);
+    void* ptr = glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY);
+    if (ptr) memcpy(ptr, vram, vram_bytes);
     glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
 
+    // Transfer: previous PBO -> current texture
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbos[prev]);
     glBindTexture(GL_TEXTURE_2D, vram_textures[utex]);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H, fmt, GL_UNSIGNED_BYTE, NULL);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
+    // Render: render the ready texture
     glClear(GL_COLOR_BUFFER_BIT);
     render_quad(vram_textures[rtex]);
     SDL_GL_SwapWindow(window);
@@ -273,7 +311,7 @@ static void upload_and_render() {
     pbo_idx = 1 - pbo_idx;
 }
 
-// Upload a sub-region of VRAM to the texture (partial dirty rect).
+// Upload a sub-region of VRAM to the current texture (partial dirty rect).
 // Uses GL_UNPACK_ROW_LENGTH to skip untouched rows.
 static void upload_dirty_rect(const Rect& r) {
     int x = r.x, y = r.y, w = r.w, h = r.h;
@@ -320,7 +358,7 @@ static void set_viewport_with_letterbox() {
 }
 
 // ============================================================
-// Mouse coordinate conversion
+// Mouse coordinate conversion (accounting for letterbox)
 // ============================================================
 
 static void convert_mouse_coords(int window_x, int window_y, int* rom_x, int* rom_y) {
@@ -371,18 +409,30 @@ static void host_audio_callback(void* userdata, Uint8* stream_ptr, int len_bytes
     uint32_t w   = mem_u32(gptr_audio_write);
     uint32_t sz  = mem_u32(gptr_audio_size);
     uint32_t bpp = mem_u32(gptr_audio_bpp);
+    uint32_t channels = mem_u32(gptr_audio_channels);
     if (sz == 0) return;
 
     uint8_t* audio_buf = wasm_memory + gptr_audio_buffer;
     float* stream = (float*)stream_ptr;
-    int ns = len_bytes / (int)sizeof(float);
+    int total_samples = len_bytes / (int)sizeof(float);
 
-    for (int i = 0; i < ns; i++) {
-        if (r == w) { stream[i] = 0.0f; continue; }
+    // Decode samples from ring buffer
+    for (int i = 0; i < total_samples; i++) {
+        if (r == w) {
+            stream[i] = 0.0f;
+            continue;
+        }
         float s = 0;
-        if      (bpp == 1) { s = (audio_buf[r] - 128) / 128.0f;              r = (r + 1) % sz; }
-        else if (bpp == 2) { s = (*(int16_t*)(audio_buf + r)) / 32768.0f;     r = (r + 2) % sz; }
-        else               { s = *(float*)(audio_buf + r);                     r = (r + 4) % sz; }
+        if (bpp == 1) {
+            s = (audio_buf[r] - 128) / 128.0f;
+            r = (r + 1) % sz;
+        } else if (bpp == 2) {
+            s = (*(int16_t*)(audio_buf + r)) / 32768.0f;
+            r = (r + 2) % sz;
+        } else {
+            s = *(float*)(audio_buf + r);
+            r = (r + 4) % sz;
+        }
         stream[i] = s;
     }
     mem_u32(gptr_audio_read, r);
@@ -404,8 +454,9 @@ static bool eval_js(const char* source) {
 }
 
 // Refresh wasm_memory after potential WASM memory growth.
+// Must call __getMem() which returns memory.buffer (ArrayBuffer).
 static bool refresh_memory() {
-    JS::RootedObject g(gCx, JS::CurrentGlobalOrNull(gCx));
+    JS::RootedObject g(gCx, gGlobal);
     JS::RootedValue fn(gCx);
     if (!JS_GetProperty(gCx, g, "__getMem", &fn) || !fn.isObject()) return false;
     JS::RootedValue mb(gCx);
@@ -428,7 +479,7 @@ static uint32_t get_gp(JS::HandleObject gpObj, const char* name) {
 }
 
 // ============================================================
-// Initialization from named globals
+// Init window / textures / audio from ROM globals
 // ============================================================
 
 static void init_from_globals() {
@@ -447,15 +498,28 @@ static void init_from_globals() {
     mem_str(gptr_title, title, 128);
 
     if (!window) {
+        // First-time window creation with OpenGL 3.0 Core Profile
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
+        SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
+
         window = SDL_CreateWindow(
             title[0] ? title : "Wagnostic SM",
             SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
             W * SCALE, H * SCALE,
             SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
-        if (!window) return;
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+        if (!window) {
+            fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError());
+            return;
+        }
         gl_ctx = SDL_GL_CreateContext(window);
+        if (!gl_ctx) {
+            fprintf(stderr, "SDL_GL_CreateContext: %s\n", SDL_GetError());
+            return;
+        }
         SDL_GL_SetSwapInterval(1);
         init_gpu_pipeline();
     } else {
@@ -477,8 +541,64 @@ static void init_from_globals() {
         if (wanted.channels == 0) wanted.channels = 1;
         wanted.samples  = 1024;
         wanted.callback = host_audio_callback;
+        wanted.userdata = NULL;
         audio_dev = SDL_OpenAudioDevice(NULL, 0, &wanted, NULL, 0);
-        if (audio_dev) SDL_PauseAudioDevice(audio_dev, 0);
+        if (audio_dev) {
+            SDL_PauseAudioDevice(audio_dev, 0);
+        } else {
+            fprintf(stderr, "SDL_OpenAudioDevice: %s\n", SDL_GetError());
+        }
+        prev_audio_rate = wanted.freq;
+        prev_audio_channels = wanted.channels;
+        prev_audio_size = audio_size;
+    }
+}
+
+// ============================================================
+// Detect audio config changes and reinit if needed
+// ============================================================
+
+static void check_audio_config_change() {
+    if (audio_dev == 0) return; // no audio device open yet
+
+    uint32_t cur_rate     = mem_u32(gptr_audio_sample_rate);
+    uint32_t cur_channels = mem_u32(gptr_audio_channels);
+    uint32_t cur_size     = mem_u32(gptr_audio_size);
+
+    if (cur_rate == 0) cur_rate = 44100;
+    if (cur_channels == 0) cur_channels = 1;
+
+    if (cur_rate != prev_audio_rate ||
+        cur_channels != prev_audio_channels ||
+        cur_size != prev_audio_size) {
+        // Close old device and reopen with new settings
+        SDL_CloseAudioDevice(audio_dev);
+        audio_dev = 0;
+
+        if (cur_size > 0) {
+            SDL_AudioSpec wanted;
+            SDL_zero(wanted);
+            wanted.freq     = cur_rate;
+            wanted.format   = AUDIO_F32;
+            wanted.channels = cur_channels;
+            wanted.samples  = 1024;
+            wanted.callback = host_audio_callback;
+            wanted.userdata = NULL;
+            audio_dev = SDL_OpenAudioDevice(NULL, 0, &wanted, NULL, 0);
+            if (audio_dev) {
+                SDL_PauseAudioDevice(audio_dev, 0);
+            } else {
+                fprintf(stderr, "SDL_OpenAudioDevice (reinit): %s\n", SDL_GetError());
+            }
+            prev_audio_rate = cur_rate;
+            prev_audio_channels = cur_channels;
+            prev_audio_size = cur_size;
+        }
+    } else if (cur_size == 0 && audio_dev != 0) {
+        // ROM stopped requesting audio
+        SDL_CloseAudioDevice(audio_dev);
+        audio_dev = 0;
+        prev_audio_size = 0;
     }
 }
 
@@ -488,38 +608,55 @@ static void init_from_globals() {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        printf("Usage: %s <rom.wasm>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <rom.wasm>\n", argv[0]);
         return 1;
     }
 
     // ---- Load WASM binary ----
     FILE* f = fopen(argv[1], "rb");
-    if (!f) { perror("ROM"); return 1; }
+    if (!f) {
+        fprintf(stderr, "Cannot open ROM: %s\n", argv[1]);
+        return 1;
+    }
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
     fseek(f, 0, SEEK_SET);
     uint8_t* wasm_data = (uint8_t*)malloc(sz);
+    if (!wasm_data) { fclose(f); fprintf(stderr, "OOM reading ROM\n"); return 1; }
     fread(wasm_data, 1, sz, f);
     fclose(f);
 
     // ---- Init SpiderMonkey ----
-    if (!JS_Init()) { fprintf(stderr, "JS_Init\n"); return 1; }
+    if (!JS_Init()) {
+        fprintf(stderr, "JS_Init failed\n");
+        return 1;
+    }
     gCx = JS_NewContext(64L * 1024L * 1024L);
-    if (!gCx) { fprintf(stderr, "JS_NewContext\n"); return 1; }
-    if (!JS::InitSelfHostedCode(gCx)) { fprintf(stderr, "InitSelfHosted\n"); return 1; }
+    if (!gCx) {
+        fprintf(stderr, "JS_NewContext failed\n");
+        return 1;
+    }
+    if (!JS::InitSelfHostedCode(gCx)) {
+        fprintf(stderr, "JS::InitSelfHostedCode failed\n");
+        return 1;
+    }
 
     const JSClass cls = { "Wagnostic", JSCLASS_GLOBAL_FLAGS, &JS::DefaultGlobalClassOps };
     JS::RealmOptions ro;
     JS::RootedObject global(gCx, JS_NewGlobalObject(gCx, &cls, nullptr,
                                                      JS::FireOnNewGlobalHook, ro));
-    if (!global) { fprintf(stderr, "NewGlobalObject\n"); return 1; }
+    if (!global) {
+        fprintf(stderr, "JS_NewGlobalObject failed\n");
+        return 1;
+    }
+    gGlobal = global;
 
-    // Expose WASM bytes to JS
+    // Expose WASM bytes to JS as an ArrayBuffer property
     {
         JSAutoRealm ar(gCx, global);
         auto copy = mozilla::UniquePtr<uint8_t[], JS::FreePolicy>(
             (uint8_t*)JS_malloc(gCx, sz));
-        if (!copy) { fprintf(stderr, "OOM\n"); return 1; }
+        if (!copy) { fprintf(stderr, "OOM allocating WASM copy\n"); return 1; }
         memcpy(copy.get(), wasm_data, sz);
         JS::RootedObject ab(gCx,
             JS::NewArrayBufferWithContents(gCx, sz, std::move(copy)));
@@ -530,120 +667,131 @@ int main(int argc, char** argv) {
 
     // ---- Init SDL ----
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
-        fprintf(stderr, "SDL: %s\n", SDL_GetError());
+        fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
     }
 
-    // ---- Instantiate WASM and cache global pointers ----
+    // ---- Instantiate WASM and cache global pointers via JS ----
     {
         JSAutoRealm ar(gCx, global);
 
         // clang-format off
         if (!eval_js(
             // Instantiate the WASM module
-            "var _b = new Uint8Array(__wasmBytes);"
-            "var _m = new WebAssembly.Module(_b);"
-            "var _imports = {env: {strlen: function(){return 0;}}};"
-            "var _inst = new WebAssembly.Instance(_m, _imports);"
-            "var _e = _inst.exports;"
-            // Cache every named global's pointer (i32 → linear memory offset)
-            "var _gp = {};"
-            "var _gn = ["
-            "  'w_width','w_height','w_bpp','w_scale','w_title','w_vram',"
-            "  'w_mouse_x','w_mouse_y','w_mouse_buttons','w_mouse_wheel',"
-            "  'w_keys','w_gamepad_buttons','w_ticks',"
-            "  'w_audio_size','w_audio_sample_rate','w_audio_bpp',"
-            "  'w_audio_channels','w_audio_write','w_audio_read',"
-            "  'w_audio_buffer',"
-            "  'w_dirty_count','w_dirty_rects'"
-            "];"
-            "for (var i = 0; i < _gn.length; i++) {"
-            "  var n = _gn[i];"
-            "  _gp[n] = (_e[n] !== undefined) ? _e[n].value : 0;"
-            "}"
-            // Stash callable wrappers
-            "__wupdate = function() { return _e.wupdate(); };"
-            "__getMem  = function() { return _e.memory.buffer; };"
+            "var _b = new Uint8Array(__wasmBytes);\n"
+            "var _m = new WebAssembly.Module(_b);\n"
+            "var _imports = {env: {strlen: function(){return 0;}}};\n"
+            "var _inst = new WebAssembly.Instance(_m, _imports);\n"
+            "var _e = _inst.exports;\n"
+            // Cache every named global's pointer (i32 -> linear memory offset)
+            "var _gp = {};\n"
+            "var _gn = [\n"
+            "  'w_width','w_height','w_bpp','w_scale','w_title','w_vram',\n"
+            "  'w_mouse_x','w_mouse_y','w_mouse_buttons','w_mouse_wheel',\n"
+            "  'w_keys','w_gamepad_buttons','w_ticks',\n"
+            "  'w_audio_size','w_audio_sample_rate','w_audio_bpp',\n"
+            "  'w_audio_channels','w_audio_write','w_audio_read',\n"
+            "  'w_audio_buffer',\n"
+            "  'w_dirty_count','w_dirty_rects'\n"
+            "];\n"
+            "for (var i = 0; i < _gn.length; i++) {\n"
+            "  var n = _gn[i];\n"
+            "  _gp[n] = (_e[n] !== undefined) ? _e[n].value : 0;\n"
+            "}\n"
+            // Expose callable wrappers to C++
+            "__wupdate = function() { return _e.wupdate(); };\n"
+            "__getMem  = function() { return _e.memory.buffer; };\n"
         )) {
-            fprintf(stderr, "WASM setup failed\n");
+            fprintf(stderr, "WASM instantiation/setup JS failed\n");
             return 1;
         }
     }
 
-    // Cache global pointers and refresh memory
+    // Cache global pointers and get initial memory reference
     {
         JSAutoRealm ar(gCx, global);
-        if (!refresh_memory()) { fprintf(stderr, "Memory\n"); return 1; }
+        if (!refresh_memory()) {
+            fprintf(stderr, "Failed to get WASM memory buffer\n");
+            return 1;
+        }
     }
 
-    // ---- Read cached global pointers into C++ ----
+    // ---- Read cached global pointers from JS _gp into C++ ----
     {
         JSAutoRealm ar(gCx, global);
-        JS::RootedObject g(gCx, JS::CurrentGlobalOrNull(gCx));
+        JS::RootedObject g(gCx, gGlobal);
         JS::RootedValue gpVal(gCx);
         if (!JS_GetProperty(gCx, g, "_gp", &gpVal) || !gpVal.isObject()) {
-            fprintf(stderr, "No _gp object\n"); return 1;
+            fprintf(stderr, "No _gp object found\n");
+            return 1;
         }
         JS::RootedObject gpObj(gCx, &gpVal.toObject());
 
-        gptr_width              = get_gp(gpObj, "w_width");
-        gptr_height             = get_gp(gpObj, "w_height");
-        gptr_bpp                = get_gp(gpObj, "w_bpp");
-        gptr_scale              = get_gp(gpObj, "w_scale");
-        gptr_title              = get_gp(gpObj, "w_title");
-        gptr_vram               = get_gp(gpObj, "w_vram");
-        gptr_mouse_x            = get_gp(gpObj, "w_mouse_x");
-        gptr_mouse_y            = get_gp(gpObj, "w_mouse_y");
-        gptr_mouse_buttons      = get_gp(gpObj, "w_mouse_buttons");
-        gptr_mouse_wheel        = get_gp(gpObj, "w_mouse_wheel");
-        gptr_keys               = get_gp(gpObj, "w_keys");
-        gptr_gamepad_buttons    = get_gp(gpObj, "w_gamepad_buttons");
-        gptr_ticks              = get_gp(gpObj, "w_ticks");
-        gptr_audio_size         = get_gp(gpObj, "w_audio_size");
-        gptr_audio_sample_rate  = get_gp(gpObj, "w_audio_sample_rate");
-        gptr_audio_bpp          = get_gp(gpObj, "w_audio_bpp");
-        gptr_audio_channels     = get_gp(gpObj, "w_audio_channels");
-        gptr_audio_write        = get_gp(gpObj, "w_audio_write");
-        gptr_audio_read         = get_gp(gpObj, "w_audio_read");
-        gptr_audio_buffer       = get_gp(gpObj, "w_audio_buffer");
-        gptr_dirty_count        = get_gp(gpObj, "w_dirty_count");
-        gptr_dirty_rects        = get_gp(gpObj, "w_dirty_rects");
+        gptr_width             = get_gp(gpObj, "w_width");
+        gptr_height            = get_gp(gpObj, "w_height");
+        gptr_bpp               = get_gp(gpObj, "w_bpp");
+        gptr_scale             = get_gp(gpObj, "w_scale");
+        gptr_title             = get_gp(gpObj, "w_title");
+        gptr_vram              = get_gp(gpObj, "w_vram");
+        gptr_mouse_x           = get_gp(gpObj, "w_mouse_x");
+        gptr_mouse_y           = get_gp(gpObj, "w_mouse_y");
+        gptr_mouse_buttons     = get_gp(gpObj, "w_mouse_buttons");
+        gptr_mouse_wheel       = get_gp(gpObj, "w_mouse_wheel");
+        gptr_keys              = get_gp(gpObj, "w_keys");
+        gptr_gamepad_buttons   = get_gp(gpObj, "w_gamepad_buttons");
+        gptr_ticks             = get_gp(gpObj, "w_ticks");
+        gptr_audio_size        = get_gp(gpObj, "w_audio_size");
+        gptr_audio_sample_rate = get_gp(gpObj, "w_audio_sample_rate");
+        gptr_audio_bpp         = get_gp(gpObj, "w_audio_bpp");
+        gptr_audio_channels    = get_gp(gpObj, "w_audio_channels");
+        gptr_audio_write       = get_gp(gpObj, "w_audio_write");
+        gptr_audio_read        = get_gp(gpObj, "w_audio_read");
+        gptr_audio_buffer      = get_gp(gpObj, "w_audio_buffer");
+        gptr_dirty_count       = get_gp(gpObj, "w_dirty_count");
+        gptr_dirty_rects       = get_gp(gpObj, "w_dirty_rects");
     }
 
     fprintf(stderr, "Globals: vram=%u  w=%u h=%u bpp=%u scale=%u\n",
             gptr_vram, gptr_width, gptr_height, gptr_bpp, gptr_scale);
 
-    // ---- Set up SDL window / GL / audio from ROM config ----
+    // ---- Set up SDL window / GL / audio from initial ROM config ----
     init_from_globals();
 
     // ============================================================
     // Main loop
     // ============================================================
-    // Previous config values for change detection
-    uint32_t prev_W = W, prev_H = H, prev_BPP = BPP, prev_SCALE = SCALE;
 
-    while (1) {
+    bool running = true;
+    while (running) {
         if (!wasm_memory) { SDL_Delay(1); continue; }
 
-        // ---- Write input into WASM memory via named globals ----
+        // ---- 1. Write input into WASM memory via named globals ----
         mem_u32(gptr_ticks, SDL_GetTicks());
 
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
-            if (ev.type == SDL_QUIT) { break; }
+            if (ev.type == SDL_QUIT) {
+                running = false;
+                break;
+            }
 
+            // Keyboard: USB HID scancodes (SDL scancodes match directly)
             if (ev.type == SDL_KEYDOWN || ev.type == SDL_KEYUP) {
                 if (ev.key.keysym.scancode < 256 && gptr_keys) {
                     wasm_memory[gptr_keys + ev.key.keysym.scancode] =
                         (ev.type == SDL_KEYDOWN) ? 1 : 0;
                 }
             }
+
+            // Mouse motion (with letterbox-aware coordinate conversion)
             if (ev.type == SDL_MOUSEMOTION) {
                 int rx, ry;
                 convert_mouse_coords(ev.motion.x, ev.motion.y, &rx, &ry);
                 mem_i32(gptr_mouse_x, rx);
                 mem_i32(gptr_mouse_y, ry);
             }
+
+            // Mouse buttons (bit0=L, bit1=R)
             if (ev.type == SDL_MOUSEBUTTONDOWN || ev.type == SDL_MOUSEBUTTONUP) {
                 uint32_t btns = mem_u32(gptr_mouse_buttons);
                 if (ev.button.button == SDL_BUTTON_LEFT)
@@ -654,30 +802,34 @@ int main(int argc, char** argv) {
                         ? (btns | 2) : (btns & ~2u);
                 mem_u32(gptr_mouse_buttons, btns);
             }
+
+            // Mouse wheel (accumulated per frame, host resets after consumption)
             if (ev.type == SDL_MOUSEWHEEL) {
                 mem_i32(gptr_mouse_wheel,
                     mem_i32(gptr_mouse_wheel) + ev.wheel.y);
             }
         }
 
-        // ---- Call wupdate() and refresh memory pointer ----
+        if (!running) break;
+
+        // ---- 2. Call wupdate(), exit if 0 ----
+        int32_t keep = 1;
         {
             JSAutoRealm ar(gCx, global);
+            JS::RootedObject g(gCx, gGlobal);
             JS::RootedValue fn(gCx);
-            JS::RootedObject g(gCx, JS::CurrentGlobalOrNull(gCx));
-            int32_t keep = 1;
             if (JS_GetProperty(gCx, g, "__wupdate", &fn) && fn.isObject()) {
                 JS::RootedValue rv(gCx);
                 JS_CallFunctionValue(gCx, g, fn,
                     JS::HandleValueArray::empty(), &rv);
                 if (rv.isInt32()) keep = rv.toInt32();
             }
+            // Memory may grow after wupdate(), refresh pointer
             refresh_memory();
-            if (!keep) break;
         }
-        if (!wasm_memory) { break; }
+        if (!keep || !wasm_memory) break;
 
-        // ---- Auto-detect config changes ----
+        // ---- 3. Read config AFTER wupdate() (ROM may change it) ----
         {
             uint32_t cur_W     = mem_u32(gptr_width);
             uint32_t cur_H     = mem_u32(gptr_height);
@@ -696,14 +848,12 @@ int main(int argc, char** argv) {
             }
         }
 
-        // Clear mouse wheel after consumption
-        mem_i32(gptr_mouse_wheel, 0);
+        // ---- 4. Check audio config changes ----
+        check_audio_config_change();
 
-        // ---- Render dirty rectangles ----
+        // ---- 5. Render dirty rectangles ----
         uint32_t dirty_count = mem_u32(gptr_dirty_count);
         if (dirty_count > 0) {
-            mem_u32(gptr_dirty_count, 0); // consume
-
             set_viewport_with_letterbox();
 
             if (dirty_count == 1 && gptr_dirty_rects) {
@@ -712,6 +862,7 @@ int main(int argc, char** argv) {
                 if (r.x == 0 && r.y == 0 &&
                     (uint32_t)r.w == W && (uint32_t)r.h == H) {
                     if (first_frame) {
+                        // First frame: direct upload without PBO pipeline
                         uint8_t* vram = wasm_memory + gptr_vram;
                         GLenum fmt = (BPP == 8) ? GL_RED :
                                      (BPP == 16) ? GL_RG : GL_RGBA;
@@ -719,7 +870,8 @@ int main(int argc, char** argv) {
                         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
                         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H,
                                         fmt, GL_UNSIGNED_BYTE, vram);
-                        tex_idx = 1; first_frame = 0;
+                        tex_idx = 1;
+                        first_frame = 0;
                         glClear(GL_COLOR_BUFFER_BIT);
                         render_quad(vram_textures[0]);
                         SDL_GL_SwapWindow(window);
@@ -736,7 +888,7 @@ int main(int argc, char** argv) {
             } else if (gptr_dirty_rects) {
                 // Multiple dirty rects: upload each sub-region
                 uint32_t count = dirty_count;
-                if (count > 32) count = 32; // safety cap
+                if (count > 32) count = 32; // safety cap (Rect[32] max)
                 for (uint32_t i = 0; i < count; i++) {
                     Rect r = mem_rect(gptr_dirty_rects, (int)i);
                     upload_dirty_rect(r);
@@ -745,22 +897,34 @@ int main(int argc, char** argv) {
                 render_quad(vram_textures[tex_idx]);
                 SDL_GL_SwapWindow(window);
             }
+            mem_u32(gptr_dirty_count, 0); // consume after rendering
         }
+
+        // ---- 6. Reset mouse wheel after consumption ----
+        mem_i32(gptr_mouse_wheel, 0);
 
         SDL_Delay(1);
     }
 
     // ---- Cleanup ----
-    if (audio_dev) SDL_CloseAudioDevice(audio_dev);
+    if (audio_dev) {
+        SDL_PauseAudioDevice(audio_dev, 1);
+        SDL_CloseAudioDevice(audio_dev);
+    }
     glDeleteBuffers(2, pbos);
     glDeleteTextures(3, vram_textures);
     glDeleteProgram(render_program);
     glDeleteVertexArrays(1, &vao);
     glDeleteBuffers(1, &vbo);
     if (gl_ctx) SDL_GL_DeleteContext(gl_ctx);
-    SDL_DestroyWindow(window);
+    if (window) SDL_DestroyWindow(window);
     SDL_Quit();
+
+    // Release JS global reference
+    gGlobal = nullptr;
+
     JS_DestroyContext(gCx);
     JS_ShutDown();
+
     return 0;
 }

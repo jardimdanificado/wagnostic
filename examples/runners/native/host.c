@@ -1,3 +1,16 @@
+/*
+ * Wagnostic Native Runner — wasm3 + SDL2 host
+ *
+ * Loads a .wasm ROM file, executes its wupdate() function each frame,
+ * and provides video/audio/input services via WASM global ABI.
+ *
+ * ROMs export i32 global pointers into WASM linear memory.
+ * The host reads/writes the pointed-to values each frame.
+ *
+ * Build: see CMakeLists.txt
+ * Usage: wagnostic <rom.wasm>
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,508 +20,908 @@
 #include "m3_env.h"
 #include "m3_api_libc.h"
 
-// strlen for wasm3
+/* ================================================================
+ * wasm3 strlen — imported by ROMs via (import "env" "strlen")
+ * ================================================================ */
+
 m3ApiRawFunction(m3_libc_strlen) {
     m3ApiReturnType(int32_t)
-    m3ApiGetArgMem(const char*, str)
+    m3ApiGetArgMem(const char *, str)
     int32_t len = 0;
-    while (str[len] != 0) len++;
+    if (str) {
+        while (str[len] != '\0')
+            len++;
+    }
     m3ApiReturn(len);
 }
 
-static IM3Module g_module = NULL;
+/* ================================================================
+ * Math primitives — backed by glibc. WASM lowering of sin/cos/exp/
+ * log/pow emits `env.*` imports, resolved here at link time.
+ * ================================================================ */
+#include <math.h>
+
+m3ApiRawFunction(m3_env_sin)   { m3ApiReturnType(double); m3ApiGetArg(double, x); m3ApiReturn(sin(x)); }
+m3ApiRawFunction(m3_env_cos)   { m3ApiReturnType(double); m3ApiGetArg(double, x); m3ApiReturn(cos(x)); }
+m3ApiRawFunction(m3_env_exp)   { m3ApiReturnType(double); m3ApiGetArg(double, x); m3ApiReturn(exp(x)); }
+m3ApiRawFunction(m3_env_log)   { m3ApiReturnType(double); m3ApiGetArg(double, x); m3ApiReturn(log(x)); }
+m3ApiRawFunction(m3_env_pow)   { m3ApiReturnType(double); m3ApiGetArg(double, x); m3ApiGetArg(double, y); m3ApiReturn(pow(x, y)); }
+m3ApiRawFunction(m3_env_ldexp) { m3ApiReturnType(double); m3ApiGetArg(double, x); m3ApiGetArg(int32_t, n); m3ApiReturn(ldexp(x, n)); }
+m3ApiRawFunction(m3_env_fabs)  { m3ApiReturnType(double); m3ApiGetArg(double, x); m3ApiReturn(fabs(x)); }
+m3ApiRawFunction(m3_env_floor) { m3ApiReturnType(double); m3ApiGetArg(double, x); m3ApiReturn(floor(x)); }
+m3ApiRawFunction(m3_env_ceil)  { m3ApiReturnType(double); m3ApiGetArg(double, x); m3ApiReturn(ceil(x)); }
+
+/* ================================================================
+ * Globals
+ * ================================================================ */
+
+static IM3Module  g_module  = NULL;
 static IM3Runtime g_runtime = NULL;
 
-// ============================================
-// Global read/write helpers
-// ============================================
+/* Cached pointers into WASM linear memory (resolved once per frame) */
+static uint8_t *g_mem          = NULL;
+static uint32_t g_mem_len      = 0;
 
-static uint32_t read_u32(const char* name) {
-    IM3Global global = m3_FindGlobal(g_module, name);
-    if (!global) return 0;
-    M3TaggedValue value;
-    if (m3_GetGlobal(global, &value)) return 0;
-    uint32_t ptr = value.value.i32;
-    uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
-    if (!mem) return 0;
-    return *(uint32_t*)(mem + ptr);
+/* Pointer offsets for frequently-used globals */
+static IM3Global g_g_w_vram         = NULL;
+static IM3Global g_g_w_dirty_count  = NULL;
+static IM3Global g_g_w_dirty_rects  = NULL;
+static IM3Global g_g_w_keys         = NULL;
+static IM3Global g_g_w_mouse_x      = NULL;
+static IM3Global g_g_w_mouse_y      = NULL;
+static IM3Global g_g_w_mouse_buttons= NULL;
+static IM3Global g_g_w_mouse_wheel  = NULL;
+static IM3Global g_g_w_gamepad_buttons = NULL;
+static IM3Global g_g_w_ticks        = NULL;
+static IM3Global g_g_w_width        = NULL;
+static IM3Global g_g_w_height       = NULL;
+static IM3Global g_g_w_bpp          = NULL;
+static IM3Global g_g_w_scale        = NULL;
+static IM3Global g_g_w_title        = NULL;
+static IM3Global g_g_w_audio_size   = NULL;
+static IM3Global g_g_w_audio_sample_rate = NULL;
+static IM3Global g_g_w_audio_bpp    = NULL;
+static IM3Global g_g_w_audio_channels = NULL;
+static IM3Global g_g_w_audio_write  = NULL;
+static IM3Global g_g_w_audio_read   = NULL;
+static IM3Global g_g_w_audio_buffer = NULL;
+static IM3Global g_g_w_audio_underrun = NULL;
+static IM3Global g_g_w_audio_overrun  = NULL;
+
+/* Audio buffer lock. The host runs wupdate() in the main thread (which
+ * writes samples into the shared w_audio_buffer via the ROM's fill_audio)
+ * and host_audio_callback() in SDL's audio thread (which reads from the
+ * same buffer). On multi-core systems the two threads can run truly
+ * concurrently, and the audio thread can read a position the main thread
+ * is mid-write — that produces a torn sample, heard as a pop.
+ *
+ * We serialize the two sides with a single mutex. The main thread
+ * acquires it around m3_CallV(f_wupdate) and the audio thread holds
+ * it for the whole callback. Writes are small (<2KB) and complete in
+ * microseconds, so the audio thread is only ever blocked briefly.
+ */
+static SDL_mutex *g_audio_mutex = NULL;
+
+/* ================================================================
+ * Pointer resolution helpers
+ * ================================================================ */
+
+static uint32_t resolve_i32(IM3Global g) {
+    if (!g) return 0;
+    M3TaggedValue v;
+    if (m3_GetGlobal(g, &v)) return 0;
+    return (uint32_t)v.value.i32;
 }
 
-static void write_u32(const char* name, uint32_t val) {
-    IM3Global global = m3_FindGlobal(g_module, name);
-    if (!global) return;
-    M3TaggedValue value;
-    if (m3_GetGlobal(global, &value)) return;
-    uint32_t ptr = value.value.i32;
-    uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
-    if (!mem) return;
-    *(uint32_t*)(mem + ptr) = val;
+/* Resolve the i32 global and return a pointer into linear memory.
+ * Returns NULL if the global or memory is unavailable. */
+static void *resolve_ptr(IM3Global g) {
+    if (!g) return NULL;
+    M3TaggedValue v;
+    if (m3_GetGlobal(g, &v)) return NULL;
+    uint32_t off = (uint32_t)v.value.i32;
+    if (off == 0) return NULL;
+    if (!g_mem) return NULL;
+    return g_mem + off;
 }
 
-static int32_t read_i32(const char* name) {
-    return (int32_t)read_u32(name);
+/* ================================================================
+ * Cached pointer-to-data helpers (avoid repeated resolve_i32)
+ * ================================================================ */
+
+static uint32_t *ptr_u32(IM3Global g) {
+    return (uint32_t *)resolve_ptr(g);
 }
 
-static void write_i32(const char* name, int32_t val) {
-    write_u32(name, (uint32_t)val);
+static int32_t *ptr_i32(IM3Global g) {
+    return (int32_t *)resolve_ptr(g);
 }
 
-static uint8_t read_u8(const char* name) {
-    IM3Global global = m3_FindGlobal(g_module, name);
-    if (!global) return 0;
-    M3TaggedValue value;
-    if (m3_GetGlobal(global, &value)) return 0;
-    uint32_t ptr = value.value.i32;
-    uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
-    if (!mem) return 0;
-    return mem[ptr];
+static uint8_t *ptr_u8(IM3Global g) {
+    return (uint8_t *)resolve_ptr(g);
 }
 
-static void read_str(const char* name, char* dst, int max) {
-    IM3Global global = m3_FindGlobal(g_module, name);
-    if (!global) { dst[0] = '\0'; return; }
-    M3TaggedValue value;
-    if (m3_GetGlobal(global, &value)) { dst[0] = '\0'; return; }
-    uint32_t ptr = value.value.i32;
-    uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
-    if (!mem) { dst[0] = '\0'; return; }
-    strncpy(dst, (char*)(mem + ptr), max - 1);
+/* ================================================================
+ * High-level read/write helpers using cached globals
+ * ================================================================ */
+
+static uint32_t read_u32(IM3Global g) {
+    uint32_t *p = ptr_u32(g);
+    return p ? *p : 0;
+}
+
+static int32_t read_i32(IM3Global g) {
+    int32_t *p = ptr_i32(g);
+    return p ? *p : 0;
+}
+
+static void write_u32(IM3Global g, uint32_t val) {
+    uint32_t *p = ptr_u32(g);
+    if (p) *p = val;
+}
+
+static void write_i32(IM3Global g, int32_t val) {
+    int32_t *p = ptr_i32(g);
+    if (p) *p = val;
+}
+
+static void read_str(IM3Global g, char *dst, int max) {
+    if (!g || !dst || max <= 0) { if (dst) dst[0] = '\0'; return; }
+    M3TaggedValue v;
+    if (m3_GetGlobal(g, &v)) { dst[0] = '\0'; return; }
+    uint32_t off = (uint32_t)v.value.i32;
+    if (off == 0 || !g_mem) { dst[0] = '\0'; return; }
+    const char *src = (const char *)(g_mem + off);
+    strncpy(dst, src, max - 1);
     dst[max - 1] = '\0';
 }
 
-// Read dirty rect by index
-static void read_dirty_rect(int idx, int* x, int* y, int* w, int* h) {
-    IM3Global global = m3_FindGlobal(g_module, "w_dirty_rects");
-    if (!global) { *x = *y = *w = *h = 0; return; }
-    M3TaggedValue value;
-    if (m3_GetGlobal(global, &value)) { *x = *y = *w = *h = 0; return; }
-    uint32_t ptr = value.value.i32;
-    uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
-    if (!mem) { *x = *y = *w = *h = 0; return; }
-    uint32_t* rect = (uint32_t*)(mem + ptr + idx * 16);
-    *x = (int)rect[0];
-    *y = (int)rect[1];
-    *w = (int)rect[2];
-    *h = (int)rect[3];
+/* ================================================================
+ * Dirty rect reading
+ * ================================================================ */
+
+/* Each dirty rect is 4 x i32 = 16 bytes: {x, y, w, h} */
+static void read_dirty_rect(int idx, int *rx, int *ry, int *rw, int *rh) {
+    uint8_t *base = ptr_u8(g_g_w_dirty_rects);
+    if (!base) { *rx = *ry = *rw = *rh = 0; return; }
+    int32_t *r = (int32_t *)(base + idx * 16);
+    *rx = r[0]; *ry = r[1]; *rw = r[2]; *rh = r[3];
 }
 
-// ============================================
-// Audio callback
-// ============================================
+/* ================================================================
+ * Cache all global pointers from the module
+ * ================================================================ */
 
-static void host_audio_callback(void* userdata, Uint8* stream_ptr, int len_bytes) {
-    float* stream = (float*)stream_ptr;
-    int ns = len_bytes / (int)sizeof(float);
+static void cache_globals(void) {
+    g_g_w_vram          = m3_FindGlobal(g_module, "w_vram");
+    g_g_w_dirty_count   = m3_FindGlobal(g_module, "w_dirty_count");
+    g_g_w_dirty_rects   = m3_FindGlobal(g_module, "w_dirty_rects");
+    g_g_w_keys          = m3_FindGlobal(g_module, "w_keys");
+    g_g_w_mouse_x       = m3_FindGlobal(g_module, "w_mouse_x");
+    g_g_w_mouse_y       = m3_FindGlobal(g_module, "w_mouse_y");
+    g_g_w_mouse_buttons = m3_FindGlobal(g_module, "w_mouse_buttons");
+    g_g_w_mouse_wheel   = m3_FindGlobal(g_module, "w_mouse_wheel");
+    g_g_w_gamepad_buttons = m3_FindGlobal(g_module, "w_gamepad_buttons");
+    g_g_w_ticks         = m3_FindGlobal(g_module, "w_ticks");
+    g_g_w_width         = m3_FindGlobal(g_module, "w_width");
+    g_g_w_height        = m3_FindGlobal(g_module, "w_height");
+    g_g_w_bpp           = m3_FindGlobal(g_module, "w_bpp");
+    g_g_w_scale         = m3_FindGlobal(g_module, "w_scale");
+    g_g_w_title         = m3_FindGlobal(g_module, "w_title");
+    g_g_w_audio_size       = m3_FindGlobal(g_module, "w_audio_size");
+    g_g_w_audio_sample_rate= m3_FindGlobal(g_module, "w_audio_sample_rate");
+    g_g_w_audio_bpp        = m3_FindGlobal(g_module, "w_audio_bpp");
+    g_g_w_audio_channels   = m3_FindGlobal(g_module, "w_audio_channels");
+    g_g_w_audio_write      = m3_FindGlobal(g_module, "w_audio_write");
+    g_g_w_audio_read       = m3_FindGlobal(g_module, "w_audio_read");
+    g_g_w_audio_buffer     = m3_FindGlobal(g_module, "w_audio_buffer");
+    g_g_w_audio_underrun   = m3_FindGlobal(g_module, "w_audio_underrun");
+    g_g_w_audio_overrun    = m3_FindGlobal(g_module, "w_audio_overrun");
+}
 
-    uint32_t r = read_u32("w_audio_read");
-    uint32_t w = read_u32("w_audio_write");
-    uint32_t size = read_u32("w_audio_size");
-    uint32_t bpp = read_u32("w_audio_bpp");
+/* ================================================================
+ * Audio callback (runs on SDL audio thread)
+ *
+ * RULES FOR ROM AUTHORS (prevents race conditions):
+ *   1. Write samples into w_audio_buffer FIRST
+ *   2. THEN update w_audio_write ONCE, at the very end
+ *   3. NEVER read w_audio_write while writing samples
+ *   4. NEVER read w_audio_read (host owns it)
+ *   5. Use the provided fill_audio_buffer() helper — it follows all rules
+ *
+ * RULES FOR HOST AUTHORS:
+ *   1. Read w_audio_write ONCE at the start of the callback
+ *   2. Process all samples
+ *   3. Write w_audio_read ONCE at the very end
+ *   4. NEVER write to w_audio_write (ROM owns it)
+ *   5. NEVER read w_audio_read from another thread
+ * ================================================================ */
 
-    if (size == 0) return;
+static void host_audio_callback(void *userdata, Uint8 *stream_ptr, int len_bytes) {
+    (void)userdata;
+    float *stream = (float *)stream_ptr;
+    int nsamples  = len_bytes / (int)sizeof(float);
 
-    // Get audio buffer pointer from global
-    IM3Global buf_global = m3_FindGlobal(g_module, "w_audio_buffer");
-    if (!buf_global) return;
-    M3TaggedValue buf_val;
-    if (m3_GetGlobal(buf_global, &buf_val)) return;
-    uint32_t buf_ptr = buf_val.value.i32;
-    if (buf_ptr == 0) return;
-    
-    uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
-    if (!mem) return;
-    uint8_t* audio_buf = mem + buf_ptr;
+    /* Block the main thread from writing the audio buffer while we read
+     * it. See g_audio_mutex declaration for the full rationale. */
+    if (g_audio_mutex) SDL_LockMutex(g_audio_mutex);
 
-    for (int i = 0; i < ns; i++) {
-        if (r == w) { stream[i] = 0.0f; continue; }
-        float sample = 0;
+    /* ---- Step 1: Read pointers ONCE (snapshot) ---- */
+    uint32_t size  = read_u32(g_g_w_audio_size);
+    uint32_t bpp   = read_u32(g_g_w_audio_bpp);
+    uint32_t r_off = read_u32(g_g_w_audio_read);
+    uint32_t w_off = read_u32(g_g_w_audio_write);
+
+    uint8_t *abuf = ptr_u8(g_g_w_audio_buffer);
+
+    /* ---- Step 2: Validate everything ---- */
+    if (!abuf || size == 0 || bpp == 0 || bpp > 4) {
+        memset(stream, 0, len_bytes);
+        return;
+    }
+
+    /* Clamp pointers to valid range */
+    if (r_off >= size) r_off = 0;
+    if (w_off >= size) w_off = 0;
+
+    /* ---- Step 3: Calculate available bytes ---- */
+    /* Buffer uses size-1 usable slots: when r==w it means EMPTY.
+     * When (w+1)%size==r it means FULL. This avoids the ambiguity
+     * of r==w meaning both empty and full. */
+    uint32_t avail;
+    if (w_off >= r_off)
+        avail = w_off - r_off;
+    else
+        avail = size - r_off + w_off;
+
+    /* ---- Step 4: Read samples, handle wrap-around ----
+     *
+     * max_bytes must be capped at what the audio actually consumes
+     * (nsamples * bpp), NOT at the f32 output size (nsamples * 4).
+     * Otherwise r_off advances by the f32-equivalent bytes while only
+     * bpp bytes per sample are read, and the read pointer drifts past
+     * the audio's true position in the buffer. After a few callbacks
+     * the audio is reading samples from a half-period away in the
+     * looping pcm — heard as a 180° phase flip / pop at every callback
+     * boundary. */
+    uint32_t bytes_per_sample = bpp;
+    uint32_t max_bytes = avail;
+    uint32_t stream_bytes = (uint32_t)nsamples * bpp;
+    if (max_bytes > stream_bytes) max_bytes = stream_bytes;
+
+    /* Round down to whole samples */
+    max_bytes = (max_bytes / bytes_per_sample) * bytes_per_sample;
+
+    uint32_t bytes_read = 0;
+    int stream_idx = 0;
+
+    while (bytes_read < max_bytes && stream_idx < nsamples) {
+        uint32_t chunk = max_bytes - bytes_read;
+        uint32_t pos = (r_off + bytes_read) % size;
+
+        /* Clamp chunk to end of buffer (wrap-around boundary) */
+        uint32_t to_end = size - pos;
+        if (chunk > to_end) chunk = to_end;
+
+        /* Convert samples in this chunk */
         if (bpp == 1) {
-            sample = (audio_buf[r] - 128) / 128.0f;
-            r = (r + 1) % size;
+            /* u8: unsigned 8-bit, centre at 128 */
+            for (uint32_t b = 0; b < chunk && stream_idx < nsamples; b++) {
+                stream[stream_idx++] = ((float)abuf[pos + b] - 128.0f) / 128.0f;
+            }
         } else if (bpp == 2) {
-            sample = (*(int16_t*)(audio_buf + r)) / 32768.0f;
-            r = (r + 2) % size;
-        } else if (bpp == 4) {
-            sample = (*(float*)(audio_buf + r));
-            r = (r + 4) % size;
+            /* s16 little-endian */
+            for (uint32_t b = 0; b + 1 < chunk && stream_idx < nsamples; b += 2) {
+                int16_t s16;
+                memcpy(&s16, abuf + pos + b, 2);
+                stream[stream_idx++] = (float)s16 / 32768.0f;
+            }
+        } else {
+            /* bpp == 4: f32 */
+            for (uint32_t b = 0; b + 3 < chunk && stream_idx < nsamples; b += 4) {
+                float sample;
+                memcpy(&sample, abuf + pos + b, 4);
+                stream[stream_idx++] = sample;
+            }
         }
-        stream[i] = sample;
-    }
-    write_u32("w_audio_read", r);
-}
 
-// ============================================
-// Mouse coordinate conversion
-// ============================================
-
-static void convert_mouse_coords(int window_x, int window_y, int* rom_x, int* rom_y, SDL_Window* window) {
-    int win_w, win_h;
-    SDL_GetWindowSize(window, &win_w, &win_h);
-
-    uint32_t W = read_u32("w_width");
-    uint32_t H = read_u32("w_height");
-    if (W == 0) W = 320; if (H == 0) H = 240;
-
-    float aspect_rom = (float)W / (float)H;
-    float aspect_win = (float)win_w / (float)win_h;
-
-    int dst_x, dst_y, dst_w, dst_h;
-    if (aspect_win > aspect_rom) {
-        dst_h = win_h;
-        dst_w = (int)(win_h * aspect_rom);
-        dst_x = (win_w - dst_w) / 2;
-        dst_y = 0;
-    } else {
-        dst_w = win_w;
-        dst_h = (int)(win_w / aspect_rom);
-        dst_x = 0;
-        dst_y = (win_h - dst_h) / 2;
+        bytes_read += chunk;
     }
 
-    float scale_x = (float)W / dst_w;
-    float scale_y = (float)H / dst_h;
+    /* ---- Step 5: Fill remaining with silence ---- */
+    int underrun = (stream_idx < nsamples);
+    for (int i = stream_idx; i < nsamples; i++) {
+        stream[i] = 0.0f;
+    }
 
-    *rom_x = (int)((window_x - dst_x) * scale_x);
-    *rom_y = (int)((window_y - dst_y) * scale_y);
+    /* ---- Step 6: Write read pointer ONCE ---- */
+    if (bytes_read > 0) {
+        write_u32(g_g_w_audio_read, (r_off + bytes_read) % size);
+    }
 
-    if (*rom_x < 0) *rom_x = 0;
-    if (*rom_x >= (int)W) *rom_x = W - 1;
-    if (*rom_y < 0) *rom_y = 0;
-    if (*rom_y >= (int)H) *rom_y = H - 1;
+    /* ---- Step 7: Update underrun counter ---- */
+    if (underrun) {
+        uint32_t ur = read_u32(g_g_w_audio_underrun);
+        write_u32(g_g_w_audio_underrun, ur + 1);
+    }
+
+    /* Release the audio buffer lock so the main thread can write again. */
+    if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
 }
 
-// ============================================
-// Render VRAM region to texture
-// ============================================
+/* ================================================================
+ * Pixel conversion helpers
+ * ================================================================ */
 
-static void render_rect_to_texture(SDL_Texture* texture, uint8_t* vram, int rx, int ry, int rw, int rh, uint32_t W, uint32_t H, uint32_t BPP) {
-    void* pixels;
+static inline uint32_t rgb332_to_abgr8888(uint8_t p) {
+    uint32_t r = ((p >> 5) & 0x07) * 255 / 7;
+    uint32_t g = ((p >> 2) & 0x07) * 255 / 7;
+    uint32_t b = (p & 0x03) * 255 / 3;
+    return 0xFF000000u | (b << 16) | (g << 8) | r;
+}
+
+static inline uint32_t rgb565_to_abgr8888(uint16_t p) {
+    uint32_t r = ((p >> 11) & 0x1F) * 255 / 31;
+    uint32_t g = ((p >> 5) & 0x3F) * 255 / 63;
+    uint32_t b = (p & 0x1F) * 255 / 31;
+    return 0xFF000000u | (b << 16) | (g << 8) | r;
+}
+
+/* 32bpp RGBA8888 is already in ABGR8888 memory layout — direct copy */
+
+/* ================================================================
+ * Render a rect from VRAM to the SDL texture
+ * ================================================================ */
+
+static void render_rect_to_texture(SDL_Texture *texture, uint8_t *vram,
+                                   int rx, int ry, int rw, int rh,
+                                   uint32_t W, uint32_t H, uint32_t BPP) {
+    /* Clamp rect to screen bounds */
+    if (rx < 0) { rw += rx; rx = 0; }
+    if (ry < 0) { rh += ry; ry = 0; }
+    if (rx + rw > (int)W) rw = (int)W - rx;
+    if (ry + rh > (int)H) rh = (int)H - ry;
+    if (rw <= 0 || rh <= 0) return;
+
+    SDL_Rect sdl_rect = { rx, ry, rw, rh };
+    void *pixels;
     int pitch;
-    SDL_LockTexture(texture, NULL, &pixels, &pitch);
+    SDL_LockTexture(texture, &sdl_rect, &pixels, &pitch);
 
-    if (BPP == 16) {
-        uint16_t* src = (uint16_t*)vram;
-        uint32_t* dst = (uint32_t*)pixels;
-        for (int y = ry; y < ry + rh && y < (int)H; y++) {
-            for (int x = rx; x < rx + rw && x < (int)W; x++) {
-                uint16_t p = src[y * W + x];
-                uint32_t r = ((p >> 11) & 0x1F) * 255 / 31;
-                uint32_t g = ((p >> 5) & 0x3F) * 255 / 63;
-                uint32_t b = (p & 0x1F) * 255 / 31;
-                dst[y * W + x] = 0xFF000000 | (b << 16) | (g << 8) | r;
+    if (BPP == 8) {
+        for (int y = ry; y < ry + rh; y++) {
+            uint8_t  *src = vram + y * W + rx;
+            uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
+            for (int x = 0; x < rw; x++) {
+                dst[x] = rgb332_to_abgr8888(src[x]);
+            }
+        }
+    } else if (BPP == 16) {
+        for (int y = ry; y < ry + rh; y++) {
+            uint16_t *src = (uint16_t *)(vram + (y * W + rx) * 2);
+            uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
+            for (int x = 0; x < rw; x++) {
+                dst[x] = rgb565_to_abgr8888(src[x]);
             }
         }
     } else if (BPP == 32) {
-        uint32_t* src = (uint32_t*)vram;
-        uint32_t* dst = (uint32_t*)pixels;
-        for (int y = ry; y < ry + rh && y < (int)H; y++) {
-            memcpy(&dst[y * W + rx], &src[y * W + rx], rw * 4);
-        }
-    } else if (BPP == 8) {
-        uint8_t* src = vram;
-        uint32_t* dst = (uint32_t*)pixels;
-        for (int y = ry; y < ry + rh && y < (int)H; y++) {
-            for (int x = rx; x < rx + rw && x < (int)W; x++) {
-                uint8_t p = src[y * W + x];
-                uint32_t r = ((p >> 5) & 0x07) * 255 / 7;
-                uint32_t g = ((p >> 2) & 0x07) * 255 / 7;
-                uint32_t b = (p & 0x03) * 255 / 3;
-                dst[y * W + x] = 0xFF000000 | (b << 16) | (g << 8) | r;
-            }
+        for (int y = ry; y < ry + rh; y++) {
+            uint8_t  *src = vram + (y * W + rx) * 4;
+            uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
+            memcpy(dst, src, rw * 4);
         }
     }
 
     SDL_UnlockTexture(texture);
 }
 
-// ============================================
-// Main
-// ============================================
+/* ================================================================
+ * Full-screen bulk copy (fast path)
+ * ================================================================ */
 
-int main(int argc, char** argv) {
+static void render_fullscreen(SDL_Texture *texture, uint8_t *vram,
+                              uint32_t W, uint32_t H, uint32_t BPP) {
+    void *pixels;
+    int pitch;
+    SDL_LockTexture(texture, NULL, &pixels, &pitch);
+
+    if (BPP == 8) {
+        uint8_t  *src = vram;
+        uint32_t *dst = (uint32_t *)pixels;
+        uint32_t total = W * H;
+        for (uint32_t i = 0; i < total; i++) {
+            dst[i] = rgb332_to_abgr8888(src[i]);
+        }
+    } else if (BPP == 16) {
+        uint16_t *src = (uint16_t *)vram;
+        uint32_t *dst = (uint32_t *)pixels;
+        uint32_t total = W * H;
+        for (uint32_t i = 0; i < total; i++) {
+            dst[i] = rgb565_to_abgr8888(src[i]);
+        }
+    } else if (BPP == 32) {
+        /* Direct memcpy — 32bpp ROM format matches ABGR8888 layout */
+        memcpy(pixels, vram, W * H * 4);
+    }
+
+    SDL_UnlockTexture(texture);
+}
+
+/* ================================================================
+ * Aspect-ratio-correct letterbox calculation
+ * ================================================================ */
+
+static void calc_letterbox(int win_w, int win_h, uint32_t W, uint32_t H,
+                           SDL_Rect *dst) {
+    float aspect_rom = (float)W / (float)H;
+    float aspect_win = (float)win_w / (float)win_h;
+
+    if (aspect_win > aspect_rom) {
+        /* Window is wider than ROM — pillarbox */
+        dst->h = win_h;
+        dst->w = (int)(win_h * aspect_rom);
+        dst->x = (win_w - dst->w) / 2;
+        dst->y = 0;
+    } else {
+        /* Window is taller than ROM — letterbox */
+        dst->w = win_w;
+        dst->h = (int)(win_w / aspect_rom);
+        dst->x = 0;
+        dst->y = (win_h - dst->h) / 2;
+    }
+}
+
+/* ================================================================
+ * Mouse coordinate conversion: window space → ROM space
+ * ================================================================ */
+
+static void convert_mouse_coords(int wx, int wy, int *rx, int *ry,
+                                 int win_w, int win_h, uint32_t W, uint32_t H) {
+    SDL_Rect dst;
+    calc_letterbox(win_w, win_h, W, H, &dst);
+
+    /* Map window coords into ROM pixel coords */
+    float scale_x = (float)W / (float)dst.w;
+    float scale_y = (float)H / (float)dst.h;
+
+    *rx = (int)((wx - dst.x) * scale_x);
+    *ry = (int)((wy - dst.y) * scale_y);
+
+    /* Clamp to ROM bounds */
+    if (*rx < 0) *rx = 0;
+    if (*rx >= (int)W) *rx = (int)W - 1;
+    if (*ry < 0) *ry = 0;
+    if (*ry >= (int)H) *ry = (int)H - 1;
+}
+
+/* ================================================================
+ * Resolve the runtime memory base pointer
+ * ================================================================ */
+
+static void refresh_memory(void) {
+    g_mem = m3_GetMemory(g_runtime, &g_mem_len, 0);
+}
+
+/* ================================================================
+ * Read screen configuration with defaults
+ * ================================================================ */
+
+static void read_screen_config(uint32_t *W, uint32_t *H, uint32_t *BPP, uint32_t *SCALE) {
+    *W     = read_u32(g_g_w_width);
+    *H     = read_u32(g_g_w_height);
+    *BPP   = read_u32(g_g_w_bpp);
+    *SCALE = read_u32(g_g_w_scale);
+    if (*W == 0)     *W = 320;
+    if (*H == 0)     *H = 240;
+    if (*BPP == 0)   *BPP = 16;
+    if (*SCALE == 0) *SCALE = 1;
+}
+
+/* ================================================================
+ * main
+ * ================================================================ */
+
+int main(int argc, char **argv) {
     if (argc < 2) {
-        printf("Usage: %s <rom.wasm>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <rom.wasm>\n", argv[0]);
         return 1;
     }
 
-    FILE* f = fopen(argv[1], "rb");
+    /* ---- Load WASM binary ---- */
+    FILE *f = fopen(argv[1], "rb");
     if (!f) { perror("Failed to open ROM"); return 1; }
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
     fseek(f, 0, SEEK_SET);
-    uint8_t* wasm_data = malloc(sz);
+    uint8_t *wasm_data = (uint8_t *)malloc(sz);
+    if (!wasm_data) { fprintf(stderr, "Out of memory\n"); fclose(f); return 1; }
     fread(wasm_data, 1, sz, f);
     fclose(f);
 
+    /* ---- Initialize wasm3 ---- */
     IM3Environment env = m3_NewEnvironment();
-    g_runtime = m3_NewRuntime(env, 64*1024*1024, NULL);
-    m3_ParseModule(env, &g_module, wasm_data, sz);
-    m3_LoadModule(g_runtime, g_module);
-    m3_LinkLibC(g_module);
+    if (!env) { fprintf(stderr, "m3_NewEnvironment failed\n"); free(wasm_data); return 1; }
 
-    // Link strlen
-    {
-        static const char* env_name = "env";
-        M3Result lr = m3_LinkRawFunction(g_module, env_name, "strlen", "i(i)", &m3_libc_strlen);
-        if (lr) fprintf(stderr, "Warning: strlen link failed: %s\n", lr);
-    }
+    g_runtime = m3_NewRuntime(env, 64 * 1024 * 1024, NULL);
+    if (!g_runtime) { fprintf(stderr, "m3_NewRuntime failed\n"); m3_FreeEnvironment(env); free(wasm_data); return 1; }
 
-    IM3Function f_upd = NULL;
-    m3_FindFunction(&f_upd, g_runtime, "wupdate");
+    M3Result result = m3_ParseModule(env, &g_module, wasm_data, sz);
+    if (result) { fprintf(stderr, "Parse error: %s\n", result); m3_FreeRuntime(g_runtime); m3_FreeEnvironment(env); free(wasm_data); return 1; }
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
-        fprintf(stderr, "SDL init failed: %s\n", SDL_GetError());
+    result = m3_LoadModule(g_runtime, g_module);
+    if (result) { fprintf(stderr, "Load error: %s\n", result); m3_FreeRuntime(g_runtime); m3_FreeEnvironment(env); free(wasm_data); return 1; }
+
+    result = m3_LinkLibC(g_module);
+    if (result) fprintf(stderr, "Warning: m3_LinkLibC: %s\n", result);
+
+    /* Link strlen into "env" module */
+    result = m3_LinkRawFunction(g_module, "env", "strlen", "i(i)", &m3_libc_strlen);
+    if (result) fprintf(stderr, "Warning: strlen link: %s\n", result);
+
+    /* Math primitives — provided by glibc. OGG ROMs (stb_vorbis) need
+     * these for the inverse MDCT; MP3/WAV ROMs do not import them.
+     * Note: 'i' (lowercase) = i32, 'I' = i64. */
+    result = m3_LinkRawFunction(g_module, "env", "sin",   "F(F)",  &m3_env_sin);   if (result) {}
+    result = m3_LinkRawFunction(g_module, "env", "cos",   "F(F)",  &m3_env_cos);   if (result) {}
+    result = m3_LinkRawFunction(g_module, "env", "exp",   "F(F)",  &m3_env_exp);   if (result) {}
+    result = m3_LinkRawFunction(g_module, "env", "log",   "F(F)",  &m3_env_log);   if (result) {}
+    result = m3_LinkRawFunction(g_module, "env", "pow",   "F(FF)", &m3_env_pow);   if (result) {}
+    result = m3_LinkRawFunction(g_module, "env", "ldexp", "F(Fi)", &m3_env_ldexp); if (result) {}
+    result = m3_LinkRawFunction(g_module, "env", "fabs",  "F(F)",  &m3_env_fabs);  if (result) {}
+    result = m3_LinkRawFunction(g_module, "env", "floor", "F(F)",  &m3_env_floor); if (result) {}
+    result = m3_LinkRawFunction(g_module, "env", "ceil",  "F(F)",  &m3_env_ceil);  if (result) {}
+
+    /* ---- Find wupdate ---- */
+    IM3Function f_wupdate = NULL;
+    result = m3_FindFunction(&f_wupdate, g_runtime, "wupdate");
+    if (result || !f_wupdate) {
+        fprintf(stderr, "ROM does not export wupdate(): %s\n", result ? result : "not found");
+        m3_FreeRuntime(g_runtime); m3_FreeEnvironment(env); free(wasm_data);
         return 1;
     }
 
-    // Read config from globals (set by ROM's initializers)
-    uint32_t W = read_u32("w_width");
-    uint32_t H = read_u32("w_height");
-    uint32_t BPP = read_u32("w_bpp");
-    uint32_t SCALE = read_u32("w_scale");
-    if (W == 0) W = 320; if (H == 0) H = 240; if (BPP == 0) BPP = 16; if (SCALE == 0) SCALE = 1;
+    /* ---- Cache all global pointers ---- */
+    cache_globals();
+
+    /* ---- Refresh WASM memory ---- */
+    refresh_memory();
+
+    /* ---- Initialize SDL ---- */
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) < 0) {
+        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+        m3_FreeRuntime(g_runtime); m3_FreeEnvironment(env); free(wasm_data);
+        return 1;
+    }
+
+    /* Audio buffer mutex — created after SDL_Init so SDL_CreateMutex
+     * is available; checked in the callback for NULL so an early audio
+     * callback (before we get here) just runs without locking. */
+    g_audio_mutex = SDL_CreateMutex();
+    if (!g_audio_mutex) {
+        fprintf(stderr, "SDL_CreateMutex failed: %s\n", SDL_GetError());
+        SDL_Quit(); m3_FreeRuntime(g_runtime); m3_FreeEnvironment(env); free(wasm_data);
+        return 1;
+    }
+
+    /* ---- Read initial config ---- */
+    uint32_t W, H, BPP, SCALE;
+    read_screen_config(&W, &H, &BPP, &SCALE);
 
     char title[128];
-    read_str("w_title", title, 128);
+    read_str(g_g_w_title, title, 128);
 
-    SDL_Window* window = SDL_CreateWindow(title[0] ? title : "Wagnostic",
+    /* ---- Create window ---- */
+    SDL_Window *window = SDL_CreateWindow(
+        title[0] ? title : "Wagnostic",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        W * SCALE, H * SCALE, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
-    if (!window) { fprintf(stderr, "Window failed: %s\n", SDL_GetError()); return 1; }
+        (int)(W * SCALE), (int)(H * SCALE),
+        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+    if (!window) {
+        fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
+        SDL_Quit(); m3_FreeRuntime(g_runtime); m3_FreeEnvironment(env); free(wasm_data);
+        return 1;
+    }
 
-    SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!renderer) renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    /* ---- Create renderer (HW accel + vsync, fallback to software) ---- */
+    SDL_Renderer *renderer = SDL_CreateRenderer(window, -1,
+        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!renderer) {
+        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    }
+    if (!renderer) {
+        fprintf(stderr, "SDL_CreateRenderer failed: %s\n", SDL_GetError());
+        SDL_DestroyWindow(window); SDL_Quit();
+        m3_FreeRuntime(g_runtime); m3_FreeEnvironment(env); free(wasm_data);
+        return 1;
+    }
 
-    SDL_Texture* texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888,
-        SDL_TEXTUREACCESS_STREAMING, W, H);
+    /* ---- Create texture ---- */
+    SDL_Texture *texture = SDL_CreateTexture(renderer,
+        SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
+        (int)W, (int)H);
     SDL_SetTextureScaleMode(texture, SDL_ScaleModeNearest);
 
-    // Audio setup
+    /* ---- Audio device ---- */
     SDL_AudioDeviceID audio_dev = 0;
-    uint32_t audio_size = read_u32("w_audio_size");
-    if (audio_size > 0) {
+    uint32_t prev_audio_size     = read_u32(g_g_w_audio_size);
+    uint32_t prev_audio_rate     = read_u32(g_g_w_audio_sample_rate);
+    uint32_t prev_audio_bpp      = read_u32(g_g_w_audio_bpp);
+    uint32_t prev_audio_channels = read_u32(g_g_w_audio_channels);
+
+    if (prev_audio_size > 0) {
         SDL_AudioSpec wanted;
         SDL_zero(wanted);
-        wanted.freq = read_u32("w_audio_sample_rate");
-        if (wanted.freq == 0) wanted.freq = 44100;
-        wanted.format = AUDIO_F32;
-        wanted.channels = read_u32("w_audio_channels");
-        if (wanted.channels == 0) wanted.channels = 1;
-        wanted.samples = 1024;
+        wanted.freq     = prev_audio_rate ? prev_audio_rate : 44100;
+        wanted.format   = AUDIO_F32;
+        wanted.channels = prev_audio_channels ? prev_audio_channels : 1;
+        wanted.samples  = 1024;
         wanted.callback = host_audio_callback;
         audio_dev = SDL_OpenAudioDevice(NULL, 0, &wanted, NULL, 0);
         if (audio_dev) SDL_PauseAudioDevice(audio_dev, 0);
     }
 
-    // Previous config for change detection
+    /* ---- Track previous config for change detection ---- */
     uint32_t prev_W = W, prev_H = H, prev_BPP = BPP, prev_SCALE = SCALE;
-    uint32_t prev_audio_size = audio_size;
-    uint32_t prev_audio_rate = read_u32("w_audio_sample_rate");
-    uint32_t prev_audio_bpp = read_u32("w_audio_bpp");
-    uint32_t prev_audio_channels = read_u32("w_audio_channels");
+    uint8_t keys_state[256];
+    memset(keys_state, 0, sizeof(keys_state));
+
+    uint32_t mouse_buttons = 0;
+    int      mouse_x = 0, mouse_y = 0;
+    int      mouse_wheel = 0;
+    uint32_t gamepad_buttons = 0;
+
+    /* ================================================================
+     * Main loop
+     * ================================================================ */
 
     int running = 1;
     while (running) {
-        // Call wupdate — returns 0 to quit
-        int32_t keep = 1;
-        if (f_upd) {
-            m3_CallV(f_upd);
-            m3_GetResultsV(f_upd, &keep);
-        }
-        if (!keep) running = 0;
 
+        /* ---- Poll SDL events ---- */
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
-            if (ev.type == SDL_QUIT) running = 0;
-            if (ev.type == SDL_KEYDOWN || ev.type == SDL_KEYUP) {
+            switch (ev.type) {
+            case SDL_QUIT:
+                running = 0;
+                break;
+
+            case SDL_KEYDOWN:
+            case SDL_KEYUP:
                 if (ev.key.keysym.scancode < 256) {
-                    IM3Global keys_global = m3_FindGlobal(g_module, "w_keys");
-                    if (keys_global) {
-                        M3TaggedValue kv;
-                        if (!m3_GetGlobal(keys_global, &kv)) {
-                            uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
-                            if (mem && kv.value.i32) {
-                                mem[kv.value.i32 + ev.key.keysym.scancode] = (ev.type == SDL_KEYDOWN) ? 1 : 0;
-                            }
-                        }
-                    }
+                    keys_state[ev.key.keysym.scancode] =
+                        (ev.type == SDL_KEYDOWN) ? 1 : 0;
                 }
+                break;
+
+            case SDL_MOUSEMOTION: {
+                int win_w, win_h;
+                SDL_GetWindowSize(window, &win_w, &win_h);
+                convert_mouse_coords(ev.motion.x, ev.motion.y,
+                                     &mouse_x, &mouse_y,
+                                     win_w, win_h, W, H);
+                break;
             }
-            if (ev.type == SDL_MOUSEMOTION) {
-                int rx, ry;
-                convert_mouse_coords(ev.motion.x, ev.motion.y, &rx, &ry, window);
-                write_i32("w_mouse_x", rx);
-                write_i32("w_mouse_y", ry);
+
+            case SDL_MOUSEBUTTONDOWN:
+            case SDL_MOUSEBUTTONUP: {
+                int pressed = (ev.type == SDL_MOUSEBUTTONDOWN);
+                if (ev.button.button == SDL_BUTTON_LEFT) {
+                    if (pressed) mouse_buttons |= 1; else mouse_buttons &= ~1u;
+                } else if (ev.button.button == SDL_BUTTON_RIGHT) {
+                    if (pressed) mouse_buttons |= 2; else mouse_buttons &= ~2u;
+                }
+                break;
             }
-            if (ev.type == SDL_MOUSEBUTTONDOWN || ev.type == SDL_MOUSEBUTTONUP) {
-                uint32_t buttons = read_u32("w_mouse_buttons");
-                if (ev.button.button == SDL_BUTTON_LEFT)
-                    buttons = (ev.type == SDL_MOUSEBUTTONDOWN) ? (buttons | 1) : (buttons & ~1);
-                if (ev.button.button == SDL_BUTTON_RIGHT)
-                    buttons = (ev.type == SDL_MOUSEBUTTONDOWN) ? (buttons | 2) : (buttons & ~2);
-                write_u32("w_mouse_buttons", buttons);
+
+            case SDL_MOUSEWHEEL:
+                mouse_wheel += ev.wheel.y;
+                break;
+
+            case SDL_CONTROLLERBUTTONDOWN:
+            case SDL_CONTROLLERBUTTONUP: {
+                int pressed = (ev.type == SDL_CONTROLLERBUTTONDOWN);
+                SDL_GameControllerButton btn = ev.cbutton.button;
+                uint32_t mask = 0;
+                switch (btn) {
+                    case SDL_CONTROLLER_BUTTON_A:      mask = 0x0001; break;
+                    case SDL_CONTROLLER_BUTTON_B:      mask = 0x0002; break;
+                    case SDL_CONTROLLER_BUTTON_X:      mask = 0x0004; break;
+                    case SDL_CONTROLLER_BUTTON_Y:      mask = 0x0008; break;
+                    case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:  mask = 0x0010; break;
+                    case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: mask = 0x0020; break;
+                    case SDL_CONTROLLER_BUTTON_BACK:   mask = 0x0040; break;
+                    case SDL_CONTROLLER_BUTTON_START:  mask = 0x0080; break;
+                    case SDL_CONTROLLER_BUTTON_LEFTSTICK:  mask = 0x0100; break;
+                    case SDL_CONTROLLER_BUTTON_RIGHTSTICK: mask = 0x0200; break;
+                    case SDL_CONTROLLER_BUTTON_DPAD_UP:    mask = 0x0400; break;
+                    case SDL_CONTROLLER_BUTTON_DPAD_DOWN:  mask = 0x0800; break;
+                    case SDL_CONTROLLER_BUTTON_DPAD_LEFT:  mask = 0x1000; break;
+                    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: mask = 0x2000; break;
+                    default: break;
+                }
+                if (mask) {
+                    if (pressed) gamepad_buttons |= mask;
+                    else         gamepad_buttons &= ~mask;
+                }
+                break;
             }
-            if (ev.type == SDL_MOUSEWHEEL) {
-                write_i32("w_mouse_wheel", read_i32("w_mouse_wheel") + ev.wheel.y);
+
+            case SDL_WINDOWEVENT:
+                if (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+                    /* Window was resized by user — no action needed,
+                     * letterbox is computed dynamically */
+                }
+                break;
             }
         }
 
-        // Update ticks
-        write_u32("w_ticks", SDL_GetTicks());
+        /* ---- Step 1: Write input to WASM globals ---- */
 
-        // Read config (ROM may have changed it)
-        W = read_u32("w_width");
-        H = read_u32("w_height");
-        BPP = read_u32("w_bpp");
-        SCALE = read_u32("w_scale");
-        if (W == 0) W = 320; if (H == 0) H = 240; if (BPP == 0) BPP = 16; if (SCALE == 0) SCALE = 1;
+        /* Keys array */
+        {
+            uint8_t *keys_ptr = ptr_u8(g_g_w_keys);
+            if (keys_ptr) {
+                memcpy(keys_ptr, keys_state, 256);
+            }
+        }
+        write_i32(g_g_w_mouse_x, mouse_x);
+        write_i32(g_g_w_mouse_y, mouse_y);
+        write_u32(g_g_w_mouse_buttons, mouse_buttons);
+        write_i32(g_g_w_mouse_wheel, mouse_wheel);
+        write_u32(g_g_w_gamepad_buttons, gamepad_buttons);
+        write_u32(g_g_w_ticks, SDL_GetTicks());
 
-        // Detect config changes
-        int config_changed = (W != prev_W || H != prev_H || BPP != prev_BPP || SCALE != prev_SCALE);
-        int title_changed = 0;
+        /* ---- Step 2: Call wupdate(), exit if 0 ----
+         *
+         * Hold the audio mutex for the whole wupdate call. The ROM's
+         * fill_audio writes to w_audio_buffer inside wupdate; holding
+         * the lock here prevents the audio thread from reading while
+         * the write is in progress. */
+        {
+            int32_t keep = 0;
+            if (g_audio_mutex) SDL_LockMutex(g_audio_mutex);
+            m3_CallV(f_wupdate);
+            m3_GetResultsV(f_wupdate, &keep);
+            if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
+            if (!keep) break;
+        }
+
+        /* ---- Refresh memory pointer (ROM may have grown it) ---- */
+        refresh_memory();
+
+        /* ---- Step 3: Read config and detect changes ---- */
+        read_screen_config(&W, &H, &BPP, &SCALE);
+
+        int config_changed = (W != prev_W || H != prev_H ||
+                              BPP != prev_BPP || SCALE != prev_SCALE);
+
         char new_title[128];
-        read_str("w_title", new_title, 128);
-        if (strcmp(new_title, title) != 0) title_changed = 1;
+        read_str(g_g_w_title, new_title, 128);
+        int title_changed = (strcmp(new_title, title) != 0);
 
-        // Handle config changes
         if (config_changed || title_changed) {
-            SDL_SetWindowSize(window, W * SCALE, H * SCALE);
+            SDL_SetWindowSize(window, (int)(W * SCALE), (int)(H * SCALE));
             if (title_changed) {
                 SDL_SetWindowTitle(window, new_title[0] ? new_title : "Wagnostic");
-                strcpy(title, new_title);
+                strncpy(title, new_title, sizeof(title) - 1);
+                title[sizeof(title) - 1] = '\0';
             }
             SDL_DestroyTexture(texture);
-            texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888,
-                SDL_TEXTUREACCESS_STREAMING, W, H);
+            texture = SDL_CreateTexture(renderer,
+                SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
+                (int)W, (int)H);
             SDL_SetTextureScaleMode(texture, SDL_ScaleModeNearest);
             prev_W = W; prev_H = H; prev_BPP = BPP; prev_SCALE = SCALE;
-        }
 
-        // Detect audio config changes
-        uint32_t cur_audio_size = read_u32("w_audio_size");
-        uint32_t cur_audio_rate = read_u32("w_audio_sample_rate");
-        uint32_t cur_audio_bpp = read_u32("w_audio_bpp");
-        uint32_t cur_audio_channels = read_u32("w_audio_channels");
-        
-        if (cur_audio_size != prev_audio_size || cur_audio_rate != prev_audio_rate ||
-            cur_audio_bpp != prev_audio_bpp || cur_audio_channels != prev_audio_channels) {
-            // Audio config changed - reinit
-            if (audio_dev) SDL_CloseAudioDevice(audio_dev);
-            audio_dev = 0;
-            
-            if (cur_audio_size > 0) {
-                SDL_AudioSpec wanted;
-                SDL_zero(wanted);
-                wanted.freq = cur_audio_rate;
-                if (wanted.freq == 0) wanted.freq = 44100;
-                wanted.format = AUDIO_F32;
-                wanted.channels = cur_audio_channels;
-                if (wanted.channels == 0) wanted.channels = 1;
-                wanted.samples = 1024;
-                wanted.callback = host_audio_callback;
-                audio_dev = SDL_OpenAudioDevice(NULL, 0, &wanted, NULL, 0);
-                if (audio_dev) SDL_PauseAudioDevice(audio_dev, 0);
-            }
-            
-            prev_audio_size = cur_audio_size;
-            prev_audio_rate = cur_audio_rate;
-            prev_audio_bpp = cur_audio_bpp;
-            prev_audio_channels = cur_audio_channels;
-        }
-
-        // Get VRAM pointer
-        IM3Global vram_global = m3_FindGlobal(g_module, "w_vram");
-        uint8_t* vram = NULL;
-        if (vram_global) {
-            M3TaggedValue value;
-            if (!m3_GetGlobal(vram_global, &value)) {
-                uint8_t* mem = m3_GetMemory(g_runtime, NULL, 0);
-                if (mem) vram = mem + value.value.i32;
+            /* Recompute mouse position for new resolution */
+            {
+                int win_w, win_h;
+                SDL_GetWindowSize(window, &win_w, &win_h);
+                convert_mouse_coords(mouse_x, mouse_y, &mouse_x, &mouse_y,
+                                     win_w, win_h, W, H);
             }
         }
 
-        // Handle dirty rectangles
-        uint32_t dirty_count = read_u32("w_dirty_count");
-        if (vram && dirty_count > 0) {
-            // Fast path: full screen update
-            if (dirty_count == 1) {
-                int rx, ry, rw, rh;
-                read_dirty_rect(0, &rx, &ry, &rw, &rh);
-                if (rx == 0 && ry == 0 && (uint32_t)rw == W && (uint32_t)rh == H) {
-                    // Full screen - direct copy
-                    void* pixels;
-                    int pitch;
-                    SDL_LockTexture(texture, NULL, &pixels, &pitch);
-                    if (BPP == 16) {
-                        uint16_t* src = (uint16_t*)vram;
-                        uint32_t* dst = (uint32_t*)pixels;
-                        for (int i = 0; i < (int)(W * H); i++) {
-                            uint16_t p = src[i];
-                            uint32_t r = ((p >> 11) & 0x1F) * 255 / 31;
-                            uint32_t g = ((p >> 5) & 0x3F) * 255 / 63;
-                            uint32_t b = (p & 0x1F) * 255 / 31;
-                            dst[i] = 0xFF000000 | (b << 16) | (g << 8) | r;
-                        }
-                    } else if (BPP == 32) {
-                        memcpy(pixels, vram, W * H * 4);
-                    } else if (BPP == 8) {
-                        uint8_t* src = vram;
-                        uint32_t* dst = (uint32_t*)pixels;
-                        for (int i = 0; i < (int)(W * H); i++) {
-                            uint8_t p = src[i];
-                            uint32_t r = ((p >> 5) & 0x07) * 255 / 7;
-                            uint32_t g = ((p >> 2) & 0x07) * 255 / 7;
-                            uint32_t b = (p & 0x03) * 255 / 3;
-                            dst[i] = 0xFF000000 | (b << 16) | (g << 8) | r;
-                        }
-                    }
-                    SDL_UnlockTexture(texture);
-                } else {
-                    // Single rect, not full screen
-                    render_rect_to_texture(texture, vram, rx, ry, rw, rh, W, H, BPP);
+        /* ---- Detect audio config changes ---- */
+        {
+            uint32_t cur_size     = read_u32(g_g_w_audio_size);
+            uint32_t cur_rate     = read_u32(g_g_w_audio_sample_rate);
+            uint32_t cur_bpp      = read_u32(g_g_w_audio_bpp);
+            uint32_t cur_channels = read_u32(g_g_w_audio_channels);
+
+            if (cur_size != prev_audio_size || cur_rate != prev_audio_rate ||
+                cur_bpp != prev_audio_bpp || cur_channels != prev_audio_channels) {
+
+                if (audio_dev) {
+                    SDL_CloseAudioDevice(audio_dev);
+                    audio_dev = 0;
                 }
-            } else {
-                // Multiple dirty rects
-                for (uint32_t i = 0; i < dirty_count && i < 32; i++) {
+
+                if (cur_size > 0 && cur_rate > 0 && cur_channels > 0) {
+                    SDL_AudioSpec wanted;
+                    SDL_zero(wanted);
+                    wanted.freq     = cur_rate;
+                    wanted.format   = AUDIO_F32;
+                    wanted.channels = cur_channels;
+                    wanted.samples  = 1024;
+                    wanted.callback = host_audio_callback;
+                    audio_dev = SDL_OpenAudioDevice(NULL, 0, &wanted, NULL, 0);
+                    if (audio_dev) SDL_PauseAudioDevice(audio_dev, 0);
+                }
+
+                prev_audio_size     = cur_size;
+                prev_audio_rate     = cur_rate;
+                prev_audio_bpp      = cur_bpp;
+                prev_audio_channels = cur_channels;
+            }
+        }
+
+        /* ---- Step 4: Render dirty rects ---- */
+        {
+            uint8_t *vram = ptr_u8(g_g_w_vram);
+            uint32_t dirty_count = read_u32(g_g_w_dirty_count);
+
+            if (vram && dirty_count > 0) {
+                if (dirty_count == 1) {
+                    /* Fast path: check if single rect covers entire screen */
                     int rx, ry, rw, rh;
-                    read_dirty_rect(i, &rx, &ry, &rw, &rh);
-                    render_rect_to_texture(texture, vram, rx, ry, rw, rh, W, H, BPP);
+                    read_dirty_rect(0, &rx, &ry, &rw, &rh);
+                    if (rx == 0 && ry == 0 &&
+                        (uint32_t)rw == W && (uint32_t)rh == H) {
+                        render_fullscreen(texture, vram, W, H, BPP);
+                    } else {
+                        render_rect_to_texture(texture, vram,
+                            rx, ry, rw, rh, W, H, BPP);
+                    }
+                } else {
+                    /* Multiple dirty rects (up to 32) */
+                    uint32_t count = dirty_count;
+                    if (count > 32) count = 32;
+                    for (uint32_t i = 0; i < count; i++) {
+                        int rx, ry, rw, rh;
+                        read_dirty_rect((int)i, &rx, &ry, &rw, &rh);
+                        render_rect_to_texture(texture, vram,
+                            rx, ry, rw, rh, W, H, BPP);
+                    }
                 }
-            }
 
-            // Calculate aspect-ratio-correct destination
-            int win_w, win_h;
-            SDL_GetWindowSize(window, &win_w, &win_h);
-            float aspect_rom = (float)W / (float)H;
-            float aspect_win = (float)win_w / (float)win_h;
-            SDL_Rect dst;
-            if (aspect_win > aspect_rom) {
-                dst.h = win_h;
-                dst.w = (int)(win_h * aspect_rom);
-                dst.x = (win_w - dst.w) / 2;
-                dst.y = 0;
-            } else {
-                dst.w = win_w;
-                dst.h = (int)(win_w / aspect_rom);
-                dst.x = 0;
-                dst.y = (win_h - dst.h) / 2;
-            }
+                /* Calculate letterbox destination */
+                int win_w, win_h;
+                SDL_GetWindowSize(window, &win_w, &win_h);
+                SDL_Rect dst;
+                calc_letterbox(win_w, win_h, W, H, &dst);
 
-            SDL_RenderClear(renderer);
-            SDL_RenderCopy(renderer, texture, NULL, &dst);
-            SDL_RenderPresent(renderer);
+                SDL_RenderClear(renderer);
+                SDL_RenderCopy(renderer, texture, NULL, &dst);
+                SDL_RenderPresent(renderer);
+
+                /* Reset dirty count */
+                write_u32(g_g_w_dirty_count, 0);
+            }
         }
 
-        // Reset mouse wheel
-        write_i32("w_mouse_wheel", 0);
+        /* ---- Step 5: Reset mouse wheel ---- */
+        write_i32(g_g_w_mouse_wheel, 0);
+        mouse_wheel = 0;
 
+        /* ---- Yield CPU briefly ---- */
         SDL_Delay(1);
     }
+
+    /* ================================================================
+     * Cleanup
+     * ================================================================ */
 
     if (audio_dev) SDL_CloseAudioDevice(audio_dev);
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
+
+    /* Audio callback is already stopped (SDL_CloseAudioDevice above), so
+     * no other thread holds the mutex. Safe to destroy. */
+    if (g_audio_mutex) SDL_DestroyMutex(g_audio_mutex);
+    g_audio_mutex = NULL;
+
     SDL_Quit();
 
     m3_FreeRuntime(g_runtime);

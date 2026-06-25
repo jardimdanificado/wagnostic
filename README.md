@@ -33,13 +33,11 @@ A Wagnostic ROM is a WebAssembly binary that exports named globals. The Host rea
 ## 2. ROM Requirements
 
 ### Must export
-
 - `wupdate()` — called once per frame, returns 0 to quit
 
 ## 3. Global Variables
 
 ### Screen Configuration (ROM writes, Host reads)
-
 | Name | Type | Description |
 |------|------|-------------|
 | `w_width` | `uint32` | Screen width in pixels |
@@ -49,13 +47,11 @@ A Wagnostic ROM is a WebAssembly binary that exports named globals. The Host rea
 | `w_title` | `char[128]` | Window title |
 
 ### VRAM (ROM writes, Host reads)
-
 | Name | Type | Description |
 |------|------|-------------|
 | `w_vram` | `uint8[]` | Pixel buffer |
 
 ### Dirty Rectangles (ROM writes, Host reads)
-
 | Name | Type | Description |
 |------|------|-------------|
 | `w_dirty_count` | `uint32` | 0=nothing, N=render N rects |
@@ -64,7 +60,6 @@ A Wagnostic ROM is a WebAssembly binary that exports named globals. The Host rea
 **Rect struct:** `{ int x, y, w, h; }` — 16 bytes each
 
 ### Input (Host writes, ROM reads)
-
 | Name | Type | Description |
 |------|------|-------------|
 | `w_mouse_x` | `int32` | Mouse X position |
@@ -75,22 +70,22 @@ A Wagnostic ROM is a WebAssembly binary that exports named globals. The Host rea
 | `w_gamepad_buttons` | `uint32` | Gamepad button state |
 
 ### Timing (Host writes, ROM reads)
-
 | Name | Type | Description |
 |------|------|-------------|
 | `w_ticks` | `uint32` | Time in milliseconds |
 
 ### Audio (ROM writes, Host reads)
-
 | Name | Type | Description |
 |------|------|-------------|
-| `w_audio_size` | `uint32` | Buffer size |
+| `w_audio_size` | `uint32` | Buffer size in bytes |
 | `w_audio_sample_rate` | `uint32` | Sample rate (Hz) |
-| `w_audio_bpp` | `uint32` | Bytes per sample (1, 2, or 4) |
+| `w_audio_bpp` | `uint32` | Bytes per sample (1=u8, 2=s16, 4=f32) |
 | `w_audio_channels` | `uint32` | Number of channels |
-| `w_audio_write` | `uint32` | Write position |
-| `w_audio_read` | `uint32` | Read position |
+| `w_audio_write` | `uint32` | Write position (ROM owns this) |
+| `w_audio_read` | `uint32` | Read position (Host owns this) |
 | `w_audio_buffer` | `uint8[]` | Audio ring buffer |
+| `w_audio_underrun` | `uint32` | Underrun counter (Host increments) |
+| `w_audio_overrun` | `uint32` | Overrun counter (Host increments) |
 
 ## 4. Dirty Rectangles
 
@@ -114,7 +109,7 @@ Instead of redrawing the entire screen every frame, the ROM specifies which regi
 int wupdate() {
     // Move player
     player_x += 1;
-    
+
     // Mark old and new positions as dirty
     w_dirty_count = 2;
     w_dirty_rects[0] = (Rect){old_x, player_y, 20, 24};
@@ -143,9 +138,29 @@ pixel = (a << 24) | (b << 16) | (g << 8) | r;
 ## 6. Audio
 
 Ring buffer at `w_audio_buffer`. Format determined by `w_audio_bpp`:
-- 1: Unsigned 8-bit PCM
-- 2: Signed 16-bit PCM
-- 4: 32-bit float
+- 1: Unsigned 8-bit PCM (128 = silence)
+- 2: Signed 16-bit PCM (little-endian, 0 = silence)
+- 4: 32-bit float (0.0 = silence)
+
+### Ring Buffer Rules
+
+The buffer uses `size - 1` usable bytes:
+- `w_audio_write == w_audio_read` → **EMPTY**
+- `(w_audio_write + 1) % size == w_audio_read` → **FULL**
+
+**ROM must:**
+1. Write samples into `w_audio_buffer` first
+2. Update `w_audio_write` ONCE at the very end
+3. Never read `w_audio_write` while writing
+4. Never read `w_audio_read`
+
+**Host must:**
+1. Read `w_audio_write` ONCE at callback start
+2. Process samples
+3. Write `w_audio_read` ONCE at callback end
+4. Never write to `w_audio_write`
+
+See [ABI.md](ABI.md) for complete details and examples.
 
 ## 7. Host Behavior
 
