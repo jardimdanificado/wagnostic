@@ -98,6 +98,31 @@
   // Pre-allocated render buffers
   let imageData = null;
 
+  // Pixel lookup tables (LUTs) for fast format conversion
+  const rgb332_lut = new Uint32Array(256);
+  const rgb565_lut = new Uint32Array(65536);
+  let pixel_lut_initialized = false;
+
+  function initPixelLuts() {
+    if (pixel_lut_initialized) return;
+
+    for (let i = 0; i < 256; i++) {
+      const r = ((i >> 5) & 0x07) * 36;
+      const g = ((i >> 2) & 0x07) * 36;
+      const b = (i & 0x03) * 85;
+      rgb332_lut[i] = 0xFF000000 | (b << 16) | (g << 8) | r;
+    }
+
+    for (let i = 0; i < 65536; i++) {
+      const r = ((i >> 11) & 0x1F) * 255 / 31 | 0;
+      const g = ((i >> 5) & 0x3F) * 255 / 63 | 0;
+      const b = (i & 0x1F) * 255 / 31 | 0;
+      rgb565_lut[i] = 0xFF000000 | (b << 16) | (g << 8) | r;
+    }
+
+    pixel_lut_initialized = true;
+  }
+
   // Timing
   let startTime = performance.now();
 
@@ -175,49 +200,28 @@
   }
 
   function renderFullFrame(w, h, bpp, vramPtr) {
+    initPixelLuts();
+
     const buf = new Uint8Array(wasmMemory.buffer, vramPtr, w * h * (bpp >> 3));
     const pixels = imageData.data;
 
     if (bpp === 8) {
-      // RGB332: R(3) G(3) B(2)
-      for (let i = 0, j = 0; i < w * h; i++) {
-        const v = buf[i];
-        pixels[j++] = (v >> 5) & 7;  // R: 3 bits -> scale to 8-bit later
-        pixels[j++] = (v >> 2) & 7;  // G: 3 bits
-        pixels[j++] = v & 3;         // B: 2 bits
-        pixels[j++] = 0xFF;
-      }
-      // Scale RGB332 to full 8-bit per channel
-      const lutR = new Uint8Array(8);
-      const lutG = new Uint8Array(8);
-      const lutB = new Uint8Array(4);
-      for (let i = 0; i < 8; i++) { lutR[i] = (i * 255) / 7; lutG[i] = (i * 255) / 7; }
-      for (let i = 0; i < 4; i++) { lutB[i] = (i * 255) / 3; }
-      for (let i = 0, j = 0; i < w * h; i++) {
-        pixels[j] = lutR[pixels[j]]; j++;
-        pixels[j] = lutG[pixels[j]]; j++;
-        pixels[j] = lutB[pixels[j]]; j++;
-        j++; // skip alpha
+      const u32 = new Uint32Array(pixels.buffer);
+      for (let i = 0; i < w * h; i++) {
+        u32[i] = rgb332_lut[buf[i]];
       }
     } else if (bpp === 16) {
-      // RGB565 — match native: *255/31 and *255/63 for full range
       const u16 = new Uint16Array(wasmMemory.buffer, vramPtr, w * h);
-      for (let i = 0, j = 0; i < w * h; i++) {
-        const v = u16[i];
-        pixels[j++] = ((v >> 11) & 0x1F) * 255 / 31 | 0; // R
-        pixels[j++] = ((v >> 5) & 0x3F) * 255 / 63 | 0;  // G
-        pixels[j++] = (v & 0x1F) * 255 / 31 | 0;          // B
-        pixels[j++] = 0xFF;
+      const u32 = new Uint32Array(pixels.buffer);
+      for (let i = 0; i < w * h; i++) {
+        u32[i] = rgb565_lut[u16[i]];
       }
     } else if (bpp === 32) {
-      // RGBA8888: a<<24 | b<<16 | g<<8 | r
       const u32 = new Uint32Array(wasmMemory.buffer, vramPtr, w * h);
-      for (let i = 0, j = 0; i < w * h; i++) {
+      const dst = new Uint32Array(pixels.buffer);
+      for (let i = 0; i < w * h; i++) {
         const v = u32[i];
-        pixels[j++] = v & 0xFF;         // R
-        pixels[j++] = (v >> 8) & 0xFF;  // G
-        pixels[j++] = (v >> 16) & 0xFF; // B
-        pixels[j++] = (v >> 24) & 0xFF; // A
+        dst[i] = 0xFF000000 | ((v >> 16) & 0xFF) << 16 | ((v >> 8) & 0xFF) << 8 | (v & 0xFF);
       }
     }
     ctx.putImageData(imageData, 0, 0);
@@ -257,44 +261,34 @@
       const pixels = rectData.data;
 
       if (bpp === 8) {
+        const u32 = new Uint32Array(pixels.buffer);
         for (let row = 0; row < ch; row++) {
           const srcOff = (cy + row) * w + cx;
           const dstOff = row * cw;
           for (let col = 0; col < cw; col++) {
             const v = new Uint8Array(wasmMemory.buffer, vramPtr + srcOff + col, 1)[0];
-            const px = (dstOff + col) * 4;
-            pixels[px]     = ((v >> 5) & 7) * 255 / 7 | 0;
-            pixels[px + 1] = ((v >> 2) & 7) * 255 / 7 | 0;
-            pixels[px + 2] = (v & 3) * 255 / 3 | 0;
-            pixels[px + 3] = 0xFF;
+            u32[dstOff + col] = rgb332_lut[v];
           }
         }
       } else if (bpp === 16) {
+        const u32 = new Uint32Array(pixels.buffer);
         for (let row = 0; row < ch; row++) {
           const srcOff = ((cy + row) * w + cx);
           const srcU16 = new Uint16Array(wasmMemory.buffer, vramPtr + srcOff * 2, cw);
-          const dstOff = row * cw * 4;
+          const dstOff = row * cw;
           for (let col = 0; col < cw; col++) {
-            const v = srcU16[col];
-            const px = dstOff + col * 4;
-            pixels[px]     = ((v >> 11) & 0x1F) * 255 / 31 | 0;
-            pixels[px + 1] = ((v >> 5) & 0x3F) * 255 / 63 | 0;
-            pixels[px + 2] = (v & 0x1F) * 255 / 31 | 0;
-            pixels[px + 3] = 0xFF;
+            u32[dstOff + col] = rgb565_lut[srcU16[col]];
           }
         }
       } else if (bpp === 32) {
+        const u32 = new Uint32Array(pixels.buffer);
         for (let row = 0; row < ch; row++) {
           const srcOff = ((cy + row) * w + cx);
           const srcU32 = new Uint32Array(wasmMemory.buffer, vramPtr + srcOff * 4, cw);
-          const dstOff = row * cw * 4;
+          const dstOff = row * cw;
           for (let col = 0; col < cw; col++) {
             const v = srcU32[col];
-            const px = dstOff + col * 4;
-            pixels[px]     = v & 0xFF;
-            pixels[px + 1] = (v >> 8) & 0xFF;
-            pixels[px + 2] = (v >> 16) & 0xFF;
-            pixels[px + 3] = (v >> 24) & 0xFF;
+            u32[dstOff + col] = 0xFF000000 | ((v >> 16) & 0xFF) << 16 | ((v >> 8) & 0xFF) << 8 | (v & 0xFF);
           }
         }
       }

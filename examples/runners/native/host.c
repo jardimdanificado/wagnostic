@@ -88,6 +88,19 @@ static IM3Global g_g_w_audio_buffer = NULL;
 static IM3Global g_g_w_audio_underrun = NULL;
 static IM3Global g_g_w_audio_overrun  = NULL;
 
+/* ================================================================
+ * Pixel lookup tables (LUTs) for fast format conversion
+ *
+ * Pre-computed RGB332→ABGR8888 and RGB565→ABGR8888 mappings.
+ * Avoids per-pixel division: 1 memory lookup vs ~10 arithmetic ops.
+ *
+ * Memory cost: 1KB (8-bit) + 256KB (16-bit) = 257KB total.
+ * ================================================================ */
+
+static uint32_t rgb332_lut[256];      /* 1KB  — 8bpp RGB332 */
+static uint32_t rgb565_lut[65536];    /* 256KB — 16bpp RGB565 */
+static int pixel_lut_initialized = 0;
+
 /* Audio buffer lock. The host runs wupdate() in the main thread (which
  * writes samples into the shared w_audio_buffer via the ROM's fill_audio)
  * and host_audio_callback() in SDL's audio thread (which reads from the
@@ -369,6 +382,26 @@ static inline uint32_t rgb565_to_abgr8888(uint16_t p) {
 
 /* 32bpp RGBA8888 is already in ABGR8888 memory layout — direct copy */
 
+static void init_pixel_luts(void) {
+    if (pixel_lut_initialized) return;
+
+    for (int i = 0; i < 256; i++) {
+        uint32_t r = ((i >> 5) & 0x07) * 36;
+        uint32_t g = ((i >> 2) & 0x07) * 36;
+        uint32_t b = (i & 0x03) * 85;
+        rgb332_lut[i] = 0xFF000000u | (b << 16) | (g << 8) | r;
+    }
+
+    for (int i = 0; i < 65536; i++) {
+        uint32_t r = ((i >> 11) & 0x1F) * 255 / 31;
+        uint32_t g = ((i >> 5) & 0x3F) * 255 / 63;
+        uint32_t b = (i & 0x1F) * 255 / 31;
+        rgb565_lut[i] = 0xFF000000u | (b << 16) | (g << 8) | r;
+    }
+
+    pixel_lut_initialized = 1;
+}
+
 /* ================================================================
  * Render a rect from VRAM to the SDL texture
  * ================================================================ */
@@ -393,7 +426,7 @@ static void render_rect_to_texture(SDL_Texture *texture, uint8_t *vram,
             uint8_t  *src = vram + y * W + rx;
             uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
             for (int x = 0; x < rw; x++) {
-                dst[x] = rgb332_to_abgr8888(src[x]);
+                dst[x] = rgb332_lut[src[x]];
             }
         }
     } else if (BPP == 16) {
@@ -401,7 +434,7 @@ static void render_rect_to_texture(SDL_Texture *texture, uint8_t *vram,
             uint16_t *src = (uint16_t *)(vram + (y * W + rx) * 2);
             uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
             for (int x = 0; x < rw; x++) {
-                dst[x] = rgb565_to_abgr8888(src[x]);
+                dst[x] = rgb565_lut[src[x]];
             }
         }
     } else if (BPP == 32) {
@@ -430,14 +463,14 @@ static void render_fullscreen(SDL_Texture *texture, uint8_t *vram,
         uint32_t *dst = (uint32_t *)pixels;
         uint32_t total = W * H;
         for (uint32_t i = 0; i < total; i++) {
-            dst[i] = rgb332_to_abgr8888(src[i]);
+            dst[i] = rgb332_lut[src[i]];
         }
     } else if (BPP == 16) {
         uint16_t *src = (uint16_t *)vram;
         uint32_t *dst = (uint32_t *)pixels;
         uint32_t total = W * H;
         for (uint32_t i = 0; i < total; i++) {
-            dst[i] = rgb565_to_abgr8888(src[i]);
+            dst[i] = rgb565_lut[src[i]];
         }
     } else if (BPP == 32) {
         /* Direct memcpy — 32bpp ROM format matches ABGR8888 layout */
@@ -592,6 +625,8 @@ int main(int argc, char **argv) {
         m3_FreeRuntime(g_runtime); m3_FreeEnvironment(env); free(wasm_data);
         return 1;
     }
+
+    init_pixel_luts();
 
     /* Audio buffer mutex — created after SDL_Init so SDL_CreateMutex
      * is available; checked in the callback for NULL so an early audio
