@@ -189,6 +189,7 @@ jobs:
         run: |
           mkdir dist_pkg
           cp wagnostic dist_pkg/
+          cp examples/*.wasm dist_pkg/
           cp README.md dist_pkg/
           tar -czf "wagnostic${{ inputs.version }}-${{ matrix.archive }}.tar.gz" -C dist_pkg .
 
@@ -197,6 +198,7 @@ jobs:
         run: |
           mkdir dist_pkg
           cp wagnostic dist_pkg/
+          cp examples/*.wasm dist_pkg/
           cp README.md dist_pkg/
           tar -czf "wagnostic${{ inputs.version }}-${{ matrix.archive }}.tar.gz" -C dist_pkg .
 
@@ -206,6 +208,7 @@ jobs:
         run: |
           mkdir -p dist_pkg
           cp wagnostic.exe dist_pkg/
+          cp examples/*.wasm dist_pkg/
           cp /mingw64/bin/SDL2.dll dist_pkg/
           cp README.md dist_pkg/
           powershell -NoProfile -Command \
@@ -217,6 +220,7 @@ jobs:
         run: |
           mkdir -p dist_pkg
           cp wagnostic.exe dist_pkg/
+          cp examples/*.wasm dist_pkg/
           cp /mingw32/bin/SDL2.dll dist_pkg/
           cp README.md dist_pkg/
           powershell -NoProfile -Command \
@@ -228,6 +232,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist_pkg
           Copy-Item build/Release/wagnostic.exe dist_pkg/
+          Copy-Item examples/*.wasm dist_pkg/
           $sdl = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin\SDL2.dll"
           $glew = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin\glew32.dll"
           if (Test-Path $sdl)  { Copy-Item $sdl  dist_pkg/ }
