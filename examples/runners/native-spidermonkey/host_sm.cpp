@@ -88,6 +88,7 @@ static uint32_t gptr_mouse_wheel       = 0;
 static uint32_t gptr_keys              = 0;
 static uint32_t gptr_gamepad_buttons   = 0;
 static uint32_t gptr_ticks             = 0;
+static uint32_t gptr_target_fps        = 0;
 static uint32_t gptr_audio_size        = 0;
 static uint32_t gptr_audio_sample_rate = 0;
 static uint32_t gptr_audio_bpp         = 0;
@@ -783,6 +784,7 @@ int main(int argc, char** argv) {
         gptr_mouse_wheel       = get_gp(gpObj, "w_mouse_wheel");
         gptr_keys              = get_gp(gpObj, "w_keys");
         gptr_gamepad_buttons   = get_gp(gpObj, "w_gamepad_buttons");
+        gptr_target_fps        = get_gp(gpObj, "w_target_fps");
         gptr_ticks             = get_gp(gpObj, "w_ticks");
         gptr_audio_size        = get_gp(gpObj, "w_audio_size");
         gptr_audio_sample_rate = get_gp(gpObj, "w_audio_sample_rate");
@@ -954,7 +956,17 @@ int main(int argc, char** argv) {
         // ---- 6. Reset mouse wheel after consumption ----
         mem_i32(gptr_mouse_wheel, 0);
 
-        SDL_Delay(1);
+        uint32_t target_fps = gptr_target_fps ? mem_u32(gptr_target_fps) : 0;
+        if (target_fps > 0) {
+            static uint32_t frame_start = 0;
+            uint32_t now = SDL_GetTicks();
+            uint32_t elapsed = now - frame_start;
+            int32_t delay = (1000 / target_fps) - (int32_t)elapsed;
+            if (delay > 0) SDL_Delay((uint32_t)delay);
+            frame_start = SDL_GetTicks();
+        } else {
+            SDL_Delay(1);
+        }
     }
 
     // ---- Cleanup ----

@@ -71,6 +71,7 @@ static IM3Global g_g_w_mouse_x      = NULL;
 static IM3Global g_g_w_mouse_y      = NULL;
 static IM3Global g_g_w_mouse_buttons= NULL;
 static IM3Global g_g_w_mouse_wheel  = NULL;
+static IM3Global g_g_w_target_fps   = NULL;
 static IM3Global g_g_w_gamepad_buttons = NULL;
 static IM3Global g_g_w_ticks        = NULL;
 static IM3Global g_g_w_width        = NULL;
@@ -214,6 +215,7 @@ static void cache_globals(void) {
     g_g_w_mouse_y       = m3_FindGlobal(g_module, "w_mouse_y");
     g_g_w_mouse_buttons = m3_FindGlobal(g_module, "w_mouse_buttons");
     g_g_w_mouse_wheel   = m3_FindGlobal(g_module, "w_mouse_wheel");
+    g_g_w_target_fps    = m3_FindGlobal(g_module, "w_target_fps");
     g_g_w_gamepad_buttons = m3_FindGlobal(g_module, "w_gamepad_buttons");
     g_g_w_ticks         = m3_FindGlobal(g_module, "w_ticks");
     g_g_w_width         = m3_FindGlobal(g_module, "w_width");
@@ -939,8 +941,18 @@ int main(int argc, char **argv) {
         write_i32(g_g_w_mouse_wheel, 0);
         mouse_wheel = 0;
 
-        /* ---- Yield CPU briefly ---- */
-        SDL_Delay(1);
+        /* ---- Yield / FPS limit ---- */
+        uint32_t target_fps = g_g_w_target_fps ? *m3_GetGlobalI32(g_g_w_target_fps) : 0;
+        if (target_fps > 0) {
+            static uint32_t frame_start = 0;
+            uint32_t now = SDL_GetTicks();
+            uint32_t elapsed = now - frame_start;
+            int32_t delay = (1000 / target_fps) - (int32_t)elapsed;
+            if (delay > 0) SDL_Delay((uint32_t)delay);
+            frame_start = SDL_GetTicks();
+        } else {
+            SDL_Delay(1);
+        }
     }
 
     /* ================================================================

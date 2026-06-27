@@ -74,6 +74,11 @@ A Wagnostic ROM is a WebAssembly binary that exports named globals. The Host rea
 |------|------|-------------|
 | `w_ticks` | `uint32` | Time in milliseconds |
 
+### Framerate Control (ROM writes, Host reads)
+| Name | Type | Description |
+|------|------|-------------|
+| `w_target_fps` | `uint32` | Target FPS (0 = no limit, default) |
+
 ### Audio (ROM writes, Host reads)
 | Name | Type | Description |
 |------|------|-------------|
@@ -170,3 +175,4 @@ The Host:
 3. Auto-detects config changes (resizes window if needed)
 4. Reads `w_dirty_count` and renders dirty regions
 5. Resets `w_mouse_wheel` to 0
+6. If `w_target_fps > 0`, the host adjusts the frame loop to call `wupdate()` at the target rate (using `SDL_Delay` or `setTimeout`). Setting `w_target_fps = 0` removes the limit.

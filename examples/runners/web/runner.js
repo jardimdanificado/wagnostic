@@ -556,8 +556,14 @@
 
     // 5. Reset mouse wheel
     resetInput();
-
-    requestAnimationFrame(frame);
+    
+    // Check if ROM wants a specific framerate
+    var target = readScalar('w_target_fps');
+    if (target > 0) {
+      setTimeout(frame, 1000 / target);
+    } else {
+      requestAnimationFrame(frame);
+    }
   }
 
   // ── WASM Loading ───────────────────────────────────────────────────────
@@ -635,11 +641,18 @@
       console.log('ROM loaded. Title:', readTitle() || '(untitled)');
       console.log('Screen:', g.w + 'x' + g.h, 'bpp=' + g.bpp, 'scale=' + g.scale);
 
-      running = true;
-      requestAnimationFrame(frame);
-    }).catch(function (err) {
-      console.error('Failed to load ROM:', err);
-    });
+    running = true;
+    // Use rAF by default; switch to setTimeout if ROM sets w_target_fps
+    var nextFrame = function () { requestAnimationFrame(frame); };
+    var target = readScalar('w_target_fps');
+    if (target > 0) {
+      var delay = 1000 / target;
+      nextFrame = function () { setTimeout(frame, delay); };
+    }
+    nextFrame();
+  }).catch(function (err) {
+    console.error('Failed to load ROM:', err);
+  });
   }
 
   // ── Event Listeners ────────────────────────────────────────────────────
