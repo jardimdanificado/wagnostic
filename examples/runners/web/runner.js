@@ -578,12 +578,16 @@
     // when the ROM doesn't need them.
     var wasmImports = {
       env: {
+        strlen: function () { return 0; },
         sin:   Math.sin,
         cos:   Math.cos,
         exp:   Math.exp,
         log:   Math.log,
         pow:   Math.pow,
-        ldexp: function (x, n) { return x * Math.pow(2, n); }
+        ldexp: function (x, n) { return x * Math.pow(2, n); },
+        fabs:  Math.abs,
+        floor: Math.floor,
+        ceil:  Math.ceil
       }
     };
 

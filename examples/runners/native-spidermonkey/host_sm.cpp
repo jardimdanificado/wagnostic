@@ -577,11 +577,11 @@ static void init_from_globals() {
 // ============================================================
 
 static void check_audio_config_change() {
-    if (audio_dev == 0) return; // no audio device open yet
+    uint32_t cur_size = mem_u32(gptr_audio_size);
+    if (audio_dev == 0 && cur_size == 0) return; // ROM hasn't requested audio yet
 
     uint32_t cur_rate     = mem_u32(gptr_audio_sample_rate);
     uint32_t cur_channels = mem_u32(gptr_audio_channels);
-    uint32_t cur_size     = mem_u32(gptr_audio_size);
 
     if (cur_rate == 0) cur_rate = 44100;
     if (cur_channels == 0) cur_channels = 1;
@@ -590,7 +590,7 @@ static void check_audio_config_change() {
         cur_channels != prev_audio_channels ||
         cur_size != prev_audio_size) {
         // Close old device and reopen with new settings
-        SDL_CloseAudioDevice(audio_dev);
+        if (audio_dev) SDL_CloseAudioDevice(audio_dev);
         audio_dev = 0;
 
         if (cur_size > 0) {
