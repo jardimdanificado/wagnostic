@@ -180,7 +180,7 @@ jobs:
         run: |
           mkdir dist_pkg
           cp wagnostic dist_pkg/
-          cp examples/*.wasm dist_pkg/
+          ls examples/*.wasm 2>/dev/null && cp examples/*.wasm dist_pkg/ || true
           cp README.md dist_pkg/
           tar -czf "wagnostic${{ inputs.version }}-${{ matrix.archive }}.tar.gz" -C dist_pkg .
 
@@ -189,7 +189,7 @@ jobs:
         run: |
           mkdir dist_pkg
           cp wagnostic dist_pkg/
-          cp examples/*.wasm dist_pkg/
+          ls examples/*.wasm 2>/dev/null && cp examples/*.wasm dist_pkg/ || true
           cp README.md dist_pkg/
           tar -czf "wagnostic${{ inputs.version }}-${{ matrix.archive }}.tar.gz" -C dist_pkg .
 
