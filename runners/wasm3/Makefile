@@ -25,7 +25,7 @@ WASM3_SRC = $(WASM3_DIR)/m3_api_libc.c \
             $(WASM3_DIR)/m3_info.c \
             $(WASM3_DIR)/m3_module.c \
             $(WASM3_DIR)/m3_parse.c
-CFLAGS = -I$(WASM3_DIR) -O2
+CFLAGS ?= -I$(WASM3_DIR) -O2
 
 HOST = ../../wagnostic
 
