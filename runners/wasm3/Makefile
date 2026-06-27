@@ -7,7 +7,7 @@ ifneq (,$(findstring MINGW,$(shell uname -s)))
 else
   UNAME_S := $(shell uname -s)
   ifeq ($(UNAME_S),Darwin)
-    CFLAGS += -I/opt/homebrew/include -I/opt/homebrew/opt/sdl2/include -I/usr/local/include
+    CFLAGS = -I$(WASM3_DIR) -O2 -I/opt/homebrew/include -I/opt/homebrew/opt/sdl2/include -I/usr/local/include
     LDFLAGS = -L/opt/homebrew/lib -L/opt/homebrew/opt/sdl2/lib -lSDL2 -framework OpenGL -lm
   else
     LDFLAGS = -lSDL2 -lGL -lm
