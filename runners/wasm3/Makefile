@@ -7,7 +7,8 @@ ifneq (,$(findstring MINGW,$(shell uname -s)))
 else
   UNAME_S := $(shell uname -s)
   ifeq ($(UNAME_S),Darwin)
-    LDFLAGS = -lSDL2 -framework OpenGL -lm
+    CFLAGS += $(shell pkg-config --cflags sdl2)
+    LDFLAGS = $(shell pkg-config --libs sdl2) -framework OpenGL -lm
   else
     LDFLAGS = -lSDL2 -lGL -lm
   endif

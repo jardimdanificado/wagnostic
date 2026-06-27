@@ -91,7 +91,7 @@ jobs:
       - name: Build (Linux x86 via Docker)
         if: matrix.target == 'linux-x86'
         run: |
-          docker run --rm -v "$PWD:/src" -w /src i386/ubuntu:22.04 bash -c "
+          docker run --rm -v "$PWD:/src" -w /src i386/debian:12 bash -c "
             apt-get update -qq &&
             apt-get install -y build-essential libsdl2-dev libgl1-mesa-dev pkg-config make &&
             make -C runners/wasm3
@@ -102,7 +102,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Deps (macOS)
         if: startsWith(matrix.target, 'macos')
-        run: brew install sdl2 make
+        run: brew install sdl2 make pkg-config
 
       # -----------------------------------------------------------------------
       # Windows MinGW
@@ -113,7 +113,7 @@ jobs:
         with:
           msystem: MINGW64
           update: true
-          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2 make
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2 make git
 
       - name: Deps (Windows MinGW x86)
         if: matrix.target == 'windows-mingw32'
@@ -121,7 +121,7 @@ jobs:
         with:
           msystem: MINGW32
           update: true
-          install: mingw-w64-i686-gcc mingw-w64-i686-SDL2 make
+          install: mingw-w64-i686-gcc mingw-w64-i686-SDL2 make git
 
       # -----------------------------------------------------------------------
       # Build steps (all use the wasm3 runner's Makefile, which auto-clones wasm3)
@@ -134,7 +134,9 @@ jobs:
 
       - name: Build (macOS)
         if: startsWith(matrix.target, 'macos')
-        run: make -C runners/wasm3
+        run: |
+          make -C runners/wasm3
+          make -C examples roms
 
       - name: Build (Windows MinGW x64)
         if: matrix.target == 'windows-mingw'
@@ -150,6 +152,7 @@ jobs:
         if: matrix.target == 'windows-msvc'
         shell: powershell
         run: |
+          git clone --depth 1 https://github.com/wasm3/wasm3.git runners/wasm3/wasm3
           vcpkg install sdl2:x64-windows glew:x64-windows
           cmake -S . -B build -A x64 `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
@@ -160,6 +163,7 @@ jobs:
         if: matrix.target == 'windows-msvc32'
         shell: powershell
         run: |
+          git clone --depth 1 https://github.com/wasm3/wasm3.git runners/wasm3/wasm3
           vcpkg install sdl2:x86-windows glew:x86-windows
           cmake -S . -B build -A Win32 `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
