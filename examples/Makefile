@@ -39,9 +39,9 @@ HOST_LDFLAGS = -lSDL2 -lGL -lm
 
 
 
-# SpiderMonkey flags
-SM_CXXFLAGS = $(shell pkg-config --cflags mozjs-140)
-SM_LDFLAGS = $(shell pkg-config --libs mozjs-140)
+# SpiderMonkey flags — try mozjs-128 (Ubuntu 24.04), fall back to mozjs-140
+SM_CXXFLAGS = $(shell pkg-config --cflags mozjs-128 2>/dev/null || pkg-config --cflags mozjs-140 2>/dev/null)
+SM_LDFLAGS = $(shell pkg-config --libs mozjs-128 2>/dev/null || pkg-config --libs mozjs-140 2>/dev/null)
 
 # ── Binary targets (root level) ──────────────────────────────────────────────
 TARGET_HOST           = wagnostic
