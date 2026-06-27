@@ -22,28 +22,20 @@ permissions:
   contents: write
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Job 1: Build ROMs (platform-independent, done once on Linux)
-  # ---------------------------------------------------------------------------
   roms:
     name: Build ROMs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build ROMs
-        run: |
+      - run: |
           sudo apt-get update -qq
           sudo apt-get install -y clang
           make -C examples roms
-      - name: Upload ROM artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: roms
+          name: wagnostic-${{ inputs.version }}-roms
           path: examples/*.wasm
 
-  # ---------------------------------------------------------------------------
-  # Job 2: Build native host (matrix)
-  # ---------------------------------------------------------------------------
   build:
     needs: roms
     name: Build (${{ matrix.name }})
@@ -54,281 +46,127 @@ jobs:
         include:
           - name: Linux x64
             os: ubuntu-latest
-            target: linux
-            archive: linux-x64
+            target: linux-x64
           - name: Linux x86 32-bit
             os: ubuntu-latest
             target: linux-x86
-            archive: linux-x86
           - name: Linux ARM64
             os: ubuntu-24.04-arm
             target: linux-arm64
-            archive: linux-arm64
           - name: macOS Intel x64
             os: macos-15-intel
-            target: macos-intel
-            archive: macos-x64
+            target: macos-x64
           - name: macOS ARM64
             os: macos-14
             target: macos-arm64
-            archive: macos-arm64
           - name: Windows x64 (MinGW)
             os: windows-latest
             target: windows-mingw
-            archive: windows-x64-mingw
-          - name: Windows x86 32-bit (MinGW)
+          - name: Windows x86 (MinGW)
             os: windows-latest
             target: windows-mingw32
-            archive: windows-x86-mingw
           - name: Windows x64 (MSVC)
             os: windows-latest
             target: windows-msvc
-            archive: windows-x64-msvc
-          - name: Windows x86 32-bit (MSVC)
+          - name: Windows x86 (MSVC)
             os: windows-latest
             target: windows-msvc32
-            archive: windows-x86-msvc
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download ROMs
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: roms
+          name: wagnostic-${{ inputs.version }}-roms
           path: examples/
 
-      # -----------------------------------------------------------------------
-      # Linux x64 / ARM64 — SDL2 from apt
-      # -----------------------------------------------------------------------
       - name: Deps (Linux x64 / ARM64)
-        if: matrix.target == 'linux' || matrix.target == 'linux-arm64'
+        if: matrix.target == 'linux-x64' || matrix.target == 'linux-arm64'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libsdl2-dev libgl1-mesa-dev pkg-config
-
-      # -----------------------------------------------------------------------
-      # Linux x86 — i386/ubuntu Docker avoids broken i386 apt deps
-      # -----------------------------------------------------------------------
-      # -----------------------------------------------------------------------
-      # Linux x86 — i386/ubuntu Docker
-      # -----------------------------------------------------------------------
       - name: Build (Linux x86 via Docker)
         if: matrix.target == 'linux-x86'
-        run: |
+        run: >
           docker run --rm -v "$PWD:/src" -w /src i386/debian:12 bash -c "
             apt-get update -qq &&
             apt-get install -y build-essential libsdl2-dev libgl1-mesa-dev pkg-config make git &&
             make -C runners/wasm3
           "
-
-      # -----------------------------------------------------------------------
-      # macOS — SDL2 via Homebrew
-      # -----------------------------------------------------------------------
       - name: Deps (macOS)
         if: startsWith(matrix.target, 'macos')
         run: brew install sdl2 make pkg-config
-
-      # -----------------------------------------------------------------------
-      # Windows MinGW
-      # -----------------------------------------------------------------------
       - name: Deps (Windows MinGW x64)
         if: matrix.target == 'windows-mingw'
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
-          update: true
+          msystem: MINGW64; update: true
           install: mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2 make git
-
       - name: Deps (Windows MinGW x86)
         if: matrix.target == 'windows-mingw32'
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW32
-          update: true
+          msystem: MINGW32; update: true
           install: mingw-w64-i686-gcc mingw-w64-i686-SDL2 make git
 
-      # -----------------------------------------------------------------------
-      # Build steps (all use the wasm3 runner's Makefile, which auto-clones wasm3)
-      # -----------------------------------------------------------------------
-      - name: Build (Linux x64 / ARM64)
-        if: matrix.target == 'linux' || matrix.target == 'linux-arm64'
+      - name: Build
         run: |
-          make -C runners/wasm3
-          # SM runner: try mozjs-128 (Ubuntu 24.04), then mozjs-140 (PPA/manual), skip if neither
-          (sudo apt-get install -y libmozjs-128-dev 2>/dev/null || sudo apt-get install -y libmozjs-140-dev 2>/dev/null) && make -C examples host-sm && mv examples/wagnostic-sm wagnostic || true
-          mv wagnostic wagnostic-compat 2>/dev/null || true
+          case "${{ matrix.target }}" in
+            linux-x86)
+              # done via docker above
+              ;;
+            linux-*) make -C runners/wasm3 ;;
+            macos-*) make -C runners/wasm3 ;;
+            windows-mingw*) make -C runners/wasm3 ;;
+            windows-msvc*)
+              git clone --depth 1 https://github.com/wasm3/wasm3.git runners/wasm3/wasm3
+              vcpkg install sdl2:${{ matrix.target == 'windows-msvc' && 'x64' || 'x86' }}-windows glew:${{ matrix.target == 'windows-msvc' && 'x64' || 'x86' }}-windows
+              cmake -S . -B build -A ${{ matrix.target == 'windows-msvc' && 'x64' || 'Win32' }} `
+                -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+                -DVCPKG_TARGET_TRIPLET=${{ matrix.target == 'windows-msvc' && 'x64' || 'x86' }}-windows
+              cmake --build build --config Release
+              ;;
+          esac
 
-      - name: Build (macOS)
-        if: startsWith(matrix.target, 'macos')
+      - name: Rename binary
         run: |
-          brew reinstall sdl2  # ensure .pc is registered
-          make -C runners/wasm3
-          export CC=clang
-          mv wagnostic wagnostic-compat 2>/dev/null || true
+          EXT=""; SRC="wagnostic"
+          case "${{ matrix.target }}" in
+            windows-msvc)   SRC="build/Release/wagnostic.exe"; EXT=".exe" ;;
+            windows-msvc32) SRC="build/Release/wagnostic.exe"; EXT=".exe" ;;
+            windows-*)      EXT=".exe" ;;
+          esac
+          DST="wagnostic-${{ inputs.version }}-${{ matrix.target }}${EXT}"
+          if [ -f "$SRC" ]; then mv "$SRC" "$DST"; fi
 
-      - name: Build (Windows MinGW x64)
-        if: matrix.target == 'windows-mingw'
-        shell: msys2 {0}
-        run: |
-          make -C runners/wasm3
-          mv wagnostic.exe wagnostic-compat.exe
-
-      - name: Build (Windows MinGW x86)
-        if: matrix.target == 'windows-mingw32'
-        shell: msys2 {0}
-        run: |
-          make -C runners/wasm3
-          mv wagnostic.exe wagnostic-compat.exe
-
-      - name: Build (Windows MSVC x64)
-        if: matrix.target == 'windows-msvc'
-        shell: powershell
-        run: |
-          git clone --depth 1 https://github.com/wasm3/wasm3.git runners/wasm3/wasm3
-          vcpkg install sdl2:x64-windows glew:x64-windows
-          cmake -S . -B build -A x64 `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
-            -DVCPKG_TARGET_TRIPLET=x64-windows
-          cmake --build build --config Release
-
-      - name: Build (Windows MSVC x86)
-        if: matrix.target == 'windows-msvc32'
-        shell: powershell
-        run: |
-          git clone --depth 1 https://github.com/wasm3/wasm3.git runners/wasm3/wasm3
-          vcpkg install sdl2:x86-windows glew:x86-windows
-          cmake -S . -B build -A Win32 `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
-            -DVCPKG_TARGET_TRIPLET=x86-windows
-          cmake --build build --config Release
-
-      # -----------------------------------------------------------------------
-      # Package steps
-      # -----------------------------------------------------------------------
-      - name: Package (Linux / macOS)
-        if: (startsWith(matrix.target, 'linux') || startsWith(matrix.target, 'macos')) && matrix.target != 'linux-x86'
-        run: |
-          mkdir -p dist_pkg/roms
-          ls wagnostic 2>/dev/null && cp wagnostic dist_pkg/ || true
-          cp wagnostic-compat dist_pkg/ 2>/dev/null || true
-          ls examples/*.wasm 2>/dev/null && cp examples/*.wasm dist_pkg/roms/ || true
-          cp README.md dist_pkg/
-          tar -czf "wagnostic${{ inputs.version }}-${{ matrix.archive }}.tar.gz" -C dist_pkg .
-
-      - name: Package (Linux x86)
-        if: matrix.target == 'linux-x86'
-        run: |
-          mkdir -p dist_pkg/roms
-          ls wagnostic 2>/dev/null && cp wagnostic dist_pkg/ || true
-          cp wagnostic-compat dist_pkg/ 2>/dev/null || true
-          ls examples/*.wasm 2>/dev/null && cp examples/*.wasm dist_pkg/roms/ || true
-          cp README.md dist_pkg/
-          tar -czf "wagnostic${{ inputs.version }}-${{ matrix.archive }}.tar.gz" -C dist_pkg .
-
-      - name: Package (Windows MinGW x64)
-        if: matrix.target == 'windows-mingw'
-        shell: msys2 {0}
-        run: |
-          mkdir -p dist_pkg/roms
-          ls wagnostic.exe 2>/dev/null && cp wagnostic.exe dist_pkg/ || true
-          cp wagnostic-compat.exe dist_pkg/
-          ls examples/*.wasm 2>/dev/null && cp examples/*.wasm dist_pkg/roms/ || true
-          cp /mingw64/bin/SDL2.dll dist_pkg/
-          cp README.md dist_pkg/
-          powershell -NoProfile -Command \
-            "Compress-Archive -Path dist_pkg\* -DestinationPath wagnostic${{ inputs.version }}-${{ matrix.archive }}.zip -Force"
-
-      - name: Package (Windows MinGW x86)
-        if: matrix.target == 'windows-mingw32'
-        shell: msys2 {0}
-        run: |
-          mkdir -p dist_pkg/roms
-          ls wagnostic.exe 2>/dev/null && cp wagnostic.exe dist_pkg/ || true
-          cp wagnostic-compat.exe dist_pkg/
-          ls examples/*.wasm 2>/dev/null && cp examples/*.wasm dist_pkg/roms/ || true
-          cp /mingw32/bin/SDL2.dll dist_pkg/
-          cp README.md dist_pkg/
-          powershell -NoProfile -Command \
-            "Compress-Archive -Path dist_pkg\* -DestinationPath wagnostic${{ inputs.version }}-${{ matrix.archive }}.zip -Force"
-
-      - name: Package (Windows MSVC x64)
-        if: matrix.target == 'windows-msvc'
-        shell: powershell
-        run: |
-          New-Item -ItemType Directory -Force -Path dist_pkg/roms
-          Rename-Item build/Release/wagnostic.exe wagnostic-compat.exe
-          Copy-Item build/Release/wagnostic-compat.exe dist_pkg/
-          if (Test-Path "examples/*.wasm") { Copy-Item examples/*.wasm dist_pkg/roms/ }
-          $sdl = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin\SDL2.dll"
-          $glew = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin\glew32.dll"
-          if (Test-Path $sdl)  { Copy-Item $sdl  dist_pkg/ }
-          if (Test-Path $glew) { Copy-Item $glew dist_pkg/ }
-          Copy-Item README.md dist_pkg/
-          Compress-Archive -Path dist_pkg/* `
-            -DestinationPath "wagnostic${{ inputs.version }}-${{ matrix.archive }}.zip" -Force
-
-      - name: Package (Windows MSVC x86)
-        if: matrix.target == 'windows-msvc32'
-        shell: powershell
-        run: |
-          New-Item -ItemType Directory -Force -Path dist_pkg/roms
-          Rename-Item build/Release/wagnostic.exe wagnostic-compat.exe
-          Copy-Item build/Release/wagnostic-compat.exe dist_pkg/
-          if (Test-Path "examples/*.wasm") { Copy-Item examples/*.wasm dist_pkg/roms/ }
-          $sdl = "$env:VCPKG_INSTALLATION_ROOT\installed\x86-windows\bin\SDL2.dll"
-          $glew = "$env:VCPKG_INSTALLATION_ROOT\installed\x86-windows\bin\glew32.dll"
-          if (Test-Path $sdl)  { Copy-Item $sdl  dist_pkg/ }
-          if (Test-Path $glew) { Copy-Item $glew dist_pkg/ }
-          Copy-Item README.md dist_pkg/
-          Compress-Archive -Path dist_pkg/* `
-            -DestinationPath "wagnostic${{ inputs.version }}-${{ matrix.archive }}.zip" -Force
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: wagnostic-${{ matrix.target }}
-          path: |
-            *.tar.gz
-            *.zip
-          if-no-files-found: error
+          name: wagnostic-${{ inputs.version }}-${{ matrix.target }}
+          path: wagnostic-${{ inputs.version }}-${{ matrix.target }}*
 
-
-  # ---------------------------------------------------------------------------
-  # Job 3: Publish Release
-  # ---------------------------------------------------------------------------
   release:
     name: Publish release
     runs-on: ubuntu-latest
     needs: [build]
     if: ${{ !cancelled() }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Create tag if requested
         if: inputs.create_tag
         run: |
           tag="${{ inputs.version }}"
-          if git rev-parse "$tag" >/dev/null 2>&1; then
-            echo "Tag $tag already exists"
+          if git rev-parse "$tag" >/dev/null 2>&1; then echo "Tag $tag exists"
           else
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git tag -a "$tag" -m "Release $tag"
             git push origin "$tag"
           fi
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: artifacts
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.version }}
           name: ${{ inputs.version }}
