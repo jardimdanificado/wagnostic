@@ -942,7 +942,11 @@ int main(int argc, char **argv) {
         mouse_wheel = 0;
 
         /* ---- Yield / FPS limit ---- */
-        uint32_t target_fps = g_g_w_target_fps ? *m3_GetGlobalI32(g_g_w_target_fps) : 0;
+        uint32_t target_fps = 0;
+        if (g_g_w_target_fps) {
+            M3TaggedValue tv;
+            if (!m3_GetGlobal(g_g_w_target_fps, &tv)) target_fps = (uint32_t)tv.value.i32;
+        }
         if (target_fps > 0) {
             static uint32_t frame_start = 0;
             uint32_t now = SDL_GetTicks();

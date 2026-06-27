@@ -23,7 +23,7 @@ jobs:
       - name: Prepare Deployment Directory
         run: |
           mkdir dist
-          cp -r examples/runners/web/* dist/
+          cp -r runners/web/* dist/
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

@@ -17,3 +17,4 @@ wagnostic-*
 v8_Linux_x64
 examples/runners/lib/*
 wagn0/
+runners/wasm3/wasm3

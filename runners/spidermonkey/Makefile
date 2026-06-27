@@ -4,9 +4,9 @@ SM_LDFLAGS = $(shell pkg-config --libs mozjs-140)
 
 HOST = ../../wagnostic-sm
 
-.PHONY: all host bench clean
+.PHONY: all host clean
 
-all: host bench
+all: host
 
 host: $(HOST)
 
