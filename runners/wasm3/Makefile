@@ -7,8 +7,21 @@ ifneq (,$(findstring MINGW,$(shell uname -s)))
 else
   UNAME_S := $(shell uname -s)
   ifeq ($(UNAME_S),Darwin)
-    CFLAGS += $(shell pkg-config --cflags sdl2)
-    LDFLAGS = $(shell pkg-config --libs sdl2) -framework OpenGL -lm
+    # Homebrew paths: Intel = /usr/local, ARM = /opt/homebrew
+    PKG_CONFIG_PATH := $(shell find /opt/homebrew/lib/pkgconfig /usr/local/lib/pkgconfig /usr/local/opt/sdl2/lib/pkgconfig -name "sdl2.pc" 2>/dev/null | head -1 | xargs dirname 2>/dev/null)
+    ifneq ($(PKG_CONFIG_PATH),)
+      CFLAGS += $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --cflags sdl2)
+      LDFLAGS = $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs sdl2) -framework OpenGL -lm
+    else
+      # Fallback: use brew --prefix
+      SDL2_PREFIX := $(shell brew --prefix sdl2 2>/dev/null)
+      ifneq ($(SDL2_PREFIX),)
+        CFLAGS += -I$(SDL2_PREFIX)/include
+        LDFLAGS = -L$(SDL2_PREFIX)/lib -lSDL2 -framework OpenGL -lm
+      else
+        LDFLAGS = -lSDL2 -framework OpenGL -lm
+      endif
+    endif
   else
     LDFLAGS = -lSDL2 -lGL -lm
   endif
