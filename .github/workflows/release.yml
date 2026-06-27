@@ -85,25 +85,27 @@ jobs:
       # -----------------------------------------------------------------------
       # Linux x86 — i386/ubuntu Docker avoids broken i386 apt deps
       # -----------------------------------------------------------------------
+      # -----------------------------------------------------------------------
+      # Linux x86 — i386/ubuntu Docker
+      # -----------------------------------------------------------------------
       - name: Build (Linux x86 via Docker)
         if: matrix.target == 'linux-x86'
         run: |
           docker run --rm -v "$PWD:/src" -w /src i386/ubuntu:22.04 bash -c "
             apt-get update -qq &&
-            apt-get install -y build-essential libsdl2-dev libgl1-mesa-dev pkg-config &&
-            gcc -Irunners/wasm3/wasm3/source -O2 runners/wasm3/host.c runners/wasm3/wasm3/source/*.c -o wagnostic \
-              \$(pkg-config --cflags --libs sdl2) -lGL -lm
+            apt-get install -y build-essential libsdl2-dev libgl1-mesa-dev pkg-config make &&
+            make -C runners/wasm3
           "
 
       # -----------------------------------------------------------------------
-      # macOS — SDL2 via Homebrew; use prefix directly to avoid path issues
+      # macOS — SDL2 via Homebrew
       # -----------------------------------------------------------------------
       - name: Deps (macOS)
         if: startsWith(matrix.target, 'macos')
-        run: brew install sdl2
+        run: brew install sdl2 make
 
       # -----------------------------------------------------------------------
-      # Windows MinGW — correct package names (SDL2 uppercase)
+      # Windows MinGW
       # -----------------------------------------------------------------------
       - name: Deps (Windows MinGW x64)
         if: matrix.target == 'windows-mingw'
@@ -111,7 +113,7 @@ jobs:
         with:
           msystem: MINGW64
           update: true
-          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2 make
 
       - name: Deps (Windows MinGW x86)
         if: matrix.target == 'windows-mingw32'
@@ -119,47 +121,30 @@ jobs:
         with:
           msystem: MINGW32
           update: true
-          install: mingw-w64-i686-gcc mingw-w64-i686-SDL2
+          install: mingw-w64-i686-gcc mingw-w64-i686-SDL2 make
 
       # -----------------------------------------------------------------------
-      # Build steps
+      # Build steps (all use the wasm3 runner's Makefile, which auto-clones wasm3)
       # -----------------------------------------------------------------------
       - name: Build (Linux x64 / ARM64)
         if: matrix.target == 'linux' || matrix.target == 'linux-arm64'
         run: |
-          gcc -Irunners/wasm3/wasm3/source -O2 \
-            runners/wasm3/host.c runners/wasm3/wasm3/source/*.c \
-            -o wagnostic \
-            $(pkg-config --cflags --libs sdl2) \
-            -lGL -lm
+          make -C runners/wasm3
+          make -C examples roms
 
       - name: Build (macOS)
         if: startsWith(matrix.target, 'macos')
-        run: |
-          SDL2_PREFIX=$(brew --prefix sdl2)
-          gcc -Irunners/wasm3/wasm3/source -I${SDL2_PREFIX}/include -O2 \
-            runners/wasm3/host.c runners/wasm3/wasm3/source/*.c \
-            -o wagnostic \
-            -L${SDL2_PREFIX}/lib -lSDL2 \
-            -framework OpenGL -lm
+        run: make -C runners/wasm3
 
       - name: Build (Windows MinGW x64)
         if: matrix.target == 'windows-mingw'
         shell: msys2 {0}
-        run: |
-          gcc -Irunners/wasm3/wasm3/source -O2 \
-            runners/wasm3/host.c runners/wasm3/wasm3/source/*.c \
-            -o wagnostic.exe \
-            -lmingw32 -lSDL2main -lSDL2 -lopengl32 -lm
+        run: make -C runners/wasm3
 
       - name: Build (Windows MinGW x86)
         if: matrix.target == 'windows-mingw32'
         shell: msys2 {0}
-        run: |
-          gcc -Irunners/wasm3/wasm3/source -O2 \
-            runners/wasm3/host.c runners/wasm3/wasm3/source/*.c \
-            -o wagnostic.exe \
-            -lmingw32 -lSDL2main -lSDL2 -lopengl32 -lm
+        run: make -C runners/wasm3
 
       - name: Build (Windows MSVC x64)
         if: matrix.target == 'windows-msvc'
