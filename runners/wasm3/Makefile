@@ -7,13 +7,8 @@ ifneq (,$(findstring MINGW,$(shell uname -s)))
 else
   UNAME_S := $(shell uname -s)
   ifeq ($(UNAME_S),Darwin)
-    SDL2_PREFIX := $(shell brew --prefix sdl2 2>/dev/null)
-    ifneq ($(SDL2_PREFIX),)
-      CFLAGS += -I$(SDL2_PREFIX)/include
-      LDFLAGS = -L$(SDL2_PREFIX)/lib -lSDL2 -framework OpenGL -lm
-    else
-      LDFLAGS = -lSDL2 -framework OpenGL -lm
-    endif
+    CFLAGS += -I/opt/homebrew/include -I/opt/homebrew/opt/sdl2/include -I/usr/local/include
+    LDFLAGS = -L/opt/homebrew/lib -L/opt/homebrew/opt/sdl2/lib -lSDL2 -framework OpenGL -lm
   else
     LDFLAGS = -lSDL2 -lGL -lm
   endif
