@@ -111,25 +111,26 @@ jobs:
           install: mingw-w64-i686-gcc mingw-w64-i686-SDL2 make git
 
       - name: Build
+        shell: bash
         run: |
           case "${{ matrix.target }}" in
-            linux-x86)
-              # done via docker above
-              ;;
-            linux-*) make -C runners/wasm3 ;;
-            macos-*) make -C runners/wasm3 ;;
+            linux-x86) ;; # done via docker above
+            linux-*)   make -C runners/wasm3 ;;
+            macos-*)   make -C runners/wasm3 ;;
             windows-mingw*) make -C runners/wasm3 ;;
             windows-msvc*)
+              TRIPLET=${{ matrix.target == 'windows-msvc' && 'x64' || 'x86' }}
               git clone --depth 1 https://github.com/wasm3/wasm3.git runners/wasm3/wasm3
-              vcpkg install sdl2:${{ matrix.target == 'windows-msvc' && 'x64' || 'x86' }}-windows glew:${{ matrix.target == 'windows-msvc' && 'x64' || 'x86' }}-windows
-              cmake -S . -B build -A ${{ matrix.target == 'windows-msvc' && 'x64' || 'Win32' }} `
-                -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
-                -DVCPKG_TARGET_TRIPLET=${{ matrix.target == 'windows-msvc' && 'x64' || 'x86' }}-windows
+              vcpkg install sdl2:${TRIPLET}-windows glew:${TRIPLET}-windows
+              cmake -S . -B build -A ${{ matrix.target == 'windows-msvc' && 'x64' || 'Win32' }} \
+                -DCMAKE_TOOLCHAIN_FILE="${VCPKG_INSTALLATION_ROOT}/scripts/buildsystems/vcpkg.cmake" \
+                -DVCPKG_TARGET_TRIPLET=${TRIPLET}-windows
               cmake --build build --config Release
               ;;
           esac
 
       - name: Rename binary
+        shell: bash
         run: |
           EXT=""; SRC="wagnostic"
           case "${{ matrix.target }}" in
