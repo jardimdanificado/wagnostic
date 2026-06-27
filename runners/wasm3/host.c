@@ -1,5 +1,5 @@
 /*
- * Wagnostic Native Runner — wasm3 + SDL2 host
+ * Wagnostic Reference Runner — wasm3 + SDL2 host
  *
  * Loads a .wasm ROM file, executes its wupdate() function each frame,
  * and provides video/audio/input services via WASM global ABI.
@@ -19,37 +19,6 @@
 #include "wasm3.h"
 #include "m3_env.h"
 #include "m3_api_libc.h"
-
-/* ================================================================
- * wasm3 strlen — imported by ROMs via (import "env" "strlen")
- * ================================================================ */
-
-m3ApiRawFunction(m3_libc_strlen) {
-    m3ApiReturnType(int32_t)
-    m3ApiGetArgMem(const char *, str)
-    int32_t len = 0;
-    if (str) {
-        while (str[len] != '\0')
-            len++;
-    }
-    m3ApiReturn(len);
-}
-
-/* ================================================================
- * Math primitives — backed by glibc. WASM lowering of sin/cos/exp/
- * log/pow emits `env.*` imports, resolved here at link time.
- * ================================================================ */
-#include <math.h>
-
-m3ApiRawFunction(m3_env_sin)   { m3ApiReturnType(double); m3ApiGetArg(double, x); m3ApiReturn(sin(x)); }
-m3ApiRawFunction(m3_env_cos)   { m3ApiReturnType(double); m3ApiGetArg(double, x); m3ApiReturn(cos(x)); }
-m3ApiRawFunction(m3_env_exp)   { m3ApiReturnType(double); m3ApiGetArg(double, x); m3ApiReturn(exp(x)); }
-m3ApiRawFunction(m3_env_log)   { m3ApiReturnType(double); m3ApiGetArg(double, x); m3ApiReturn(log(x)); }
-m3ApiRawFunction(m3_env_pow)   { m3ApiReturnType(double); m3ApiGetArg(double, x); m3ApiGetArg(double, y); m3ApiReturn(pow(x, y)); }
-m3ApiRawFunction(m3_env_ldexp) { m3ApiReturnType(double); m3ApiGetArg(double, x); m3ApiGetArg(int32_t, n); m3ApiReturn(ldexp(x, n)); }
-m3ApiRawFunction(m3_env_fabs)  { m3ApiReturnType(double); m3ApiGetArg(double, x); m3ApiReturn(fabs(x)); }
-m3ApiRawFunction(m3_env_floor) { m3ApiReturnType(double); m3ApiGetArg(double, x); m3ApiReturn(floor(x)); }
-m3ApiRawFunction(m3_env_ceil)  { m3ApiReturnType(double); m3ApiGetArg(double, x); m3ApiReturn(ceil(x)); }
 
 /* ================================================================
  * Globals
@@ -237,19 +206,6 @@ static void cache_globals(void) {
 /* ================================================================
  * Audio callback (runs on SDL audio thread)
  *
- * RULES FOR ROM AUTHORS (prevents race conditions):
- *   1. Write samples into w_audio_buffer FIRST
- *   2. THEN update w_audio_write ONCE, at the very end
- *   3. NEVER read w_audio_write while writing samples
- *   4. NEVER read w_audio_read (host owns it)
- *   5. Use the provided fill_audio_buffer() helper — it follows all rules
- *
- * RULES FOR HOST AUTHORS:
- *   1. Read w_audio_write ONCE at the start of the callback
- *   2. Process all samples
- *   3. Write w_audio_read ONCE at the very end
- *   4. NEVER write to w_audio_write (ROM owns it)
- *   5. NEVER read w_audio_read from another thread
  * ================================================================ */
 
 static void host_audio_callback(void *userdata, Uint8 *stream_ptr, int len_bytes) {
@@ -586,25 +542,8 @@ int main(int argc, char **argv) {
     result = m3_LoadModule(g_runtime, g_module);
     if (result) { fprintf(stderr, "Load error: %s\n", result); m3_FreeRuntime(g_runtime); m3_FreeEnvironment(env); free(wasm_data); return 1; }
 
-    result = m3_LinkLibC(g_module);
-    if (result) fprintf(stderr, "Warning: m3_LinkLibC: %s\n", result);
-
-    /* Link strlen into "env" module */
-    result = m3_LinkRawFunction(g_module, "env", "strlen", "i(i)", &m3_libc_strlen);
-    if (result) fprintf(stderr, "Warning: strlen link: %s\n", result);
-
-    /* Math primitives — provided by glibc. OGG ROMs (stb_vorbis) need
-     * these for the inverse MDCT; MP3/WAV ROMs do not import them.
-     * Note: 'i' (lowercase) = i32, 'I' = i64. */
-    result = m3_LinkRawFunction(g_module, "env", "sin",   "F(F)",  &m3_env_sin);   if (result) {}
-    result = m3_LinkRawFunction(g_module, "env", "cos",   "F(F)",  &m3_env_cos);   if (result) {}
-    result = m3_LinkRawFunction(g_module, "env", "exp",   "F(F)",  &m3_env_exp);   if (result) {}
-    result = m3_LinkRawFunction(g_module, "env", "log",   "F(F)",  &m3_env_log);   if (result) {}
-    result = m3_LinkRawFunction(g_module, "env", "pow",   "F(FF)", &m3_env_pow);   if (result) {}
-    result = m3_LinkRawFunction(g_module, "env", "ldexp", "F(Fi)", &m3_env_ldexp); if (result) {}
-    result = m3_LinkRawFunction(g_module, "env", "fabs",  "F(F)",  &m3_env_fabs);  if (result) {}
-    result = m3_LinkRawFunction(g_module, "env", "floor", "F(F)",  &m3_env_floor); if (result) {}
-    result = m3_LinkRawFunction(g_module, "env", "ceil",  "F(F)",  &m3_env_ceil);  if (result) {}
+    /* The wagnostic protocol has zero host imports. Everything the ROM
+     * needs (libc, libm) must be compiled into the WASM itself. */
 
     /* ---- Find wupdate ---- */
     IM3Function f_wupdate = NULL;

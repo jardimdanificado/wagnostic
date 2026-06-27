@@ -579,23 +579,9 @@
     mouseButtons = 0;
     mouseWheel = 0;
 
-    // env imports: libm funcs some ROMs need (audio_ogg = stb_vorbis
-    // MDCT imports sin/cos/exp/log/pow/ldexp). Harmless to provide
-    // when the ROM doesn't need them.
-    var wasmImports = {
-      env: {
-        strlen: function () { return 0; },
-        sin:   Math.sin,
-        cos:   Math.cos,
-        exp:   Math.exp,
-        log:   Math.log,
-        pow:   Math.pow,
-        ldexp: function (x, n) { return x * Math.pow(2, n); },
-        fabs:  Math.abs,
-        floor: Math.floor,
-        ceil:  Math.ceil
-      }
-    };
+    // The wagnostic protocol has zero host imports. Everything the ROM
+    // needs (libc, libm) is compiled into the WASM itself.
+    var wasmImports = {};
 
     // Some browser polyfills choke on instantiateStreaming without an
     // explicit imports object. Pass an empty one and fall back to

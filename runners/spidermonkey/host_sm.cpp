@@ -707,25 +707,12 @@ int main(int argc, char** argv) {
 
         // clang-format off
         if (!eval_js(
-            // Instantiate the WASM module
+            // Instantiate the WASM module. The wagnostic protocol has
+            // zero host imports — anything the ROM needs (libc, libm) is
+            // compiled into the WASM itself.
             "var _b = new Uint8Array(__wasmBytes);\n"
             "var _m = new WebAssembly.Module(_b);\n"
-            "var _imports = {env: {\n"
-            "  strlen: function(){return 0;},\n"
-            // Math primitives needed by ROMs that decode compressed audio
-            // (e.g. stb_vorbis in audio_ogg). SpiderMonkey's Math.* are
-            // f64 which matches WASM f64. ldexp has no JS Math equivalent
-            // so it's implemented inline.
-            "  sin:   Math.sin,\n"
-            "  cos:   Math.cos,\n"
-            "  exp:   Math.exp,\n"
-            "  log:   Math.log,\n"
-            "  pow:   Math.pow,\n"
-            "  ldexp: function(x, n) { return x * Math.pow(2, n); },\n"
-            "  fabs:  Math.abs,\n"
-            "  floor: Math.floor,\n"
-            "  ceil:  Math.ceil\n"
-            "}};\n"
+            "var _imports = {};\n"
             "var _inst = new WebAssembly.Instance(_m, _imports);\n"
             "var _e = _inst.exports;\n"
             // Cache every named global's pointer (i32 -> linear memory offset)
