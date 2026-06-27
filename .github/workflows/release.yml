@@ -168,10 +168,24 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+      - name: Package release
+        run: |
+          VERSION="${{ inputs.version }}"
+          mkdir -p bin roms
+          # Move ROMs (.wasm) to roms/
+          cp artifacts/wagnostic-${VERSION}-roms/*.wasm roms/
+          # Move binaries to bin/ (skip the roms artifact folder)
+          for dir in artifacts/wagnostic-${VERSION}-*/; do
+            if [ "$dir" != "artifacts/wagnostic-${VERSION}-roms/" ]; then
+              cp "$dir"/* bin/
+            fi
+          done
+          # Create single zip with bin/ and roms/
+          zip -r "wagnostic-${VERSION}.zip" bin/ roms/
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.version }}
           name: ${{ inputs.version }}
           body: "Wagnostic ${{ inputs.version }}"
           prerelease: ${{ inputs.prerelease }}
-          files: artifacts/**/*
+          files: wagnostic-*.zip
