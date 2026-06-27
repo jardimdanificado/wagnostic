@@ -130,7 +130,9 @@ jobs:
         if: matrix.target == 'linux' || matrix.target == 'linux-arm64'
         run: |
           make -C runners/wasm3
+          (sudo apt-get install -y libmozjs-140-dev 2>/dev/null && make -C examples host-sm && mv examples/wagnostic-sm wagnostic) || true
           make -C examples roms
+          mv wagnostic wagnostic3 2>/dev/null || true
 
       - name: Build (macOS)
         if: startsWith(matrix.target, 'macos')
@@ -139,16 +141,21 @@ jobs:
           make -C runners/wasm3
           export CC=clang
           make -C examples roms 2>/dev/null || echo "ROM build skipped (wasm32 target not available)"
+          mv wagnostic wagnostic3 2>/dev/null || true
 
       - name: Build (Windows MinGW x64)
         if: matrix.target == 'windows-mingw'
         shell: msys2 {0}
-        run: make -C runners/wasm3
+        run: |
+          make -C runners/wasm3
+          mv wagnostic.exe wagnostic3.exe
 
       - name: Build (Windows MinGW x86)
         if: matrix.target == 'windows-mingw32'
         shell: msys2 {0}
-        run: make -C runners/wasm3
+        run: |
+          make -C runners/wasm3
+          mv wagnostic.exe wagnostic3.exe
 
       - name: Build (Windows MSVC x64)
         if: matrix.target == 'windows-msvc'
@@ -178,18 +185,20 @@ jobs:
       - name: Package (Linux / macOS)
         if: (startsWith(matrix.target, 'linux') || startsWith(matrix.target, 'macos')) && matrix.target != 'linux-x86'
         run: |
-          mkdir dist_pkg
-          cp wagnostic dist_pkg/
-          ls examples/*.wasm 2>/dev/null && cp examples/*.wasm dist_pkg/ || true
+          mkdir -p dist_pkg/roms
+          ls wagnostic 2>/dev/null && cp wagnostic dist_pkg/ || true
+          cp wagnostic3 dist_pkg/ 2>/dev/null || true
+          ls examples/*.wasm 2>/dev/null && cp examples/*.wasm dist_pkg/roms/ || true
           cp README.md dist_pkg/
           tar -czf "wagnostic${{ inputs.version }}-${{ matrix.archive }}.tar.gz" -C dist_pkg .
 
       - name: Package (Linux x86)
         if: matrix.target == 'linux-x86'
         run: |
-          mkdir dist_pkg
-          cp wagnostic dist_pkg/
-          ls examples/*.wasm 2>/dev/null && cp examples/*.wasm dist_pkg/ || true
+          mkdir -p dist_pkg/roms
+          ls wagnostic 2>/dev/null && cp wagnostic dist_pkg/ || true
+          cp wagnostic3 dist_pkg/ 2>/dev/null || true
+          ls examples/*.wasm 2>/dev/null && cp examples/*.wasm dist_pkg/roms/ || true
           cp README.md dist_pkg/
           tar -czf "wagnostic${{ inputs.version }}-${{ matrix.archive }}.tar.gz" -C dist_pkg .
 
@@ -197,9 +206,10 @@ jobs:
         if: matrix.target == 'windows-mingw'
         shell: msys2 {0}
         run: |
-          mkdir -p dist_pkg
-          cp wagnostic.exe dist_pkg/
-          ls examples/*.wasm 2>/dev/null && cp examples/*.wasm dist_pkg/ || true
+          mkdir -p dist_pkg/roms
+          ls wagnostic.exe 2>/dev/null && cp wagnostic.exe dist_pkg/ || true
+          cp wagnostic3.exe dist_pkg/
+          ls examples/*.wasm 2>/dev/null && cp examples/*.wasm dist_pkg/roms/ || true
           cp /mingw64/bin/SDL2.dll dist_pkg/
           cp README.md dist_pkg/
           powershell -NoProfile -Command \
@@ -209,9 +219,10 @@ jobs:
         if: matrix.target == 'windows-mingw32'
         shell: msys2 {0}
         run: |
-          mkdir -p dist_pkg
-          cp wagnostic.exe dist_pkg/
-          ls examples/*.wasm 2>/dev/null && cp examples/*.wasm dist_pkg/ || true
+          mkdir -p dist_pkg/roms
+          ls wagnostic.exe 2>/dev/null && cp wagnostic.exe dist_pkg/ || true
+          cp wagnostic3.exe dist_pkg/
+          ls examples/*.wasm 2>/dev/null && cp examples/*.wasm dist_pkg/roms/ || true
           cp /mingw32/bin/SDL2.dll dist_pkg/
           cp README.md dist_pkg/
           powershell -NoProfile -Command \
@@ -221,9 +232,10 @@ jobs:
         if: matrix.target == 'windows-msvc'
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Force -Path dist_pkg
-          Copy-Item build/Release/wagnostic.exe dist_pkg/
-          if (Test-Path "examples/*.wasm") { Copy-Item examples/*.wasm dist_pkg/ }
+          New-Item -ItemType Directory -Force -Path dist_pkg/roms
+          Rename-Item build/Release/wagnostic.exe wagnostic3.exe
+          Copy-Item build/Release/wagnostic3.exe dist_pkg/
+          if (Test-Path "examples/*.wasm") { Copy-Item examples/*.wasm dist_pkg/roms/ }
           $sdl = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin\SDL2.dll"
           $glew = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin\glew32.dll"
           if (Test-Path $sdl)  { Copy-Item $sdl  dist_pkg/ }
@@ -236,9 +248,10 @@ jobs:
         if: matrix.target == 'windows-msvc32'
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Force -Path dist_pkg
-          Copy-Item build/Release/wagnostic.exe dist_pkg/
-          if (Test-Path "examples/*.wasm") { Copy-Item examples/*.wasm dist_pkg/ }
+          New-Item -ItemType Directory -Force -Path dist_pkg/roms
+          Rename-Item build/Release/wagnostic.exe wagnostic3.exe
+          Copy-Item build/Release/wagnostic3.exe dist_pkg/
+          if (Test-Path "examples/*.wasm") { Copy-Item examples/*.wasm dist_pkg/roms/ }
           $sdl = "$env:VCPKG_INSTALLATION_ROOT\installed\x86-windows\bin\SDL2.dll"
           $glew = "$env:VCPKG_INSTALLATION_ROOT\installed\x86-windows\bin\glew32.dll"
           if (Test-Path $sdl)  { Copy-Item $sdl  dist_pkg/ }
