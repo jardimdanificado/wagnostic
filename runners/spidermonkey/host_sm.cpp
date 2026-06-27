@@ -510,7 +510,7 @@ static void init_from_globals() {
     SCALE = mem_u32(gptr_scale);
     if (W == 0)     W = 320;
     if (H == 0)     H = 240;
-    if (BPP == 0)   BPP = 16;
+    if (BPP == 0)   BPP = 32;
     if (SCALE == 0) SCALE = 1;
 
     char title[128];
@@ -526,7 +526,7 @@ static void init_from_globals() {
         SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
 
         window = SDL_CreateWindow(
-            title[0] ? title : "Wagnostic SM",
+            title[0] ? title : "Untitled",
             SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
             W * SCALE, H * SCALE,
             SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
@@ -543,7 +543,7 @@ static void init_from_globals() {
         init_gpu_pipeline();
     } else {
         SDL_SetWindowSize(window, W * SCALE, H * SCALE);
-        SDL_SetWindowTitle(window, title[0] ? title : "Wagnostic SM");
+        SDL_SetWindowTitle(window, title[0] ? title : "Untitled");
     }
     set_viewport_with_letterbox();
     init_textures_and_pbos();
@@ -890,8 +890,8 @@ int main(int argc, char** argv) {
             uint32_t cur_SCALE = mem_u32(gptr_scale);
             if (cur_W == 0)     cur_W = 320;
             if (cur_H == 0)     cur_H = 240;
-            if (cur_BPP == 0)   cur_BPP = 16;
-            if (cur_SCALE == 0) cur_SCALE = 1;
+                if (cur_BPP == 0)   cur_BPP = 32;
+                if (cur_SCALE == 0) cur_SCALE = 1;
             if (cur_W != prev_W || cur_H != prev_H ||
                 cur_BPP != prev_BPP || cur_SCALE != prev_SCALE) {
                 W = cur_W; H = cur_H; BPP = cur_BPP; SCALE = cur_SCALE;

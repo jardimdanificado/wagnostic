@@ -5,8 +5,8 @@ Minimalist, platform-agnostic WASM runtime for multimedia apps.
 ## Quick Start
 
 ```bash
-make -C examples
-./examples/wagnostic examples/buttons_test.wasm
+make -C examples           # builds the wasm3 host and the example ROMs
+./examples/wagnostic examples/roms/buttons_test/buttons_test.wasm
 ```
 
 A ROM exports globals for the screen, input, and audio, plus a single function:
@@ -34,6 +34,35 @@ A Wagnostic ROM is a WebAssembly binary that exports named globals. The Host rea
 
 ### Must export
 - `wupdate()` — called once per frame, returns 0 to quit
+
+### Optional globals
+All other globals are optional. The host applies sensible defaults so a
+ROM with just `wupdate()` runs immediately:
+
+| Global | Default | Notes |
+|--------|---------|-------|
+| `w_width` | 320 | window width in pixels |
+| `w_height` | 240 | window height in pixels |
+| `w_bpp` | 32 | bits per pixel (8/16/32) |
+| `w_scale` | 1 | window scale factor |
+| `w_title` | "Untitled" | window title |
+| `w_vram` | — | not provided: nothing to render |
+| `w_dirty_count` / `w_dirty_rects` | — | not provided: nothing to render |
+| `w_audio_*` | — | all zero: audio is opt-in |
+| `w_mouse_*` / `w_keys` / `w_gamepad_buttons` | — | reads return 0, writes are no-ops |
+| `w_ticks` | — | reads return 0 |
+| `w_target_fps` | 0 | no framerate limit |
+
+The minimal viable ROM:
+
+```c
+int wupdate() { return 1; }
+```
+
+opens a 320×240 window titled "Untitled", runs at 32bpp, and exits when
+the user closes the window. To draw, declare a `w_vram` buffer and start
+writing to it. To use audio, declare `w_audio_size > 0` plus the rest of
+the audio globals.
 
 ## 3. Global Variables
 
@@ -79,18 +108,23 @@ A Wagnostic ROM is a WebAssembly binary that exports named globals. The Host rea
 |------|------|-------------|
 | `w_target_fps` | `uint32` | Target FPS (0 = no limit, default) |
 
-### Audio (ROM writes, Host reads)
-| Name | Type | Description |
-|------|------|-------------|
-| `w_audio_size` | `uint32` | Buffer size in bytes |
-| `w_audio_sample_rate` | `uint32` | Sample rate (Hz) |
-| `w_audio_bpp` | `uint32` | Bytes per sample (1=u8, 2=s16, 4=f32) |
-| `w_audio_channels` | `uint32` | Number of channels |
-| `w_audio_write` | `uint32` | Write position (ROM owns this) |
-| `w_audio_read` | `uint32` | Read position (Host owns this) |
-| `w_audio_buffer` | `uint8[]` | Audio ring buffer |
-| `w_audio_underrun` | `uint32` | Underrun counter (Host increments) |
-| `w_audio_overrun` | `uint32` | Overrun counter (Host increments) |
+### Audio
+
+| Name | Type | Direction | Description |
+|------|------|-----------|-------------|
+| `w_audio_size` | `uint32` | ROM → Host | Buffer size in bytes |
+| `w_audio_sample_rate` | `uint32` | ROM → Host | Sample rate (Hz) |
+| `w_audio_bpp` | `uint32` | ROM → Host | Bytes per sample (1=u8, 2=s16, 4=f32) |
+| `w_audio_channels` | `uint32` | ROM → Host | Number of channels |
+| `w_audio_write` | `uint32` | ROM → Host | Write position |
+| `w_audio_read` | `uint32` | Host → ROM | Read position |
+| `w_audio_buffer` | `uint8[]` | shared | Ring buffer (16384 bytes) |
+| `w_audio_underrun` | `uint32` | Host → ROM | Underrun counter |
+| `w_audio_overrun` | `uint32` | Host → ROM | Overrun counter |
+
+`w_audio_bpp` is bytes per sample (not bits per pixel). The host opens
+the SDL audio device with the format from these fields and reopens it
+when any of them change.
 
 ## 4. Dirty Rectangles
 
@@ -153,19 +187,23 @@ The buffer uses `size - 1` usable bytes:
 - `w_audio_write == w_audio_read` → **EMPTY**
 - `(w_audio_write + 1) % size == w_audio_read` → **FULL**
 
-**ROM must:**
-1. Write samples into `w_audio_buffer` first
-2. Update `w_audio_write` ONCE at the very end
-3. Never read `w_audio_write` while writing
-4. Never read `w_audio_read`
+The Host protects this buffer with a mutex, so the ownership rules below
+are about avoiding stale-pointer bugs, not memory races. The `fill_audio()`
+default in `wagn0.h` follows all of them.
 
-**Host must:**
+**ROM (producer) — owns `w_audio_write`:**
+1. Read `w_audio_read` to compute free space
+2. Write samples into `w_audio_buffer`
+3. Update `w_audio_write` ONCE at the end
+4. Don't re-read `w_audio_write` after you start writing (you already have the local copy)
+
+**Host (consumer) — owns `w_audio_read`:**
 1. Read `w_audio_write` ONCE at callback start
 2. Process samples
 3. Write `w_audio_read` ONCE at callback end
 4. Never write to `w_audio_write`
 
-See [ABI.md](ABI.md) for complete details and examples.
+See [ABI.md](ABI.md) for the diagnostic counters and wrap-around details.
 
 ## 7. Host Behavior
 

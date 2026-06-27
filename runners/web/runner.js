@@ -6,7 +6,7 @@
   // ── Constants ──────────────────────────────────────────────────────────
   const DEFAULT_WIDTH  = 320;
   const DEFAULT_HEIGHT = 240;
-  const DEFAULT_BPP    = 16;
+  const DEFAULT_BPP    = 32;
   const DEFAULT_SCALE  = 1;
   const MAX_DIRTY_RECTS = 32;
   const RECT_STRIDE     = 16; // 4 x i32 per rect (x, y, w, h)

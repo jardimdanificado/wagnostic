@@ -3,6 +3,21 @@
 ## Globals-Based API
 ROMs export named globals. The Host finds them by name and reads/writes their values.
 
+## Minimal ROM
+
+`wupdate()` is the only required export. The host provides defaults for
+everything else so a ROM with just `wupdate()` runs immediately:
+
+- `w_width = 320`, `w_height = 240`
+- `w_bpp = 32`, `w_scale = 1`
+- `w_title = "Untitled"`
+- Audio: off (declared by setting `w_audio_size > 0` plus the rest)
+- Input/timing: no-op (declared by exporting the corresponding globals)
+
+```c
+int wupdate() { return 1; }
+```
+
 ## Core Globals
 
 ### Screen
@@ -54,18 +69,22 @@ This avoids the ambiguity of `w == r` meaning both empty and full.
 
 ### Ownership Rules
 
-**ROM (producer) owns `w_audio_write`:**
-1. Write samples into `w_audio_buffer` FIRST
-2. THEN update `w_audio_write` ONCE, at the very end
-3. NEVER read `w_audio_write` while writing samples
-4. NEVER read `w_audio_read` (Host owns it)
+The Host serializes the audio callback and the ROM's `fill_audio` with a
+mutex, so these rules are about avoiding stale-pointer bugs, not memory
+races. The `fill_audio()` default in `wagn0.h` follows all of them.
 
-**Host (consumer) owns `w_audio_read`:**
+**ROM (producer) — owns `w_audio_write`:**
+1. Read `w_audio_read` to compute free space in the ring
+2. Write samples into `w_audio_buffer`
+3. Update `w_audio_write` ONCE at the very end
+4. Don't re-read `w_audio_write` after you start writing (you already
+   have the local copy — a re-read would see a stale value)
+
+**Host (consumer) — owns `w_audio_read`:**
 1. Read `w_audio_write` ONCE at the start of the callback
 2. Process all available samples
 3. Write `w_audio_read` ONCE at the very end
-4. NEVER write to `w_audio_write` (ROM owns it)
-5. NEVER read `w_audio_read` from another thread
+4. Never write to `w_audio_write` (ROM owns it)
 
 ### Sample Formats (`w_audio_bpp`)
 
@@ -77,16 +96,19 @@ This avoids the ambiguity of `w == r` meaning both empty and full.
 
 ### Wrap-Around
 
-When a multi-byte sample (s16, f32) straddles the end of the buffer, the ROM
-must handle the split:
+The ring buffer is a flat array. When `w_audio_write` is near the end and
+a multi-byte sample (s16 = 2 bytes, f32 = 4 bytes) would straddle the
+end, the ROM must split the write:
 
 ```
 Buffer: [... data ... | 1 byte | ← wrap → | 1 byte | ... data ... ]
                               ^pos                    ^(pos+1)%size
 ```
 
-For s16 at the boundary: write the low byte now, the high byte will be at
-position 0 on the next write. The Host reads across the boundary correctly.
+For an s16 at the boundary: write the low byte at `pos`, then on the
+next iteration the high byte wraps to position 0. The Host already
+handles the read-side wrap, so it does not care that the bytes arrived
+in two separate writes.
 
 ### Diagnostic Counters
 

@@ -548,7 +548,7 @@ static void read_screen_config(uint32_t *W, uint32_t *H, uint32_t *BPP, uint32_t
     *SCALE = read_u32(g_g_w_scale);
     if (*W == 0)     *W = 320;
     if (*H == 0)     *H = 240;
-    if (*BPP == 0)   *BPP = 16;
+    if (*BPP == 0)   *BPP = 32;
     if (*SCALE == 0) *SCALE = 1;
 }
 
@@ -649,7 +649,7 @@ int main(int argc, char **argv) {
 
     /* ---- Create window ---- */
     SDL_Window *window = SDL_CreateWindow(
-        title[0] ? title : "Wagnostic",
+        title[0] ? title : "Untitled",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         (int)(W * SCALE), (int)(H * SCALE),
         SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
@@ -839,7 +839,7 @@ int main(int argc, char **argv) {
         if (config_changed || title_changed) {
             SDL_SetWindowSize(window, (int)(W * SCALE), (int)(H * SCALE));
             if (title_changed) {
-                SDL_SetWindowTitle(window, new_title[0] ? new_title : "Wagnostic");
+                SDL_SetWindowTitle(window, new_title[0] ? new_title : "Untitled");
                 strncpy(title, new_title, sizeof(title) - 1);
                 title[sizeof(title) - 1] = '\0';
             }
