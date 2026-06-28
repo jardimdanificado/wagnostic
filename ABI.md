@@ -22,7 +22,7 @@ The host provides defaults for all struct fields, so a ROM with just `wupdate()`
 
 ## State Struct Layout
 
-The struct is **984 bytes** total. All offsets are from the base address returned by `wupdate()`.
+The struct is **1024 bytes** total. All offsets are from the base address returned by `wupdate()`.
 
 ```c
 typedef struct { int x, y, w, h; } Rect;
@@ -53,7 +53,7 @@ typedef struct {
     uint32_t audio_overrun;   // +972
     uint32_t vram_offset;     // +976
     uint32_t audio_buffer_offset; // +980
-} WagnosticState;  // size = 984
+} WagnosticState;  // size = 1024
 ```
 
 ### Screen
@@ -228,7 +228,7 @@ int wupdate() {
 
 ### AssemblyScript
 ```ts
-const STATE_SIZE = 984;
+const STATE_SIZE = 1024;
 const VRAM_SIZE = 320 * 240 * 2;
 
 let state_ptr: usize = 0;
@@ -361,11 +361,11 @@ convenience; in production you can export only `wupdate` and `memory`.
 
 ## Size Guarantee
 
-The struct size is guaranteed to be exactly **984 bytes** across all
+The struct size is guaranteed to be exactly **1024 bytes** across all
 compilers and languages. Hosts include a compile-time assertion:
 
 ```c
-static_assert(sizeof(WagnosticState) == 984, "Size mismatch");
+static_assert(sizeof(WagnosticState) == 1024, "Size mismatch");
 ```
 
 If a compiler inserts unexpected padding, the build fails immediately.

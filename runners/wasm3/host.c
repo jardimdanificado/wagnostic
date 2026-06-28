@@ -41,9 +41,10 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
+    uint8_t reserved[40];
 } WagnosticState;
 
-static_assert(sizeof(WagnosticState) == 984, "WagnosticState size mismatch — check struct layout");
+static_assert(sizeof(WagnosticState) == 1024, "WagnosticState size mismatch — check struct layout");
 
 /* ================================================================
  * Globals
