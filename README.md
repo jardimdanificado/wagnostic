@@ -36,8 +36,7 @@ A Wagnostic ROM is a WebAssembly binary that exports named globals. The Host rea
 - `wupdate()` — called once per frame, returns 0 to quit
 
 ### Optional globals
-All other globals are optional. The host applies sensible defaults so a
-ROM with just `wupdate()` runs immediately:
+All other globals are optional. The host applies sensible defaults so a ROM with just `wupdate()` runs immediately:
 
 | Global | Default | Notes |
 |--------|---------|-------|

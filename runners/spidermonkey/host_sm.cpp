@@ -720,7 +720,7 @@ int main(int argc, char** argv) {
             "var _gn = [\n"
             "  'w_width','w_height','w_bpp','w_scale','w_title','w_vram',\n"
             "  'w_mouse_x','w_mouse_y','w_mouse_buttons','w_mouse_wheel',\n"
-            "  'w_keys','w_gamepad_buttons','w_ticks',\n"
+            "  'w_keys','w_gamepad_buttons','w_ticks','w_target_fps',\n"
             "  'w_audio_size','w_audio_sample_rate','w_audio_bpp',\n"
             "  'w_audio_channels','w_audio_write','w_audio_read',\n"
             "  'w_audio_buffer',\n"
