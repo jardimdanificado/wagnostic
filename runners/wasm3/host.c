@@ -1,11 +1,9 @@
 /*
  * Wagnostic Reference Runner — wasm3 + SDL2 host
  *
- * Loads a .wasm ROM file, executes its wupdate() function each frame,
- * and provides video/audio/input services via WASM global ABI.
- *
- * ROMs export i32 global pointers into WASM linear memory.
- * The host reads/writes the pointed-to values each frame.
+ * Loads a .wasm ROM file, executes its wupdate() function each frame.
+ * wupdate() returns a pointer (i32 offset) to a WagnosticState struct
+ * in WASM linear memory. The host reads/writes that struct directly.
  *
  * Build: see CMakeLists.txt
  * Usage: wagnostic <rom.wasm>
@@ -21,303 +19,89 @@
 #include "m3_api_libc.h"
 
 /* ================================================================
+ * WagnosticState struct (must match wagnostic.h exactly)
+ * ================================================================ */
+
+typedef struct { int x, y, w, h; } Rect;
+
+typedef struct {
+    uint32_t width, height, bpp, scale;
+    char title[128];
+    uint32_t dirty_count;
+    Rect dirty_rects[32];
+    int32_t mouse_x, mouse_y;
+    uint32_t mouse_buttons;
+    int32_t mouse_wheel;
+    uint8_t keys[256];
+    uint32_t gamepad_buttons;
+    uint32_t ticks;
+    uint32_t target_fps;
+    uint32_t audio_size, audio_sample_rate, audio_bpp, audio_channels;
+    uint32_t audio_write, audio_read;
+    uint32_t audio_underrun, audio_overrun;
+    uint32_t vram_offset;
+    uint32_t audio_buffer_offset;
+} WagnosticState;
+
+static_assert(sizeof(WagnosticState) == 984, "WagnosticState size mismatch — check struct layout");
+
+/* ================================================================
  * Globals
  * ================================================================ */
 
 static IM3Module  g_module  = NULL;
 static IM3Runtime g_runtime = NULL;
 
-/* Cached pointers into WASM linear memory (resolved once per frame) */
-static uint8_t *g_mem          = NULL;
-static uint32_t g_mem_len      = 0;
+static uint8_t *g_mem     = NULL;
+static uint32_t g_mem_len = 0;
 
-/* Pointer offsets for frequently-used globals */
-static IM3Global g_g_w_vram         = NULL;
-static IM3Global g_g_w_dirty_count  = NULL;
-static IM3Global g_g_w_dirty_rects  = NULL;
-static IM3Global g_g_w_keys         = NULL;
-static IM3Global g_g_w_mouse_x      = NULL;
-static IM3Global g_g_w_mouse_y      = NULL;
-static IM3Global g_g_w_mouse_buttons= NULL;
-static IM3Global g_g_w_mouse_wheel  = NULL;
-static IM3Global g_g_w_target_fps   = NULL;
-static IM3Global g_g_w_gamepad_buttons = NULL;
-static IM3Global g_g_w_ticks        = NULL;
-static IM3Global g_g_w_width        = NULL;
-static IM3Global g_g_w_height       = NULL;
-static IM3Global g_g_w_bpp          = NULL;
-static IM3Global g_g_w_scale        = NULL;
-static IM3Global g_g_w_title        = NULL;
-static IM3Global g_g_w_audio_size   = NULL;
-static IM3Global g_g_w_audio_sample_rate = NULL;
-static IM3Global g_g_w_audio_bpp    = NULL;
-static IM3Global g_g_w_audio_channels = NULL;
-static IM3Global g_g_w_audio_write  = NULL;
-static IM3Global g_g_w_audio_read   = NULL;
-static IM3Global g_g_w_audio_buffer = NULL;
-static IM3Global g_g_w_audio_underrun = NULL;
-static IM3Global g_g_w_audio_overrun  = NULL;
+/* Latest state pointer (offset into WASM memory). Updated each frame.
+ * The audio callback reads from this pointer. */
+static uint32_t g_state_ptr = 0;
 
-/* ================================================================
- * Pixel lookup tables (LUTs) for fast format conversion
- *
- * Pre-computed RGB332→ABGR8888 and RGB565→ABGR8888 mappings.
- * Avoids per-pixel division: 1 memory lookup vs ~10 arithmetic ops.
- *
- * Memory cost: 1KB (8-bit) + 256KB (16-bit) = 257KB total.
- * ================================================================ */
-
-static uint32_t rgb332_lut[256];      /* 1KB  — 8bpp RGB332 */
-static uint32_t rgb565_lut[65536];    /* 256KB — 16bpp RGB565 */
+/* Pixel lookup tables (LUTs) for fast format conversion */
+static uint32_t rgb332_lut[256];
+static uint32_t rgb565_lut[65536];
 static int pixel_lut_initialized = 0;
 
-/* Audio buffer lock. The host runs wupdate() in the main thread (which
- * writes samples into the shared w_audio_buffer via the ROM's fill_audio)
- * and host_audio_callback() in SDL's audio thread (which reads from the
- * same buffer). On multi-core systems the two threads can run truly
- * concurrently, and the audio thread can read a position the main thread
- * is mid-write — that produces a torn sample, heard as a pop.
- *
- * We serialize the two sides with a single mutex. The main thread
- * acquires it around m3_CallV(f_wupdate) and the audio thread holds
- * it for the whole callback. Writes are small (<2KB) and complete in
- * microseconds, so the audio thread is only ever blocked briefly.
- */
+/* Audio buffer lock */
 static SDL_mutex *g_audio_mutex = NULL;
 
 /* ================================================================
- * Pointer resolution helpers
+ * Pointer helpers
  * ================================================================ */
 
-static uint32_t resolve_i32(IM3Global g) {
-    if (!g) return 0;
-    M3TaggedValue v;
-    if (m3_GetGlobal(g, &v)) return 0;
-    return (uint32_t)v.value.i32;
+static inline WagnosticState *get_state(void) {
+    if (!g_mem || g_state_ptr == 0) return NULL;
+    if (g_state_ptr + sizeof(WagnosticState) > g_mem_len) return NULL;
+    return (WagnosticState *)(g_mem + g_state_ptr);
 }
 
-/* Resolve the i32 global and return a pointer into linear memory.
- * Returns NULL if the global or memory is unavailable. */
-static void *resolve_ptr(IM3Global g) {
-    if (!g) return NULL;
-    M3TaggedValue v;
-    if (m3_GetGlobal(g, &v)) return NULL;
-    uint32_t off = (uint32_t)v.value.i32;
-    if (off == 0) return NULL;
-    if (!g_mem) return NULL;
-    return g_mem + off;
+static inline uint8_t *get_vram(WagnosticState *s) {
+    if (!s || s->vram_offset == 0) return NULL;
+    return (uint8_t *)s + s->vram_offset;
+}
+
+static inline uint8_t *get_audio_buffer(WagnosticState *s) {
+    if (!s || s->audio_buffer_offset == 0) return NULL;
+    return (uint8_t *)s + s->audio_buffer_offset;
 }
 
 /* ================================================================
- * Cached pointer-to-data helpers (avoid repeated resolve_i32)
+ * Screen config with defaults
  * ================================================================ */
 
-static uint32_t *ptr_u32(IM3Global g) {
-    return (uint32_t *)resolve_ptr(g);
-}
-
-static int32_t *ptr_i32(IM3Global g) {
-    return (int32_t *)resolve_ptr(g);
-}
-
-static uint8_t *ptr_u8(IM3Global g) {
-    return (uint8_t *)resolve_ptr(g);
-}
-
-/* ================================================================
- * High-level read/write helpers using cached globals
- * ================================================================ */
-
-static uint32_t read_u32(IM3Global g) {
-    uint32_t *p = ptr_u32(g);
-    return p ? *p : 0;
-}
-
-static int32_t read_i32(IM3Global g) {
-    int32_t *p = ptr_i32(g);
-    return p ? *p : 0;
-}
-
-static void write_u32(IM3Global g, uint32_t val) {
-    uint32_t *p = ptr_u32(g);
-    if (p) *p = val;
-}
-
-static void write_i32(IM3Global g, int32_t val) {
-    int32_t *p = ptr_i32(g);
-    if (p) *p = val;
-}
-
-static void read_str(IM3Global g, char *dst, int max) {
-    if (!g || !dst || max <= 0) { if (dst) dst[0] = '\0'; return; }
-    M3TaggedValue v;
-    if (m3_GetGlobal(g, &v)) { dst[0] = '\0'; return; }
-    uint32_t off = (uint32_t)v.value.i32;
-    if (off == 0 || !g_mem) { dst[0] = '\0'; return; }
-    const char *src = (const char *)(g_mem + off);
-    strncpy(dst, src, max - 1);
-    dst[max - 1] = '\0';
-}
-
-/* ================================================================
- * Dirty rect reading
- * ================================================================ */
-
-/* Each dirty rect is 4 x i32 = 16 bytes: {x, y, w, h} */
-static void read_dirty_rect(int idx, int *rx, int *ry, int *rw, int *rh) {
-    uint8_t *base = ptr_u8(g_g_w_dirty_rects);
-    if (!base) { *rx = *ry = *rw = *rh = 0; return; }
-    int32_t *r = (int32_t *)(base + idx * 16);
-    *rx = r[0]; *ry = r[1]; *rw = r[2]; *rh = r[3];
-}
-
-/* ================================================================
- * Cache all global pointers from the module
- * ================================================================ */
-
-static void cache_globals(void) {
-    g_g_w_vram          = m3_FindGlobal(g_module, "w_vram");
-    g_g_w_dirty_count   = m3_FindGlobal(g_module, "w_dirty_count");
-    g_g_w_dirty_rects   = m3_FindGlobal(g_module, "w_dirty_rects");
-    g_g_w_keys          = m3_FindGlobal(g_module, "w_keys");
-    g_g_w_mouse_x       = m3_FindGlobal(g_module, "w_mouse_x");
-    g_g_w_mouse_y       = m3_FindGlobal(g_module, "w_mouse_y");
-    g_g_w_mouse_buttons = m3_FindGlobal(g_module, "w_mouse_buttons");
-    g_g_w_mouse_wheel   = m3_FindGlobal(g_module, "w_mouse_wheel");
-    g_g_w_target_fps    = m3_FindGlobal(g_module, "w_target_fps");
-    g_g_w_gamepad_buttons = m3_FindGlobal(g_module, "w_gamepad_buttons");
-    g_g_w_ticks         = m3_FindGlobal(g_module, "w_ticks");
-    g_g_w_width         = m3_FindGlobal(g_module, "w_width");
-    g_g_w_height        = m3_FindGlobal(g_module, "w_height");
-    g_g_w_bpp           = m3_FindGlobal(g_module, "w_bpp");
-    g_g_w_scale         = m3_FindGlobal(g_module, "w_scale");
-    g_g_w_title         = m3_FindGlobal(g_module, "w_title");
-    g_g_w_audio_size       = m3_FindGlobal(g_module, "w_audio_size");
-    g_g_w_audio_sample_rate= m3_FindGlobal(g_module, "w_audio_sample_rate");
-    g_g_w_audio_bpp        = m3_FindGlobal(g_module, "w_audio_bpp");
-    g_g_w_audio_channels   = m3_FindGlobal(g_module, "w_audio_channels");
-    g_g_w_audio_write      = m3_FindGlobal(g_module, "w_audio_write");
-    g_g_w_audio_read       = m3_FindGlobal(g_module, "w_audio_read");
-    g_g_w_audio_buffer     = m3_FindGlobal(g_module, "w_audio_buffer");
-    g_g_w_audio_underrun   = m3_FindGlobal(g_module, "w_audio_underrun");
-    g_g_w_audio_overrun    = m3_FindGlobal(g_module, "w_audio_overrun");
-}
-
-/* ================================================================
- * Audio callback (runs on SDL audio thread)
- *
- * ================================================================ */
-
-static void host_audio_callback(void *userdata, Uint8 *stream_ptr, int len_bytes) {
-    (void)userdata;
-    float *stream = (float *)stream_ptr;
-    int nsamples  = len_bytes / (int)sizeof(float);
-
-    /* Block the main thread from writing the audio buffer while we read
-     * it. See g_audio_mutex declaration for the full rationale. */
-    if (g_audio_mutex) SDL_LockMutex(g_audio_mutex);
-
-    /* ---- Step 1: Read pointers ONCE (snapshot) ---- */
-    uint32_t size  = read_u32(g_g_w_audio_size);
-    uint32_t bpp   = read_u32(g_g_w_audio_bpp);
-    uint32_t r_off = read_u32(g_g_w_audio_read);
-    uint32_t w_off = read_u32(g_g_w_audio_write);
-
-    uint8_t *abuf = ptr_u8(g_g_w_audio_buffer);
-
-    /* ---- Step 2: Validate everything ---- */
-    if (!abuf || size == 0 || bpp == 0 || bpp > 4) {
-        memset(stream, 0, len_bytes);
-        return;
-    }
-
-    /* Clamp pointers to valid range */
-    if (r_off >= size) r_off = 0;
-    if (w_off >= size) w_off = 0;
-
-    /* ---- Step 3: Calculate available bytes ---- */
-    /* Buffer uses size-1 usable slots: when r==w it means EMPTY.
-     * When (w+1)%size==r it means FULL. This avoids the ambiguity
-     * of r==w meaning both empty and full. */
-    uint32_t avail;
-    if (w_off >= r_off)
-        avail = w_off - r_off;
-    else
-        avail = size - r_off + w_off;
-
-    /* ---- Step 4: Read samples, handle wrap-around ----
-     *
-     * max_bytes must be capped at what the audio actually consumes
-     * (nsamples * bpp), NOT at the f32 output size (nsamples * 4).
-     * Otherwise r_off advances by the f32-equivalent bytes while only
-     * bpp bytes per sample are read, and the read pointer drifts past
-     * the audio's true position in the buffer. After a few callbacks
-     * the audio is reading samples from a half-period away in the
-     * looping pcm — heard as a 180° phase flip / pop at every callback
-     * boundary. */
-    uint32_t bytes_per_sample = bpp;
-    uint32_t max_bytes = avail;
-    uint32_t stream_bytes = (uint32_t)nsamples * bpp;
-    if (max_bytes > stream_bytes) max_bytes = stream_bytes;
-
-    /* Round down to whole samples */
-    max_bytes = (max_bytes / bytes_per_sample) * bytes_per_sample;
-
-    uint32_t bytes_read = 0;
-    int stream_idx = 0;
-
-    while (bytes_read < max_bytes && stream_idx < nsamples) {
-        uint32_t chunk = max_bytes - bytes_read;
-        uint32_t pos = (r_off + bytes_read) % size;
-
-        /* Clamp chunk to end of buffer (wrap-around boundary) */
-        uint32_t to_end = size - pos;
-        if (chunk > to_end) chunk = to_end;
-
-        /* Convert samples in this chunk */
-        if (bpp == 1) {
-            /* u8: unsigned 8-bit, centre at 128 */
-            for (uint32_t b = 0; b < chunk && stream_idx < nsamples; b++) {
-                stream[stream_idx++] = ((float)abuf[pos + b] - 128.0f) / 128.0f;
-            }
-        } else if (bpp == 2) {
-            /* s16 little-endian */
-            for (uint32_t b = 0; b + 1 < chunk && stream_idx < nsamples; b += 2) {
-                int16_t s16;
-                memcpy(&s16, abuf + pos + b, 2);
-                stream[stream_idx++] = (float)s16 / 32768.0f;
-            }
-        } else {
-            /* bpp == 4: f32 */
-            for (uint32_t b = 0; b + 3 < chunk && stream_idx < nsamples; b += 4) {
-                float sample;
-                memcpy(&sample, abuf + pos + b, 4);
-                stream[stream_idx++] = sample;
-            }
-        }
-
-        bytes_read += chunk;
-    }
-
-    /* ---- Step 5: Fill remaining with silence ---- */
-    int underrun = (stream_idx < nsamples);
-    for (int i = stream_idx; i < nsamples; i++) {
-        stream[i] = 0.0f;
-    }
-
-    /* ---- Step 6: Write read pointer ONCE ---- */
-    if (bytes_read > 0) {
-        write_u32(g_g_w_audio_read, (r_off + bytes_read) % size);
-    }
-
-    /* ---- Step 7: Update underrun counter ---- */
-    if (underrun) {
-        uint32_t ur = read_u32(g_g_w_audio_underrun);
-        write_u32(g_g_w_audio_underrun, ur + 1);
-    }
-
-    /* Release the audio buffer lock so the main thread can write again. */
-    if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
+static void read_screen_config(WagnosticState *s,
+                               uint32_t *W, uint32_t *H,
+                               uint32_t *BPP, uint32_t *SCALE) {
+    *W     = s ? s->width  : 0;
+    *H     = s ? s->height : 0;
+    *BPP   = s ? s->bpp    : 0;
+    *SCALE = s ? s->scale  : 0;
+    if (*W == 0)     *W = 320;
+    if (*H == 0)     *H = 240;
+    if (*BPP == 0)   *BPP = 32;
+    if (*SCALE == 0) *SCALE = 1;
 }
 
 /* ================================================================
@@ -338,36 +122,30 @@ static inline uint32_t rgb565_to_abgr8888(uint16_t p) {
     return 0xFF000000u | (b << 16) | (g << 8) | r;
 }
 
-/* 32bpp RGBA8888 is already in ABGR8888 memory layout — direct copy */
-
 static void init_pixel_luts(void) {
     if (pixel_lut_initialized) return;
-
     for (int i = 0; i < 256; i++) {
         uint32_t r = ((i >> 5) & 0x07) * 36;
         uint32_t g = ((i >> 2) & 0x07) * 36;
         uint32_t b = (i & 0x03) * 85;
         rgb332_lut[i] = 0xFF000000u | (b << 16) | (g << 8) | r;
     }
-
     for (int i = 0; i < 65536; i++) {
         uint32_t r = ((i >> 11) & 0x1F) * 255 / 31;
         uint32_t g = ((i >> 5) & 0x3F) * 255 / 63;
         uint32_t b = (i & 0x1F) * 255 / 31;
         rgb565_lut[i] = 0xFF000000u | (b << 16) | (g << 8) | r;
     }
-
     pixel_lut_initialized = 1;
 }
 
 /* ================================================================
- * Render a rect from VRAM to the SDL texture
+ * Render helpers
  * ================================================================ */
 
 static void render_rect_to_texture(SDL_Texture *texture, uint8_t *vram,
                                    int rx, int ry, int rw, int rh,
                                    uint32_t W, uint32_t H, uint32_t BPP) {
-    /* Clamp rect to screen bounds */
     if (rx < 0) { rw += rx; rx = 0; }
     if (ry < 0) { rh += ry; ry = 0; }
     if (rx + rw > (int)W) rw = (int)W - rx;
@@ -383,17 +161,13 @@ static void render_rect_to_texture(SDL_Texture *texture, uint8_t *vram,
         for (int y = ry; y < ry + rh; y++) {
             uint8_t  *src = vram + y * W + rx;
             uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
-            for (int x = 0; x < rw; x++) {
-                dst[x] = rgb332_lut[src[x]];
-            }
+            for (int x = 0; x < rw; x++) dst[x] = rgb332_lut[src[x]];
         }
     } else if (BPP == 16) {
         for (int y = ry; y < ry + rh; y++) {
             uint16_t *src = (uint16_t *)(vram + (y * W + rx) * 2);
             uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
-            for (int x = 0; x < rw; x++) {
-                dst[x] = rgb565_lut[src[x]];
-            }
+            for (int x = 0; x < rw; x++) dst[x] = rgb565_lut[src[x]];
         }
     } else if (BPP == 32) {
         for (int y = ry; y < ry + rh; y++) {
@@ -402,59 +176,44 @@ static void render_rect_to_texture(SDL_Texture *texture, uint8_t *vram,
             memcpy(dst, src, rw * 4);
         }
     }
-
     SDL_UnlockTexture(texture);
 }
-
-/* ================================================================
- * Full-screen bulk copy (fast path)
- * ================================================================ */
 
 static void render_fullscreen(SDL_Texture *texture, uint8_t *vram,
                               uint32_t W, uint32_t H, uint32_t BPP) {
     void *pixels;
     int pitch;
     SDL_LockTexture(texture, NULL, &pixels, &pitch);
-
     if (BPP == 8) {
         uint8_t  *src = vram;
         uint32_t *dst = (uint32_t *)pixels;
         uint32_t total = W * H;
-        for (uint32_t i = 0; i < total; i++) {
-            dst[i] = rgb332_lut[src[i]];
-        }
+        for (uint32_t i = 0; i < total; i++) dst[i] = rgb332_lut[src[i]];
     } else if (BPP == 16) {
         uint16_t *src = (uint16_t *)vram;
         uint32_t *dst = (uint32_t *)pixels;
         uint32_t total = W * H;
-        for (uint32_t i = 0; i < total; i++) {
-            dst[i] = rgb565_lut[src[i]];
-        }
+        for (uint32_t i = 0; i < total; i++) dst[i] = rgb565_lut[src[i]];
     } else if (BPP == 32) {
-        /* Direct memcpy — 32bpp ROM format matches ABGR8888 layout */
         memcpy(pixels, vram, W * H * 4);
     }
-
     SDL_UnlockTexture(texture);
 }
 
 /* ================================================================
- * Aspect-ratio-correct letterbox calculation
+ * Aspect-ratio-correct letterbox
  * ================================================================ */
 
 static void calc_letterbox(int win_w, int win_h, uint32_t W, uint32_t H,
                            SDL_Rect *dst) {
     float aspect_rom = (float)W / (float)H;
     float aspect_win = (float)win_w / (float)win_h;
-
     if (aspect_win > aspect_rom) {
-        /* Window is wider than ROM — pillarbox */
         dst->h = win_h;
         dst->w = (int)(win_h * aspect_rom);
         dst->x = (win_w - dst->w) / 2;
         dst->y = 0;
     } else {
-        /* Window is taller than ROM — letterbox */
         dst->w = win_w;
         dst->h = (int)(win_w / aspect_rom);
         dst->x = 0;
@@ -463,22 +222,17 @@ static void calc_letterbox(int win_w, int win_h, uint32_t W, uint32_t H,
 }
 
 /* ================================================================
- * Mouse coordinate conversion: window space → ROM space
+ * Mouse coordinate conversion
  * ================================================================ */
 
 static void convert_mouse_coords(int wx, int wy, int *rx, int *ry,
                                  int win_w, int win_h, uint32_t W, uint32_t H) {
     SDL_Rect dst;
     calc_letterbox(win_w, win_h, W, H, &dst);
-
-    /* Map window coords into ROM pixel coords */
     float scale_x = (float)W / (float)dst.w;
     float scale_y = (float)H / (float)dst.h;
-
     *rx = (int)((wx - dst.x) * scale_x);
     *ry = (int)((wy - dst.y) * scale_y);
-
-    /* Clamp to ROM bounds */
     if (*rx < 0) *rx = 0;
     if (*rx >= (int)W) *rx = (int)W - 1;
     if (*ry < 0) *ry = 0;
@@ -486,26 +240,89 @@ static void convert_mouse_coords(int wx, int wy, int *rx, int *ry,
 }
 
 /* ================================================================
- * Resolve the runtime memory base pointer
+ * Audio callback
+ * ================================================================ */
+
+static void host_audio_callback(void *userdata, Uint8 *stream_ptr, int len_bytes) {
+    (void)userdata;
+    float *stream = (float *)stream_ptr;
+    int nsamples  = len_bytes / (int)sizeof(float);
+
+    if (g_audio_mutex) SDL_LockMutex(g_audio_mutex);
+
+    WagnosticState *s = get_state();
+    uint8_t *abuf = get_audio_buffer(s);
+    uint32_t size  = s ? s->audio_size  : 0;
+    uint32_t bpp   = s ? s->audio_bpp   : 0;
+    uint32_t r_off = s ? s->audio_read  : 0;
+    uint32_t w_off = s ? s->audio_write : 0;
+
+    if (!abuf || size == 0 || bpp == 0 || bpp > 4) {
+        memset(stream, 0, len_bytes);
+        if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
+        return;
+    }
+
+    if (r_off >= size) r_off = 0;
+    if (w_off >= size) w_off = 0;
+
+    uint32_t avail;
+    if (w_off >= r_off) avail = w_off - r_off;
+    else                avail = size - r_off + w_off;
+
+    uint32_t max_bytes = avail;
+    uint32_t stream_bytes = (uint32_t)nsamples * bpp;
+    if (max_bytes > stream_bytes) max_bytes = stream_bytes;
+    max_bytes = (max_bytes / bpp) * bpp;
+
+    uint32_t bytes_read = 0;
+    int stream_idx = 0;
+
+    while (bytes_read < max_bytes && stream_idx < nsamples) {
+        uint32_t chunk = max_bytes - bytes_read;
+        uint32_t pos = (r_off + bytes_read) % size;
+        uint32_t to_end = size - pos;
+        if (chunk > to_end) chunk = to_end;
+
+        if (bpp == 1) {
+            for (uint32_t b = 0; b < chunk && stream_idx < nsamples; b++) {
+                stream[stream_idx++] = ((float)abuf[pos + b] - 128.0f) / 128.0f;
+            }
+        } else if (bpp == 2) {
+            for (uint32_t b = 0; b + 1 < chunk && stream_idx < nsamples; b += 2) {
+                int16_t s16;
+                memcpy(&s16, abuf + pos + b, 2);
+                stream[stream_idx++] = (float)s16 / 32768.0f;
+            }
+        } else {
+            for (uint32_t b = 0; b + 3 < chunk && stream_idx < nsamples; b += 4) {
+                float sample;
+                memcpy(&sample, abuf + pos + b, 4);
+                stream[stream_idx++] = sample;
+            }
+        }
+        bytes_read += chunk;
+    }
+
+    int underrun = (stream_idx < nsamples);
+    for (int i = stream_idx; i < nsamples; i++) stream[i] = 0.0f;
+
+    if (bytes_read > 0 && s) {
+        s->audio_read = (r_off + bytes_read) % size;
+    }
+    if (underrun && s) {
+        s->audio_underrun++;
+    }
+
+    if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
+}
+
+/* ================================================================
+ * Refresh WASM memory pointer
  * ================================================================ */
 
 static void refresh_memory(void) {
     g_mem = m3_GetMemory(g_runtime, &g_mem_len, 0);
-}
-
-/* ================================================================
- * Read screen configuration with defaults
- * ================================================================ */
-
-static void read_screen_config(uint32_t *W, uint32_t *H, uint32_t *BPP, uint32_t *SCALE) {
-    *W     = read_u32(g_g_w_width);
-    *H     = read_u32(g_g_w_height);
-    *BPP   = read_u32(g_g_w_bpp);
-    *SCALE = read_u32(g_g_w_scale);
-    if (*W == 0)     *W = 320;
-    if (*H == 0)     *H = 240;
-    if (*BPP == 0)   *BPP = 32;
-    if (*SCALE == 0) *SCALE = 1;
 }
 
 /* ================================================================
@@ -542,9 +359,6 @@ int main(int argc, char **argv) {
     result = m3_LoadModule(g_runtime, g_module);
     if (result) { fprintf(stderr, "Load error: %s\n", result); m3_FreeRuntime(g_runtime); m3_FreeEnvironment(env); free(wasm_data); return 1; }
 
-    /* The wagnostic protocol has zero host imports. Everything the ROM
-     * needs (libc, libm) must be compiled into the WASM itself. */
-
     /* ---- Find wupdate ---- */
     IM3Function f_wupdate = NULL;
     result = m3_FindFunction(&f_wupdate, g_runtime, "wupdate");
@@ -553,9 +367,6 @@ int main(int argc, char **argv) {
         m3_FreeRuntime(g_runtime); m3_FreeEnvironment(env); free(wasm_data);
         return 1;
     }
-
-    /* ---- Cache all global pointers ---- */
-    cache_globals();
 
     /* ---- Refresh WASM memory ---- */
     refresh_memory();
@@ -568,10 +379,6 @@ int main(int argc, char **argv) {
     }
 
     init_pixel_luts();
-
-    /* Audio buffer mutex — created after SDL_Init so SDL_CreateMutex
-     * is available; checked in the callback for NULL so an early audio
-     * callback (before we get here) just runs without locking. */
     g_audio_mutex = SDL_CreateMutex();
     if (!g_audio_mutex) {
         fprintf(stderr, "SDL_CreateMutex failed: %s\n", SDL_GetError());
@@ -579,12 +386,28 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    /* ---- Call wupdate() once to get initial state pointer ---- */
+    {
+        if (g_audio_mutex) SDL_LockMutex(g_audio_mutex);
+        m3_CallV(f_wupdate);
+        m3_GetResultsV(f_wupdate, &g_state_ptr);
+        if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
+    }
+    refresh_memory();
+
+    WagnosticState *state = get_state();
+
     /* ---- Read initial config ---- */
     uint32_t W, H, BPP, SCALE;
-    read_screen_config(&W, &H, &BPP, &SCALE);
+    read_screen_config(state, &W, &H, &BPP, &SCALE);
 
     char title[128];
-    read_str(g_g_w_title, title, 128);
+    if (state) {
+        strncpy(title, state->title, 127);
+        title[127] = '\0';
+    } else {
+        title[0] = '\0';
+    }
 
     /* ---- Create window ---- */
     SDL_Window *window = SDL_CreateWindow(
@@ -598,12 +421,9 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* ---- Create renderer (HW accel + vsync, fallback to software) ---- */
     SDL_Renderer *renderer = SDL_CreateRenderer(window, -1,
         SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!renderer) {
-        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
-    }
+    if (!renderer) renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
     if (!renderer) {
         fprintf(stderr, "SDL_CreateRenderer failed: %s\n", SDL_GetError());
         SDL_DestroyWindow(window); SDL_Quit();
@@ -611,7 +431,6 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* ---- Create texture ---- */
     SDL_Texture *texture = SDL_CreateTexture(renderer,
         SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
         (int)W, (int)H);
@@ -619,10 +438,10 @@ int main(int argc, char **argv) {
 
     /* ---- Audio device ---- */
     SDL_AudioDeviceID audio_dev = 0;
-    uint32_t prev_audio_size     = read_u32(g_g_w_audio_size);
-    uint32_t prev_audio_rate     = read_u32(g_g_w_audio_sample_rate);
-    uint32_t prev_audio_bpp      = read_u32(g_g_w_audio_bpp);
-    uint32_t prev_audio_channels = read_u32(g_g_w_audio_channels);
+    uint32_t prev_audio_size = state ? state->audio_size : 0;
+    uint32_t prev_audio_rate = state ? state->audio_sample_rate : 0;
+    uint32_t prev_audio_bpp  = state ? state->audio_bpp : 0;
+    uint32_t prev_audio_channels = state ? state->audio_channels : 0;
 
     if (prev_audio_size > 0) {
         SDL_AudioSpec wanted;
@@ -642,8 +461,8 @@ int main(int argc, char **argv) {
     memset(keys_state, 0, sizeof(keys_state));
 
     uint32_t mouse_buttons = 0;
-    int      mouse_x = 0, mouse_y = 0;
-    int      mouse_wheel = 0;
+    int mouse_x = 0, mouse_y = 0;
+    int mouse_wheel = 0;
     uint32_t gamepad_buttons = 0;
 
     /* ================================================================
@@ -723,36 +542,24 @@ int main(int argc, char **argv) {
             }
 
             case SDL_WINDOWEVENT:
-                if (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
-                    /* Window was resized by user — no action needed,
-                     * letterbox is computed dynamically */
-                }
+                if (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {}
                 break;
             }
         }
 
-        /* ---- Step 1: Write input to WASM globals ---- */
-
-        /* Keys array */
-        {
-            uint8_t *keys_ptr = ptr_u8(g_g_w_keys);
-            if (keys_ptr) {
-                memcpy(keys_ptr, keys_state, 256);
-            }
+        /* ---- Step 1: Write input to state struct ---- */
+        state = get_state();
+        if (state) {
+            memcpy(state->keys, keys_state, 256);
+            state->mouse_x = mouse_x;
+            state->mouse_y = mouse_y;
+            state->mouse_buttons = mouse_buttons;
+            state->mouse_wheel = mouse_wheel;
+            state->gamepad_buttons = gamepad_buttons;
+            state->ticks = SDL_GetTicks();
         }
-        write_i32(g_g_w_mouse_x, mouse_x);
-        write_i32(g_g_w_mouse_y, mouse_y);
-        write_u32(g_g_w_mouse_buttons, mouse_buttons);
-        write_i32(g_g_w_mouse_wheel, mouse_wheel);
-        write_u32(g_g_w_gamepad_buttons, gamepad_buttons);
-        write_u32(g_g_w_ticks, SDL_GetTicks());
 
-        /* ---- Step 2: Call wupdate(), exit if 0 ----
-         *
-         * Hold the audio mutex for the whole wupdate call. The ROM's
-         * fill_audio writes to w_audio_buffer inside wupdate; holding
-         * the lock here prevents the audio thread from reading while
-         * the write is in progress. */
+        /* ---- Step 2: Call wupdate(), exit if return is 0 ---- */
         {
             int32_t keep = 0;
             if (g_audio_mutex) SDL_LockMutex(g_audio_mutex);
@@ -760,19 +567,26 @@ int main(int argc, char **argv) {
             m3_GetResultsV(f_wupdate, &keep);
             if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
             if (!keep) break;
+            g_state_ptr = (uint32_t)keep;
         }
 
         /* ---- Refresh memory pointer (ROM may have grown it) ---- */
         refresh_memory();
+        state = get_state();
 
         /* ---- Step 3: Read config and detect changes ---- */
-        read_screen_config(&W, &H, &BPP, &SCALE);
+        read_screen_config(state, &W, &H, &BPP, &SCALE);
 
         int config_changed = (W != prev_W || H != prev_H ||
                               BPP != prev_BPP || SCALE != prev_SCALE);
 
         char new_title[128];
-        read_str(g_g_w_title, new_title, 128);
+        if (state) {
+            strncpy(new_title, state->title, 127);
+            new_title[127] = '\0';
+        } else {
+            new_title[0] = '\0';
+        }
         int title_changed = (strcmp(new_title, title) != 0);
 
         if (config_changed || title_changed) {
@@ -789,21 +603,18 @@ int main(int argc, char **argv) {
             SDL_SetTextureScaleMode(texture, SDL_ScaleModeNearest);
             prev_W = W; prev_H = H; prev_BPP = BPP; prev_SCALE = SCALE;
 
-            /* Recompute mouse position for new resolution */
-            {
-                int win_w, win_h;
-                SDL_GetWindowSize(window, &win_w, &win_h);
-                convert_mouse_coords(mouse_x, mouse_y, &mouse_x, &mouse_y,
-                                     win_w, win_h, W, H);
-            }
+            int win_w, win_h;
+            SDL_GetWindowSize(window, &win_w, &win_h);
+            convert_mouse_coords(mouse_x, mouse_y, &mouse_x, &mouse_y,
+                                 win_w, win_h, W, H);
         }
 
         /* ---- Detect audio config changes ---- */
-        {
-            uint32_t cur_size     = read_u32(g_g_w_audio_size);
-            uint32_t cur_rate     = read_u32(g_g_w_audio_sample_rate);
-            uint32_t cur_bpp      = read_u32(g_g_w_audio_bpp);
-            uint32_t cur_channels = read_u32(g_g_w_audio_channels);
+        if (state) {
+            uint32_t cur_size     = state->audio_size;
+            uint32_t cur_rate     = state->audio_sample_rate;
+            uint32_t cur_bpp      = state->audio_bpp;
+            uint32_t cur_channels = state->audio_channels;
 
             if (cur_size != prev_audio_size || cur_rate != prev_audio_rate ||
                 cur_bpp != prev_audio_bpp || cur_channels != prev_audio_channels) {
@@ -833,15 +644,16 @@ int main(int argc, char **argv) {
         }
 
         /* ---- Step 4: Render dirty rects ---- */
-        {
-            uint8_t *vram = ptr_u8(g_g_w_vram);
-            uint32_t dirty_count = read_u32(g_g_w_dirty_count);
+        if (state) {
+            uint8_t *vram = get_vram(state);
+            uint32_t dirty_count = state->dirty_count;
 
             if (vram && dirty_count > 0) {
                 if (dirty_count == 1) {
-                    /* Fast path: check if single rect covers entire screen */
-                    int rx, ry, rw, rh;
-                    read_dirty_rect(0, &rx, &ry, &rw, &rh);
+                    int rx = state->dirty_rects[0].x;
+                    int ry = state->dirty_rects[0].y;
+                    int rw = state->dirty_rects[0].w;
+                    int rh = state->dirty_rects[0].h;
                     if (rx == 0 && ry == 0 &&
                         (uint32_t)rw == W && (uint32_t)rh == H) {
                         render_fullscreen(texture, vram, W, H, BPP);
@@ -850,18 +662,18 @@ int main(int argc, char **argv) {
                             rx, ry, rw, rh, W, H, BPP);
                     }
                 } else {
-                    /* Multiple dirty rects (up to 32) */
                     uint32_t count = dirty_count;
                     if (count > 32) count = 32;
                     for (uint32_t i = 0; i < count; i++) {
-                        int rx, ry, rw, rh;
-                        read_dirty_rect((int)i, &rx, &ry, &rw, &rh);
+                        int rx = state->dirty_rects[i].x;
+                        int ry = state->dirty_rects[i].y;
+                        int rw = state->dirty_rects[i].w;
+                        int rh = state->dirty_rects[i].h;
                         render_rect_to_texture(texture, vram,
                             rx, ry, rw, rh, W, H, BPP);
                     }
                 }
 
-                /* Calculate letterbox destination */
                 int win_w, win_h;
                 SDL_GetWindowSize(window, &win_w, &win_h);
                 SDL_Rect dst;
@@ -871,22 +683,20 @@ int main(int argc, char **argv) {
                 SDL_RenderCopy(renderer, texture, NULL, &dst);
                 SDL_RenderPresent(renderer);
 
-                /* Reset dirty count */
-                write_u32(g_g_w_dirty_count, 0);
+                state->dirty_count = 0;
             }
         }
 
         /* ---- Step 5: Reset mouse wheel ---- */
-        write_i32(g_g_w_mouse_wheel, 0);
+        if (state) state->mouse_wheel = 0;
         mouse_wheel = 0;
 
         /* ---- Yield / FPS limit ---- */
-        uint32_t target_fps = read_u32(g_g_w_target_fps);
-        if (target_fps > 0) {
+        if (state && state->target_fps > 0) {
             static uint32_t frame_start = 0;
             uint32_t now = SDL_GetTicks();
             uint32_t elapsed = now - frame_start;
-            int32_t delay = (1000 / target_fps) - (int32_t)elapsed;
+            int32_t delay = (1000 / state->target_fps) - (int32_t)elapsed;
             if (delay > 0) SDL_Delay((uint32_t)delay);
             frame_start = SDL_GetTicks();
         } else {
@@ -902,12 +712,8 @@ int main(int argc, char **argv) {
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
-
-    /* Audio callback is already stopped (SDL_CloseAudioDevice above), so
-     * no other thread holds the mutex. Safe to destroy. */
     if (g_audio_mutex) SDL_DestroyMutex(g_audio_mutex);
     g_audio_mutex = NULL;
-
     SDL_Quit();
 
     m3_FreeRuntime(g_runtime);

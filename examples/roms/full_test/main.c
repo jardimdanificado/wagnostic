@@ -1,63 +1,47 @@
 // full_test — Comprehensive test of ALL ABI features
-//
-// Split into 3 quadrants:
-//   TL: Keyboard state grid (16x16)
-//   TR: Dirty rectangle animation (tests multi-rect rendering)
-//   BL: Mouse position + buttons + wheel
-//
-// Also tests: config changes (R=resize), BPP cycle (1/2/3), ESC=quit.
-// Tests w_title, w_scale, w_bpp, w_ticks, all dirty rect modes.
-// Audio globals are still declared (host configures audio) but the
-// ROM does not feed the buffer — silent by design. See the audio_*
-// ROMs for active audio playback.
 
 #include <stdint.h>
 
 typedef struct { int x, y, w, h; } Rect;
 
-// === Globals per ABI spec ===
-uint32_t w_width       = 320;
-uint32_t w_height      = 240;
-uint32_t w_bpp         = 16;
-uint32_t w_scale       = 2;
-char     w_title[128]  = "Full Test - 16bpp";
-uint8_t  w_vram[320 * 240 * 4];
-uint32_t w_dirty_count = 0;
-Rect     w_dirty_rects[32];
-int32_t  w_mouse_x     = 0;
-int32_t  w_mouse_y     = 0;
-uint32_t w_mouse_buttons = 0;
-int32_t  w_mouse_wheel = 0;
-uint8_t  w_keys[256]   = {0};
-uint32_t w_gamepad_buttons = 0;
-uint32_t w_ticks       = 0;
+typedef struct {
+    uint32_t width, height, bpp, scale;
+    char title[128];
+    uint32_t dirty_count;
+    Rect dirty_rects[32];
+    int32_t mouse_x, mouse_y;
+    uint32_t mouse_buttons;
+    int32_t mouse_wheel;
+    uint8_t keys[256];
+    uint32_t gamepad_buttons;
+    uint32_t ticks;
+    uint32_t target_fps;
+    uint32_t audio_size, audio_sample_rate, audio_bpp, audio_channels;
+    uint32_t audio_write, audio_read;
+    uint32_t audio_underrun, audio_overrun;
+    uint32_t vram_offset;
+    uint32_t audio_buffer_offset;
+} State;
 
-// Audio globals
-uint32_t w_audio_size        = 8192;
-uint32_t w_audio_sample_rate = 22050;
-uint32_t w_audio_bpp         = 2;
-uint32_t w_audio_channels    = 1;
-uint32_t w_audio_write       = 0;
-uint32_t w_audio_read        = 0;
-uint8_t  w_audio_buffer[8192];
-uint32_t w_audio_underrun  = 0;
-uint32_t w_audio_overrun   = 0;
+static struct {
+    State s;
+    uint8_t vram[320 * 240 * 4];
+} rom;
 
-// === Internal state ===
 static int current_bpp = 16;
 static int frame_count = 0;
 static int resize_state = 0;
+static int initialized = 0;
 
-// === Pixel operations ===
 static void set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b) {
-    if (x < 0 || x >= (int)w_width || y < 0 || y >= (int)w_height) return;
-    int idx = y * (int)w_width + x;
+    if (x < 0 || x >= (int)rom.s.width || y < 0 || y >= (int)rom.s.height) return;
+    int idx = y * (int)rom.s.width + x;
     if (current_bpp == 8) {
-        w_vram[idx] = ((r & 0xE0) | ((g & 0xE0) >> 3) | ((b & 0xC0) >> 6));
+        rom.vram[idx] = ((r & 0xE0) | ((g & 0xE0) >> 3) | ((b & 0xC0) >> 6));
     } else if (current_bpp == 16) {
-        ((uint16_t*)w_vram)[idx] = (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+        ((uint16_t*)rom.vram)[idx] = (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
     } else {
-        ((uint32_t*)w_vram)[idx] = 0xFF000000 | (b << 16) | (g << 8) | r;
+        ((uint32_t*)rom.vram)[idx] = 0xFF000000 | (b << 16) | (g << 8) | r;
     }
 }
 
@@ -68,10 +52,9 @@ static void fill_rect(int rx, int ry, int rw, int rh, uint8_t r, uint8_t g, uint
 }
 
 static void clear(uint8_t r, uint8_t g, uint8_t b) {
-    fill_rect(0, 0, (int)w_width, (int)w_height, r, g, b);
+    fill_rect(0, 0, (int)rom.s.width, (int)rom.s.height, r, g, b);
 }
 
-// === 5x7 font ===
 static const uint8_t font5x7[10][7] = {
     {0x0E,0x11,0x13,0x15,0x19,0x11,0x0E},
     {0x04,0x0C,0x04,0x04,0x04,0x04,0x0E},
@@ -100,34 +83,30 @@ static void draw_number(int x, int y, int n, uint8_t r, uint8_t g, uint8_t b) {
     for (int i = len - 1; i >= 0; i--) { draw_digit(x, y, buf[i], r, g, b); x += 6; }
 }
 
-// === Quadrant: Keyboard (TL) ===
 static void draw_keyboard(int ox, int oy, int qw, int qh) {
     int cols = 8, rows = 8;
     int cell_w = qw / (cols + 1), cell_h = qh / (rows + 2);
-    int start_key = (frame_count / 120) % 3; // cycle which 64 keys shown
+    int start_key = (frame_count / 120) % 3;
 
     for (int i = 0; i < 64; i++) {
         int key_idx = start_key * 64 + i;
         if (key_idx >= 256) break;
         int cx = i % cols, cy = i / cols;
         int px = ox + 4 + cx * cell_w, py = oy + 12 + cy * cell_h;
-        uint8_t cr = w_keys[key_idx] ? 0 : 50;
-        uint8_t cg = w_keys[key_idx] ? 200 : 50;
-        uint8_t cb = w_keys[key_idx] ? 80 : 60;
+        uint8_t cr = rom.s.keys[key_idx] ? 0 : 50;
+        uint8_t cg = rom.s.keys[key_idx] ? 200 : 50;
+        uint8_t cb = rom.s.keys[key_idx] ? 80 : 60;
         fill_rect(px, py, cell_w - 1, cell_h - 1, cr, cg, cb);
     }
 }
 
-// === Quadrant: Dirty Rect Animation (TR) ===
 static int anim_x = 0, anim_y = 0, anim_dx = 2, anim_dy = 1;
 
 static void draw_dirty_anim(int ox, int oy, int qw, int qh) {
-    // Moving square
     anim_x += anim_dx; anim_y += anim_dy;
     if (anim_x <= 0 || anim_x + 15 >= qw) anim_dx = -anim_dx;
     if (anim_y <= 0 || anim_y + 15 >= qh) anim_dy = -anim_dy;
 
-    // Background pattern (checkered)
     for (int y = 0; y < qh; y += 8)
         for (int x = 0; x < qw; x += 8)
             fill_rect(ox + x, oy + y, 7, 7,
@@ -135,46 +114,31 @@ static void draw_dirty_anim(int ox, int oy, int qw, int qh) {
                       ((x / 8 + y / 8) % 2) ? 40 : 25,
                       ((x / 8 + y / 8) % 2) ? 50 : 35);
 
-    // Animated square
     fill_rect(ox + anim_x, oy + anim_y, 15, 15, 255, 200, 0);
-
-    // Trail effect
     fill_rect(ox + anim_x - anim_dx, oy + anim_y - anim_dy, 5, 5, 100, 80, 0);
 }
 
-// === Quadrant: Mouse (BL) ===
 static void draw_mouse(int ox, int oy, int qw, int qh) {
-    // Crosshair
-    int mx = w_mouse_x, my = w_mouse_y;
-    int cx = ox + (mx * qw) / (int)w_width;
-    int cy = oy + (my * qh) / (int)w_height;
+    int mx = rom.s.mouse_x, my = rom.s.mouse_y;
+    int cx = ox + (mx * qw) / (int)rom.s.width;
+    int cy = oy + (my * qh) / (int)rom.s.height;
 
-    // H and V lines
     for (int x = ox; x < ox + qw; x++) set_pixel(x, cy, 60, 60, 80);
     for (int y = oy; y < oy + qh; y++) set_pixel(cx, y, 60, 60, 80);
 
-    // Cursor
     fill_rect(cx - 2, cy - 2, 5, 5, 255, 255, 255);
 
-    // Left button indicator
-    uint8_t lb = (w_mouse_buttons & 1) ? 255 : 80;
+    uint8_t lb = (rom.s.mouse_buttons & 1) ? 255 : 80;
     fill_rect(ox + 2, oy + qh - 12, 15, 10, lb, 30, 30);
 
-    // Right button indicator
-    uint8_t rb = (w_mouse_buttons & 2) ? 100 : 80;
+    uint8_t rb = (rom.s.mouse_buttons & 2) ? 100 : 80;
     fill_rect(ox + 22, oy + qh - 12, 15, 10, 30, 30, rb);
 
-    // Wheel counter
-    draw_number(ox + 45, oy + qh - 12, (int)w_mouse_wheel, 255, 255, 0);
+    draw_number(ox + 45, oy + qh - 12, (int)rom.s.mouse_wheel, 255, 255, 0);
 }
 
-// === Quadrant: Audio (BR) removed — see audio_wav/audio_mp3/audio_ogg
-//     ROMs for active audio playback. Globals stay so the host still
-//     configures audio (silent by design). ===
-
-// === Config change handlers ===
 static void update_title(void) {
-    char* t = w_title;
+    char* t = rom.s.title;
     int i = 0;
     const char* prefix = "Full Test - ";
     while (*prefix) t[i++] = *prefix++;
@@ -185,57 +149,62 @@ static void update_title(void) {
 }
 
 int wupdate() {
+    if (!initialized) {
+        rom.s.width = 320;
+        rom.s.height = 240;
+        rom.s.bpp = 16;
+        rom.s.scale = 2;
+        rom.s.audio_size = 8192;
+        rom.s.audio_sample_rate = 22050;
+        rom.s.audio_bpp = 2;
+        rom.s.audio_channels = 1;
+        rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
+        update_title();
+        initialized = 1;
+    }
+
     frame_count++;
 
-    // === Input handling ===
     static int sp_was = 0, r_was = 0, k1_was = 0, k2_was = 0, k3_was = 0;
 
-    // SPACE: cycle BPP
-    if (w_keys[44] && !sp_was) {
+    if (rom.s.keys[44] && !sp_was) {
         if (current_bpp == 8) current_bpp = 16;
         else if (current_bpp == 16) current_bpp = 32;
         else current_bpp = 8;
-        w_bpp = current_bpp;
+        rom.s.bpp = current_bpp;
         update_title();
     }
-    sp_was = w_keys[44];
+    sp_was = rom.s.keys[44];
 
-    // R: resize
-    if (w_keys[21] && !r_was) {
+    if (rom.s.keys[21] && !r_was) {
         resize_state = (resize_state + 1) % 3;
-        if (resize_state == 0) { w_width = 320; w_height = 240; w_scale = 2; }
-        else if (resize_state == 1) { w_width = 640; w_height = 480; w_scale = 1; }
-        else { w_width = 160; w_height = 120; w_scale = 4; }
+        if (resize_state == 0) { rom.s.width = 320; rom.s.height = 240; rom.s.scale = 2; }
+        else if (resize_state == 1) { rom.s.width = 640; rom.s.height = 480; rom.s.scale = 1; }
+        else { rom.s.width = 160; rom.s.height = 120; rom.s.scale = 4; }
     }
-    r_was = w_keys[21];
+    r_was = rom.s.keys[21];
 
-    // 1/2/3: direct BPP
-    if (w_keys[30] && !k1_was) { current_bpp = 8; w_bpp = 8; update_title(); }
-    if (w_keys[31] && !k2_was) { current_bpp = 16; w_bpp = 16; update_title(); }
-    if (w_keys[32] && !k3_was) { current_bpp = 32; w_bpp = 32; update_title(); }
-    k1_was = w_keys[30]; k2_was = w_keys[31]; k3_was = w_keys[32];
+    if (rom.s.keys[30] && !k1_was) { current_bpp = 8; rom.s.bpp = 8; update_title(); }
+    if (rom.s.keys[31] && !k2_was) { current_bpp = 16; rom.s.bpp = 16; update_title(); }
+    if (rom.s.keys[32] && !k3_was) { current_bpp = 32; rom.s.bpp = 32; update_title(); }
+    k1_was = rom.s.keys[30]; k2_was = rom.s.keys[31]; k3_was = rom.s.keys[32];
 
-    // ESC: quit
-    if (w_keys[41]) return 0;
+    if (rom.s.keys[41]) return 0;
 
-    // === Draw ===
-    int W = (int)w_width, H = (int)w_height;
+    int W = (int)rom.s.width, H = (int)rom.s.height;
     clear(15, 15, 20);
 
-    // Dividers
     fill_rect(W/2, 0, 1, H, 60, 60, 80);
     fill_rect(0, H/2, W, 1, 60, 60, 80);
 
-    // Quadrants
     draw_keyboard(0, 0, W/2, H/2);
     draw_dirty_anim(W/2 + 1, 0, W/2 - 1, H/2);
     draw_mouse(0, H/2 + 1, W/2, H/2 - 1);
 
-    // === Dirty rects: use multi-rect for the quadrants ===
-    w_dirty_count = 3;
-    w_dirty_rects[0] = (Rect){0, 0, W/2, H/2};
-    w_dirty_rects[1] = (Rect){W/2, 0, W - W/2, H/2};
-    w_dirty_rects[2] = (Rect){0, H/2, W/2, H - H/2};
+    rom.s.dirty_count = 3;
+    rom.s.dirty_rects[0] = (Rect){0, 0, W/2, H/2};
+    rom.s.dirty_rects[1] = (Rect){W/2, 0, W - W/2, H/2};
+    rom.s.dirty_rects[2] = (Rect){0, H/2, W/2, H - H/2};
 
-    return 1;
+    return (int)&rom.s;
 }

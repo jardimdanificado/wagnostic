@@ -1,27 +1,16 @@
-CLANG = clang
-CFLAGS = --target=wasm32 -nostdlib -fno-delete-null-pointer-checks -O3 -w
+CLANG ?= clang
+CFLAGS = --target=wasm32 -nostdlib -fno-delete-null-pointer-checks -O3 -w -I../audio_common/shim/include
 LDFLAGS = -Wl,--no-entry -Wl,--export-all -Wl,--allow-undefined
 MEM_FLAGS = -Wl,--initial-memory=8388608
 
-TARGET  = ../../audio_wav.wasm
-HEADER  = data/audio.h
-DATA    = data/audio.bin
-SHIM    = ../audio_common/shim/libc_shim.c
-SHIM_INC = ../audio_common/shim/include
-DECODERS = ../audio_common/decoders
-GEN     = ../audio_common/gen_audio.sh
+TARGET = ../../$(shell basename $(CURDIR)).wasm
 
 all: $(TARGET)
 
-$(DATA) $(HEADER): $(GEN)
-	$(GEN) wav $(HEADER) $(DATA)
-
-$(TARGET): main.c $(HEADER) $(SHIM) $(GEN)
-	$(CLANG) $(CFLAGS) $(MEM_FLAGS) $(LDFLAGS) \
-		-I$(DECODERS) -I$(SHIM_INC) -Idata \
-		-o $@ main.c $(SHIM)
+$(TARGET): main.c ../audio_common/shim/libc_shim.c
+	$(CLANG) $(CFLAGS) $(MEM_FLAGS) $(LDFLAGS) -o $@ main.c ../audio_common/shim/libc_shim.c
 
 clean:
-	rm -f $(TARGET) $(HEADER) $(DATA)
+	rm -f $(TARGET)
 
 .PHONY: all clean
