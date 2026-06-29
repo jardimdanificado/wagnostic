@@ -15,7 +15,10 @@ ROM_DIRS = \
 	roms/audio_ogg \
 	roms/full_test \
 	roms/buttons_test \
-	roms/fallback_test
+	roms/fallback_test \
+	roms/v_example \
+	roms/zig_example \
+	roms/as_example
 
 
 
