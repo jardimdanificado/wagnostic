@@ -53,6 +53,13 @@ typedef struct {
     uint32_t audio_overrun;   // +972
     uint32_t vram_offset;     // +976
     uint32_t audio_buffer_offset; // +980
+    uint32_t io_load;             // +984: Pointer to string (path to load)
+    uint32_t io_load_buffer;      // +988: Pointer to buffer for loaded data
+    uint32_t io_load_size;        // +992: Size of buffer (IN) / Real size (OUT)
+    uint32_t io_save;             // +996: Pointer to string (path to save)
+    uint32_t io_save_buffer;      // +1000: Pointer to data to save
+    uint32_t io_save_size;        // +1004: Size of data to save
+    uint8_t reserved[16];         // +1008
 } WagnosticState;  // size = 1024
 ```
 
@@ -92,6 +99,27 @@ The host reads VRAM at `(uint8_t*)state + vram_offset`.
 - `audio_write`, `audio_read` (uint32)
 - `audio_underrun`, `audio_overrun` (uint32) — diagnostic counters
 - `audio_buffer_offset` (uint32) — offset from state base to audio ring buffer
+
+### IO and Virtual Disk
+Wagnostic supports loading and saving files natively from its ROM (which acts as a ZIP Virtual Disk).
+IO operations are fully state-based and limited to **one Load and one Save operation per frame**.
+
+- `io_load` (uint32) — Pointer to a string (e.g. `"assets/level.dat"`). Set to 0 when idle.
+- `io_load_buffer` (uint32) — Pointer to destination WASM memory.
+- `io_load_size` (uint32) — Size available in the buffer. The Host will update this with the real file size.
+
+**Load Flow:**
+1. **Probe Size:** ROM sets `io_load = "file.txt"`, `io_load_buffer = 0`, `io_load_size = 0`. The Host looks up the file, sets `io_load_size = actual_size`, and zeroes `io_load = 0`.
+2. **Read Data:** ROM allocates memory, sets `io_load = "file.txt"`, `io_load_buffer = allocated_ptr`, `io_load_size = actual_size`. The Host reads the file directly into `io_load_buffer` and zeroes `io_load = 0`.
+
+- `io_save` (uint32) — Pointer to a string (e.g. `"save/slot1.sav"`). Set to 0 when idle.
+- `io_save_buffer` (uint32) — Pointer to the source data in WASM memory.
+- `io_save_size` (uint32) — How many bytes to write.
+
+**Save Flow:**
+ROM sets `io_save = "save.sav"`, `io_save_buffer = data_ptr`, `io_save_size = data_size`. The Host writes the data to the Virtual Disk and zeroes `io_save = 0`.
+
+Both Load and Save can be triggered in the exact same frame without ambiguity.
 
 ## Functions
 
@@ -204,6 +232,9 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
+    uint32_t io_load, io_load_buffer, io_load_size;
+    uint32_t io_save, io_save_buffer, io_save_size;
+    uint8_t reserved[16];
 } State;
 
 static struct {
@@ -272,6 +303,9 @@ const State = extern struct {
     audio_underrun: u32, audio_overrun: u32,
     vram_offset: u32,
     audio_buffer_offset: u32,
+    io_load: u32, io_load_buffer: u32, io_load_size: u32,
+    io_save: u32, io_save_buffer: u32, io_save_size: u32,
+    reserved: [16]u8,
 };
 
 const Rom = extern struct {
@@ -318,6 +352,9 @@ pub struct State {
     pub audio_underrun: u32, pub audio_overrun: u32,
     pub vram_offset: u32,
     pub audio_buffer_offset: u32,
+    pub io_load: u32, pub io_load_buffer: u32, pub io_load_size: u32,
+    pub io_save: u32, pub io_save_buffer: u32, pub io_save_size: u32,
+    pub reserved: [u8; 16],
 }
 
 static mut ROM: State = State {
@@ -337,6 +374,9 @@ static mut ROM: State = State {
     audio_underrun: 0, audio_overrun: 0,
     vram_offset: 0,
     audio_buffer_offset: 0,
+    io_load: 0, io_load_buffer: 0, io_load_size: 0,
+    io_save: 0, io_save_buffer: 0, io_save_size: 0,
+    reserved: [0; 16],
 };
 
 #[no_mangle]
