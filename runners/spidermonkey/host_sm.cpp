@@ -564,9 +564,12 @@ static void check_audio_config_change() {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s <rom.wasm>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <rom.wasm|rom.wag>\n", argv[0]);
         return 1;
     }
+    
+    char rom_path[1024];
+    strncpy(rom_path, argv[1], sizeof(rom_path)-1);
 
     // ---- Load WASM/WAG binary ----
     uint8_t* wasm_data = NULL;
@@ -886,6 +889,47 @@ int main(int argc, char** argv) {
 
                 // Process Save
                 if (s->io_save && s->io_save < wasm_memory_len) {
+                    const char *path = (const char *)(wasm_memory + s->io_save);
+                    char out_path[1024];
+                    strncpy(out_path, rom_path, 1000);
+                    char *ext = strrchr(out_path, '.');
+                    if (ext && (strcmp(ext, ".wag") == 0 || strcmp(ext, ".zip") == 0)) {
+                        *ext = '\0';
+                    }
+                    size_t len = strlen(out_path);
+                    if (len > 5 && strcmp(out_path + len - 5, "_save") == 0) {
+                        strcat(out_path, ".wag");
+                    } else {
+                        strcat(out_path, "_save.wag");
+                    }
+                    
+                    char tmp_path[1024];
+                    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", out_path);
+                    
+                    mz_zip_archive writer;
+                    memset(&writer, 0, sizeof(writer));
+                    if (mz_zip_writer_init_file(&writer, tmp_path, 0)) {
+                        int num_files = mz_zip_reader_get_num_files(&zip_archive);
+                        for (int i = 0; i < num_files; i++) {
+                            mz_zip_archive_file_stat stat;
+                            if (mz_zip_reader_file_stat(&zip_archive, i, &stat)) {
+                                if (strcmp(stat.m_filename, path) != 0) {
+                                    mz_zip_writer_add_from_zip_reader(&writer, &zip_archive, i);
+                                }
+                            }
+                        }
+                        if (s->io_save_buffer > 0 && s->io_save_buffer + s->io_save_size <= wasm_memory_len) {
+                            mz_zip_writer_add_mem(&writer, path, wasm_memory + s->io_save_buffer, s->io_save_size, MZ_DEFAULT_COMPRESSION);
+                        }
+                        mz_zip_writer_finalize_archive(&writer);
+                        mz_zip_writer_end(&writer);
+                        
+                        mz_zip_reader_end(&zip_archive);
+                        rename(tmp_path, out_path);
+                        mz_zip_reader_init_file(&zip_archive, out_path, 0);
+                        strncpy(rom_path, out_path, sizeof(rom_path)-1);
+                        printf("Saved to %s\n", out_path);
+                    }
                     s->io_save = 0;
                 }
             }

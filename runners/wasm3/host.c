@@ -54,6 +54,7 @@ typedef struct {
 
 static mz_zip_archive g_zip_archive;
 static int g_is_zip = 0;
+static char g_rom_path[1024] = {0};
 
 
 static_assert(sizeof(WagnosticState) == 1024, "WagnosticState size mismatch — check struct layout");
@@ -344,15 +345,17 @@ static void refresh_memory(void) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s <rom.wasm>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <rom.wasm|rom.wag>\n", argv[0]);
         return 1;
     }
+
+    strncpy(g_rom_path, argv[1], sizeof(g_rom_path)-1);
 
     /* ---- Load ROM (ZIP or Raw WASM) ---- */
     uint8_t *wasm_data = NULL;
     size_t sz = 0;
     memset(&g_zip_archive, 0, sizeof(g_zip_archive));
-    if (mz_zip_reader_init_file(&g_zip_archive, argv[1], 0)) {
+    if (mz_zip_reader_init_file(&g_zip_archive, g_rom_path, 0)) {
         g_is_zip = 1;
         int file_index = mz_zip_reader_locate_file(&g_zip_archive, "main.wasm", NULL, 0);
         if (file_index < 0) {
@@ -634,10 +637,49 @@ int main(int argc, char **argv) {
 
             // Process Save
             if (state->io_save && state->io_save < g_mem_len) {
-                // NOTE: miniz mz_zip_reader does not support appending to archives directly.
-                // For a full implementation, we'd need mz_zip_writer APIs or to rewrite the ZIP.
-                // For now, we simulate success by just zeroing it out.
-                // printf("Requested save: %s (%u bytes)\n", g_mem + state->io_save, state->io_save_size);
+                const char *path = (const char *)(g_mem + state->io_save);
+                if (g_is_zip) {
+                    char out_path[1024];
+                    strncpy(out_path, g_rom_path, 1000);
+                    char *ext = strrchr(out_path, '.');
+                    if (ext && (strcmp(ext, ".wag") == 0 || strcmp(ext, ".zip") == 0)) {
+                        *ext = '\0';
+                    }
+                    size_t len = strlen(out_path);
+                    if (len > 5 && strcmp(out_path + len - 5, "_save") == 0) {
+                        strcat(out_path, ".wag");
+                    } else {
+                        strcat(out_path, "_save.wag");
+                    }
+                    
+                    char tmp_path[1024];
+                    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", out_path);
+                    
+                    mz_zip_archive writer;
+                    memset(&writer, 0, sizeof(writer));
+                    if (mz_zip_writer_init_file(&writer, tmp_path, 0)) {
+                        int num_files = mz_zip_reader_get_num_files(&g_zip_archive);
+                        for (int i = 0; i < num_files; i++) {
+                            mz_zip_archive_file_stat stat;
+                            if (mz_zip_reader_file_stat(&g_zip_archive, i, &stat)) {
+                                if (strcmp(stat.m_filename, path) != 0) {
+                                    mz_zip_writer_add_from_zip_reader(&writer, &g_zip_archive, i);
+                                }
+                            }
+                        }
+                        if (state->io_save_buffer > 0 && state->io_save_buffer + state->io_save_size <= g_mem_len) {
+                            mz_zip_writer_add_mem(&writer, path, g_mem + state->io_save_buffer, state->io_save_size, MZ_DEFAULT_COMPRESSION);
+                        }
+                        mz_zip_writer_finalize_archive(&writer);
+                        mz_zip_writer_end(&writer);
+                        
+                        mz_zip_reader_end(&g_zip_archive);
+                        rename(tmp_path, out_path);
+                        mz_zip_reader_init_file(&g_zip_archive, out_path, 0);
+                        strncpy(g_rom_path, out_path, sizeof(g_rom_path)-1);
+                        printf("Saved to %s\n", out_path);
+                    }
+                }
                 state->io_save = 0; // consumed
             }
         }

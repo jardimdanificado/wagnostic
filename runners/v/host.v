@@ -33,6 +33,7 @@ struct C.mz_zip_archive {}
 @[typedef]
 struct C.mz_zip_archive_file_stat {
 	m_uncomp_size u64
+	m_filename [512]char
 }
 
 fn C.mz_zip_reader_init_file(pZip &C.mz_zip_archive, pFilename &char, flags u32) int
@@ -40,6 +41,13 @@ fn C.mz_zip_reader_locate_file(pZip &C.mz_zip_archive, pName &char, pComment &ch
 fn C.mz_zip_reader_file_stat(pZip &C.mz_zip_archive, file_index u32, pStat &C.mz_zip_archive_file_stat) int
 fn C.mz_zip_reader_extract_to_mem(pZip &C.mz_zip_archive, file_index u32, pBuf voidptr, buf_size usize, flags u32) int
 fn C.mz_zip_reader_end(pZip &C.mz_zip_archive) int
+fn C.mz_zip_reader_get_num_files(pZip &C.mz_zip_archive) int
+
+fn C.mz_zip_writer_init_file(pZip &C.mz_zip_archive, pFilename &char, size_to_reserve_at_beginning u64) int
+fn C.mz_zip_writer_add_from_zip_reader(pZip &C.mz_zip_archive, pSource_zip &C.mz_zip_archive, src_file_index u32) int
+fn C.mz_zip_writer_add_mem(pZip &C.mz_zip_archive, pArchive_name &char, pBuf voidptr, buf_size usize, level_and_flags u32) int
+fn C.mz_zip_writer_finalize_archive(pZip &C.mz_zip_archive) int
+fn C.mz_zip_writer_end(pZip &C.mz_zip_archive) int
 
 // ============================================================
 // wasm3 C declarations
@@ -472,13 +480,11 @@ fn main() {
 	}
 	defer { C.SDL_Quit() }
 
-
 	if os.args.len < 2 {
-		println('Usage: wagnostic-v <rom.wasm>')
+		eprintln('Usage: wagnostic <rom.wasm|rom.wag>')
 		return
 	}
-
-	rom_path := os.args[1]
+	mut rom_path := os.args[1]
 	mut is_zip := false
 	mut zip_archive := C.mz_zip_archive{}
 	mut rom_bytes := []u8{}
@@ -897,8 +903,48 @@ fn main() {
 				}
 				state.io_load = 0
 			}
-
+			// Process Save
 			if state.io_save != 0 && state.io_save < mem_len {
+				if is_zip {
+					path_ptr := unsafe { &char(usize(g_mem) + usize(state.io_save)) }
+					mut out_path := rom_path.clone()
+					if out_path.ends_with('.wag') || out_path.ends_with('.zip') {
+						out_path = out_path[..out_path.len - 4]
+					}
+					if out_path.ends_with('_save') {
+						out_path += '.wag'
+					} else {
+						out_path += '_save.wag'
+					}
+					tmp_path := out_path + '.tmp'
+					
+					mut writer := C.mz_zip_archive{}
+					unsafe { C.memset(&writer, 0, sizeof(C.mz_zip_archive)) }
+					if C.mz_zip_writer_init_file(&writer, &char(tmp_path.str), 0) != 0 {
+						num_files := C.mz_zip_reader_get_num_files(&zip_archive)
+						for i in 0 .. num_files {
+							mut stat := C.mz_zip_archive_file_stat{}
+							if C.mz_zip_reader_file_stat(&zip_archive, u32(i), &stat) != 0 {
+								unsafe {
+									if C.strcmp(&char(&stat.m_filename[0]), path_ptr) != 0 {
+										C.mz_zip_writer_add_from_zip_reader(&writer, &zip_archive, u32(i))
+									}
+								}
+							}
+						}
+						if state.io_save_buffer > 0 && state.io_save_buffer + state.io_save_size <= mem_len {
+							C.mz_zip_writer_add_mem(&writer, path_ptr, unsafe { voidptr(usize(g_mem) + usize(state.io_save_buffer)) }, usize(state.io_save_size), 0)
+						}
+						C.mz_zip_writer_finalize_archive(&writer)
+						C.mz_zip_writer_end(&writer)
+						
+						C.mz_zip_reader_end(&zip_archive)
+						os.mv(tmp_path, out_path) or {}
+						C.mz_zip_reader_init_file(&zip_archive, &char(out_path.str), 0)
+						rom_path = out_path
+						println("Saved to ${out_path}")
+					}
+				}
 				state.io_save = 0
 			}
 		}
