@@ -17,6 +17,7 @@
 #include <cstring>
 #include <cstdint>
 #include <cmath>
+#include "miniz.h"
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_mutex.h>
@@ -54,7 +55,13 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint8_t reserved[40];
+    uint32_t io_load;
+    uint32_t io_load_buffer;
+    uint32_t io_load_size;
+    uint32_t io_save;
+    uint32_t io_save_buffer;
+    uint32_t io_save_size;
+    uint8_t reserved[16];
 } WagnosticState;
 
 static_assert(sizeof(WagnosticState) == 1024, "WagnosticState size mismatch — check struct layout");
@@ -561,19 +568,43 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // ---- Load WASM binary ----
-    FILE* f = fopen(argv[1], "rb");
-    if (!f) {
-        fprintf(stderr, "Cannot open ROM: %s\n", argv[1]);
-        return 1;
+    // ---- Load WASM/WAG binary ----
+    uint8_t* wasm_data = NULL;
+    size_t wasm_size = 0;
+    mz_zip_archive zip_archive;
+    int is_zip = 0;
+
+    memset(&zip_archive, 0, sizeof(zip_archive));
+    if (mz_zip_reader_init_file(&zip_archive, argv[1], 0)) {
+        is_zip = 1;
+        int file_index = mz_zip_reader_locate_file(&zip_archive, "main.wasm", NULL, 0);
+        if (file_index < 0) {
+            fprintf(stderr, "Cannot find main.wasm in WAG file: %s\n", argv[1]);
+            return 1;
+        }
+        mz_zip_archive_file_stat file_stat;
+        mz_zip_reader_file_stat(&zip_archive, file_index, &file_stat);
+        wasm_size = file_stat.m_uncomp_size;
+        wasm_data = (uint8_t*)malloc(wasm_size);
+        if (!wasm_data) { fprintf(stderr, "OOM allocating wasm buffer\n"); return 1; }
+        if (!mz_zip_reader_extract_to_mem(&zip_archive, file_index, wasm_data, wasm_size, 0)) {
+            fprintf(stderr, "Failed to extract main.wasm\n");
+            return 1;
+        }
+    } else {
+        FILE* f = fopen(argv[1], "rb");
+        if (!f) {
+            fprintf(stderr, "Cannot open ROM: %s\n", argv[1]);
+            return 1;
+        }
+        fseek(f, 0, SEEK_END);
+        wasm_size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        wasm_data = (uint8_t*)malloc(wasm_size);
+        if (!wasm_data) { fclose(f); fprintf(stderr, "OOM reading ROM\n"); return 1; }
+        fread(wasm_data, 1, wasm_size, f);
+        fclose(f);
     }
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    uint8_t* wasm_data = (uint8_t*)malloc(sz);
-    if (!wasm_data) { fclose(f); fprintf(stderr, "OOM reading ROM\n"); return 1; }
-    fread(wasm_data, 1, sz, f);
-    fclose(f);
 
     // ---- Init SpiderMonkey ----
     if (!JS_Init()) {
@@ -604,11 +635,11 @@ int main(int argc, char** argv) {
     {
         JSAutoRealm ar(gCx, global);
         auto copy = mozilla::UniquePtr<uint8_t[], JS::FreePolicy>(
-            (uint8_t*)JS_malloc(gCx, sz));
+            (uint8_t*)JS_malloc(gCx, wasm_size));
         if (!copy) { fprintf(stderr, "OOM allocating WASM copy\n"); return 1; }
-        memcpy(copy.get(), wasm_data, sz);
+        memcpy(copy.get(), wasm_data, wasm_size);
         JS::RootedObject ab(gCx,
-            JS::NewArrayBufferWithContents(gCx, sz, std::move(copy)));
+            JS::NewArrayBufferWithContents(gCx, wasm_size, std::move(copy)));
         JS::RootedValue av(gCx, JS::ObjectValue(*ab));
         JS_DefineProperty(gCx, global, "__wasmBytes", av, JSPROP_ENUMERATE);
     }
@@ -829,7 +860,38 @@ int main(int argc, char** argv) {
             }
         }
 
-        // ---- 6. Reset mouse wheel after consumption ----
+        // ---- 6. Process IO Streams ----
+        {
+            WagnosticState *s = get_state();
+            if (s && is_zip) {
+                // Process Load
+                if (s->io_load && s->io_load < wasm_memory_len) {
+                    const char *path = (const char *)(wasm_memory + s->io_load);
+                    int file_index = mz_zip_reader_locate_file(&zip_archive, path, NULL, 0);
+                    if (file_index >= 0) {
+                        mz_zip_archive_file_stat file_stat;
+                        mz_zip_reader_file_stat(&zip_archive, file_index, &file_stat);
+                        size_t file_sz = file_stat.m_uncomp_size;
+                        
+                        if (s->io_load_buffer == 0) {
+                            s->io_load_size = (uint32_t)file_sz;
+                        } else if (s->io_load_buffer + file_sz <= wasm_memory_len) {
+                            mz_zip_reader_extract_to_mem(&zip_archive, file_index, wasm_memory + s->io_load_buffer, file_sz, 0);
+                        }
+                    } else {
+                        if (s->io_load_buffer == 0) s->io_load_size = 0;
+                    }
+                    s->io_load = 0;
+                }
+
+                // Process Save
+                if (s->io_save && s->io_save < wasm_memory_len) {
+                    s->io_save = 0;
+                }
+            }
+        }
+
+        // ---- 7. Reset mouse wheel after consumption ----
         {
             WagnosticState *s = get_state();
             if (s) s->mouse_wheel = 0;

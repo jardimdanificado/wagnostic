@@ -40,7 +40,13 @@ mut:
     audio_overrun  u32
     vram_offset         u32
     audio_buffer_offset u32
-    reserved            [40]u8
+    io_load             u32
+    io_load_buffer      u32
+    io_load_size        u32
+    io_save             u32
+    io_save_buffer      u32
+    io_save_size        u32
+    reserved            [16]u8
 }
 
 const state_size = sizeof(State)

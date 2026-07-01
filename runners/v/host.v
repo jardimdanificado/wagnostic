@@ -25,6 +25,21 @@ import os
 #include "wasm3.h"
 #include "m3_env.h"
 #include "SDL.h"
+#include "miniz.h"
+
+@[typedef]
+struct C.mz_zip_archive {}
+
+@[typedef]
+struct C.mz_zip_archive_file_stat {
+	m_uncomp_size u64
+}
+
+fn C.mz_zip_reader_init_file(pZip &C.mz_zip_archive, pFilename &char, flags u32) int
+fn C.mz_zip_reader_locate_file(pZip &C.mz_zip_archive, pName &char, pComment &char, flags u32) int
+fn C.mz_zip_reader_file_stat(pZip &C.mz_zip_archive, file_index u32, pStat &C.mz_zip_archive_file_stat) int
+fn C.mz_zip_reader_extract_to_mem(pZip &C.mz_zip_archive, file_index u32, pBuf voidptr, buf_size usize, flags u32) int
+fn C.mz_zip_reader_end(pZip &C.mz_zip_archive) int
 
 // ============================================================
 // wasm3 C declarations
@@ -165,7 +180,13 @@ mut:
 	audio_overrun       u32
 	vram_offset         u32
 	audio_buffer_offset u32
-	reserved            [40]u8
+	io_load             u32
+	io_load_buffer      u32
+	io_load_size        u32
+	io_save             u32
+	io_save_buffer      u32
+	io_save_size        u32
+	reserved            [16]u8
 }
 
 struct LutTables {
@@ -458,9 +479,29 @@ fn main() {
 	}
 
 	rom_path := os.args[1]
-	rom_bytes := os.read_bytes(rom_path) or {
-		println('Failed to read ROM file')
-		return
+	mut is_zip := false
+	mut zip_archive := C.mz_zip_archive{}
+	mut rom_bytes := []u8{}
+	
+	if C.mz_zip_reader_init_file(&zip_archive, &char(rom_path.str), 0) != 0 {
+		is_zip = true
+		file_index := C.mz_zip_reader_locate_file(&zip_archive, c"main.wasm", unsafe { nil }, 0)
+		if file_index < 0 {
+			eprintln('Cannot find main.wasm in WAG file: ${rom_path}')
+			return
+		}
+		mut file_stat := C.mz_zip_archive_file_stat{}
+		C.mz_zip_reader_file_stat(&zip_archive, u32(file_index), &file_stat)
+		rom_bytes = []u8{len: int(file_stat.m_uncomp_size)}
+		if C.mz_zip_reader_extract_to_mem(&zip_archive, u32(file_index), unsafe { &rom_bytes[0] }, usize(file_stat.m_uncomp_size), 0) == 0 {
+			eprintln('Failed to extract main.wasm')
+			return
+		}
+	} else {
+		rom_bytes = os.read_bytes(rom_path) or {
+			println('Failed to read ROM file')
+			return
+		}
 	}
 
 	// Init Wasm3
@@ -479,7 +520,7 @@ fn main() {
 	defer { C.m3_FreeRuntime(runtime) }
 
 	mut module_ := &C.M3Module(unsafe { nil })
-	mut res := C.m3_ParseModule(env, &module_, &rom_bytes[0], u32(rom_bytes.len))
+	mut res := C.m3_ParseModule(env, &module_, unsafe { &rom_bytes[0] }, u32(rom_bytes.len))
 	if res != unsafe { nil } {
 		eprintln('Parse error: ${unsafe { cstring_to_vstring(res) }}')
 		return
@@ -830,6 +871,35 @@ fn main() {
 				C.SDL_RenderPresent(renderer)
 
 				state.dirty_count = 0
+			}
+		}
+
+		// Process IO
+		if state != unsafe { nil } && is_zip {
+			if state.io_load != 0 && state.io_load < mem_len {
+				path_ptr := unsafe { &char(usize(g_mem) + usize(state.io_load)) }
+				file_index := C.mz_zip_reader_locate_file(&zip_archive, path_ptr, unsafe { nil }, 0)
+				if file_index >= 0 {
+					mut file_stat := C.mz_zip_archive_file_stat{}
+					C.mz_zip_reader_file_stat(&zip_archive, u32(file_index), &file_stat)
+					file_sz := u32(file_stat.m_uncomp_size)
+					
+					if state.io_load_buffer == 0 {
+						state.io_load_size = file_sz
+					} else if state.io_load_buffer + file_sz <= mem_len {
+						dest_ptr := unsafe { voidptr(usize(g_mem) + usize(state.io_load_buffer)) }
+						C.mz_zip_reader_extract_to_mem(&zip_archive, u32(file_index), dest_ptr, usize(file_sz), 0)
+					}
+				} else {
+					if state.io_load_buffer == 0 {
+						state.io_load_size = 0
+					}
+				}
+				state.io_load = 0
+			}
+
+			if state.io_save != 0 && state.io_save < mem_len {
+				state.io_save = 0
 			}
 		}
 

@@ -70,11 +70,13 @@
   const ctx         = canvas.getContext('2d', { alpha: false, desynchronized: true });
   const emptyState  = document.getElementById('emptyState');
 
-  // ── State ──────────────────────────────────────────────────────────────
+  // State
   let wasmInstance = null;
   let wasmMemory   = null;
   let wasmExports  = null;
   let running      = false;
+  let statePtr     = 0;
+  let zipArchive   = null;
 
   // Screen config tracking
   let prevWidth  = 0;
@@ -128,50 +130,51 @@
 
   // ── Helpers ────────────────────────────────────────────────────────────
 
-  // clang for wasm32 emits C globals as memory-backed: the global's value
-  // is the ADDRESS of the variable's storage in linear memory. Scalars
-  // (uint32_t x = 5) need a dereference to read the int32; arrays
-  // (uint8_t arr[100]) use the address directly as a pointer to the
-  // first byte. Memory writes work even for globals the browser exports
-  // as `mutable=0` (the .value = setter would throw on those).
-  function readGlobal(name) {
-    return wasmExports[name] | 0;
-  }
-  function readScalar(name) {
-    return new DataView(wasmMemory.buffer).getInt32(wasmExports[name] | 0, true);
-  }
-  function writeGlobal(name, value) {
-    const offset = wasmExports[name] | 0;
-    new DataView(wasmMemory.buffer).setInt32(offset, value | 0, true);
+  function getMem() {
+    return new DataView(wasmMemory.buffer);
   }
 
   function readGlobals() {
+    if (!statePtr) return {};
+    const mem = getMem();
+    const ptr = statePtr;
+
     return {
-      w:            readScalar('w_width')             || DEFAULT_WIDTH,
-      h:            readScalar('w_height')            || DEFAULT_HEIGHT,
-      bpp:          readScalar('w_bpp')               || DEFAULT_BPP,
-      scale:        readScalar('w_scale')             || DEFAULT_SCALE,
-      vram:         readGlobal('w_vram'),
-      dirtyCount:   readScalar('w_dirty_count'),
-      dirtyRects:   readGlobal('w_dirty_rects'),
-      mouseX:       readScalar('w_mouse_x'),
-      mouseY:       readScalar('w_mouse_y'),
-      mouseButtons: readScalar('w_mouse_buttons'),
-      mouseWheel:   readScalar('w_mouse_wheel'),
-      ticks:        readScalar('w_ticks'),
-      audioSize:        readScalar('w_audio_size'),
-      audioSampleRate: readScalar('w_audio_sample_rate'),
-      audioBpp:         readScalar('w_audio_bpp'),
-      audioChannels:    readScalar('w_audio_channels'),
-      audioWrite:       readScalar('w_audio_write'),
-      audioRead:        readScalar('w_audio_read'),
-      audioBuffer:      readGlobal('w_audio_buffer')
+      w:               mem.getUint32(ptr + 0, true),
+      h:               mem.getUint32(ptr + 4, true),
+      bpp:             mem.getUint32(ptr + 8, true),
+      scale:           mem.getUint32(ptr + 12, true),
+      dirtyCount:      mem.getUint32(ptr + 144, true),
+      dirtyRects:      ptr + 148,
+      mouseX:          mem.getInt32(ptr + 660, true),
+      mouseY:          mem.getInt32(ptr + 664, true),
+      mouseButtons:    mem.getUint32(ptr + 668, true),
+      mouseWheel:      mem.getInt32(ptr + 672, true),
+      gamepadButtons:  mem.getUint32(ptr + 932, true),
+      ticks:           mem.getUint32(ptr + 936, true),
+      targetFps:       mem.getUint32(ptr + 940, true),
+      audioSize:       mem.getUint32(ptr + 944, true),
+      audioSampleRate: mem.getUint32(ptr + 948, true),
+      audioBpp:        mem.getUint32(ptr + 952, true),
+      audioChannels:   mem.getUint32(ptr + 956, true),
+      audioWrite:      mem.getUint32(ptr + 960, true),
+      audioRead:       mem.getUint32(ptr + 964, true),
+      audioUnderrun:   mem.getUint32(ptr + 968, true),
+      audioOverrun:    mem.getUint32(ptr + 972, true),
+      vramOffset:      mem.getUint32(ptr + 976, true),
+      audioBuffer:     mem.getUint32(ptr + 980, true),
+      ioLoad:          mem.getUint32(ptr + 984, true),
+      ioLoadBuffer:    mem.getUint32(ptr + 988, true),
+      ioLoadSize:      mem.getUint32(ptr + 992, true),
+      ioSave:          mem.getUint32(ptr + 996, true),
+      ioSaveBuffer:    mem.getUint32(ptr + 1000, true),
+      ioSaveSize:      mem.getUint32(ptr + 1004, true),
     };
   }
 
   function readTitle() {
-    const ptr = readGlobal('w_title');
-    const u8 = new Uint8Array(wasmMemory.buffer, ptr, TITLE_MAX);
+    if (!statePtr) return '(untitled)';
+    const u8 = new Uint8Array(wasmMemory.buffer, statePtr + 16, TITLE_MAX);
     let end = 0;
     while (end < TITLE_MAX && u8[end] !== 0) end++;
     return new TextDecoder().decode(u8.subarray(0, end));
@@ -228,6 +231,7 @@
   }
 
   function renderDirtyRects(w, h, bpp, vramPtr, dirtyCount, dirtyRectsPtr) {
+    initPixelLuts();
     const bppBytes = bpp >> 3;
     const dataView = new DataView(wasmMemory.buffer, dirtyRectsPtr, MAX_DIRTY_RECTS * RECT_STRIDE);
     const isFullScreen = dirtyCount === 1 &&
@@ -300,22 +304,25 @@
   // ── Input ──────────────────────────────────────────────────────────────
 
   function writeInputToGlobals() {
-    writeGlobal('w_mouse_x',          mouseX);
-    writeGlobal('w_mouse_y',          mouseY);
-    writeGlobal('w_mouse_buttons',    mouseButtons);
-    writeGlobal('w_mouse_wheel',      mouseWheel);
-    writeGlobal('w_gamepad_buttons',  gamepadBtns);
-    writeGlobal('w_ticks',            (performance.now() - startTime) | 0);
-
-    // Write key states — w_keys is a byte array, write directly to memory.
-    const keysPtr = readGlobal('w_keys');
-    const keysMem = new Uint8Array(wasmMemory.buffer, keysPtr, KEYS_COUNT);
+    if (!statePtr) return;
+    const mem = getMem();
+    const ptr = statePtr;
+    mem.setInt32(ptr + 660, mouseX, true);
+    mem.setInt32(ptr + 664, mouseY, true);
+    mem.setUint32(ptr + 668, mouseButtons, true);
+    mem.setInt32(ptr + 672, mouseWheel, true);
+    
+    const keysMem = new Uint8Array(wasmMemory.buffer, ptr + 676, KEYS_COUNT);
     keysMem.set(keysDown);
+
+    mem.setUint32(ptr + 932, gamepadBtns, true);
+    mem.setUint32(ptr + 936, (performance.now() - startTime) | 0, true);
   }
 
   function resetInput() {
+    if (!statePtr) return;
     mouseWheel = 0;
-    writeGlobal('w_mouse_wheel', 0);
+    getMem().setInt32(statePtr + 672, 0, true);
   }
 
   // ── Keyboard ───────────────────────────────────────────────────────────
@@ -437,8 +444,8 @@
       const g = readGlobals();
       if (g.audioSize === 0 || g.audioBpp === 0) return;
 
-      const writePtr = readScalar('w_audio_write');
-      let   readPtr  = readScalar('w_audio_read');
+      const writePtr = g.audioWrite;
+      let   readPtr  = g.audioRead;
       const bufPtr   = g.audioBuffer;
       const size     = g.audioSize;
       const bpp      = g.audioBpp;
@@ -493,7 +500,9 @@
       // Update the read pointer in WASM memory. Atomic from JS's
       // single-threaded perspective; the next frame() that calls
       // wupdate will see the new value.
-      writeGlobal('w_audio_read', readPtr);
+      if (statePtr) {
+        getMem().setUint32(statePtr + 964, readPtr, true);
+      }
     };
 
     audioProcessor.connect(audioCtx.destination);
@@ -529,13 +538,14 @@
       console.log('ROM exited (wupdate returned 0)');
       return;
     }
+    statePtr = ret;
 
     // 3. Read globals and auto-detect config changes
     const g = readGlobals();
-    const w = g.w;
-    const h = g.h;
-    const bpp = g.bpp;
-    const scale = g.scale;
+    const w = g.w || DEFAULT_WIDTH;
+    const h = g.h || DEFAULT_HEIGHT;
+    const bpp = g.bpp || DEFAULT_BPP;
+    const scale = g.scale || DEFAULT_SCALE;
 
     if (w !== prevWidth || h !== prevHeight || bpp !== prevBpp || scale !== prevScale) {
       resizeCanvas(w, h, scale);
@@ -549,16 +559,46 @@
 
     // 4. Render dirty rects
     if (g.dirtyCount > 0) {
-      renderDirtyRects(w, h, bpp, g.vram, g.dirtyCount, g.dirtyRects);
+      renderDirtyRects(w, h, bpp, statePtr + g.vramOffset, g.dirtyCount, g.dirtyRects);
       // Reset dirty count
-      writeGlobal('w_dirty_count', 0);
+      getMem().setUint32(statePtr + 144, 0, true);
+    }
+    
+    // 5. I/O Stream Check
+    if (zipArchive) {
+      if (g.ioLoad > 0) {
+        const u8 = new Uint8Array(wasmMemory.buffer, g.ioLoad);
+        let path = '';
+        for (let i = 0; i < 256; i++) {
+          if (u8[i] === 0) break;
+          path += String.fromCharCode(u8[i]);
+        }
+        const fileData = zipArchive[path];
+        if (fileData) {
+          if (g.ioLoadBuffer === 0) {
+            getMem().setUint32(statePtr + 992, fileData.length, true); // io_load_size
+          } else {
+            const dest = new Uint8Array(wasmMemory.buffer, g.ioLoadBuffer, fileData.length);
+            dest.set(fileData);
+          }
+        } else {
+          if (g.ioLoadBuffer === 0) {
+             getMem().setUint32(statePtr + 992, 0, true);
+          }
+        }
+        getMem().setUint32(statePtr + 984, 0, true); // clear io_load
+      }
+      
+      if (g.ioSave > 0) {
+        getMem().setUint32(statePtr + 996, 0, true); // clear io_save (not supported yet)
+      }
     }
 
-    // 5. Reset mouse wheel
+    // 6. Reset mouse wheel
     resetInput();
     
     // Check if ROM wants a specific framerate
-    var target = readScalar('w_target_fps');
+    var target = g.targetFps;
     if (target > 0) {
       setTimeout(frame, 1000 / target);
     } else {
@@ -568,30 +608,29 @@
 
   // ── WASM Loading ───────────────────────────────────────────────────────
 
-  function loadRom(wasmUrl) {
-    running = false;
-    stopAudio();
-    startTime = performance.now();
+  function loadRomFromBuffer(buf) {
+    let wasmBuffer = buf;
+    zipArchive = null;
+    
+    // Check if ZIP
+    const u8 = new Uint8Array(buf);
+    if (u8[0] === 0x50 && u8[1] === 0x4B && u8[2] === 0x03 && u8[3] === 0x04) {
+      if (typeof fflate === 'undefined') {
+        console.error('fflate is required to load .wag ZIP files.');
+        return;
+      }
+      zipArchive = fflate.unzipSync(u8);
+      if (zipArchive['main.wasm']) {
+        wasmBuffer = zipArchive['main.wasm'].buffer;
+      } else {
+        console.error('Cannot find main.wasm in the .wag file');
+        return;
+      }
+    }
 
-    // Reset input
-    keysDown.fill(0);
-    gamepadBtns = 0;
-    mouseButtons = 0;
-    mouseWheel = 0;
+    const wasmImports = {};
 
-    // The wagnostic protocol has zero host imports. Everything the ROM
-    // needs (libc, libm) is compiled into the WASM itself.
-    var wasmImports = {};
-
-    // Some browser polyfills choke on instantiateStreaming without an
-    // explicit imports object. Pass an empty one and fall back to
-    // instantiate if streaming fails.
-    var instantiatePromise = WebAssembly.instantiateStreaming
-      ? WebAssembly.instantiateStreaming(fetch(wasmUrl), wasmImports)
-      : fetch(wasmUrl).then(function (r) { return r.arrayBuffer(); })
-            .then(function (buf) { return WebAssembly.instantiate(buf, wasmImports); });
-
-    instantiatePromise.then(function (result) {
+    WebAssembly.instantiate(wasmBuffer, wasmImports).then(function (result) {
       wasmInstance = result.instance;
       wasmExports  = wasmInstance.exports;
       wasmMemory   = wasmExports.memory || wasmExports.linear_memory;
@@ -601,44 +640,61 @@
         return;
       }
 
-      // Check that wupdate exists
       if (typeof wasmExports.wupdate !== 'function') {
         console.error('ROM does not export wupdate() function');
         return;
       }
+      
+      // Get initial state pointer
+      statePtr = wasmExports.wupdate();
+      if (!statePtr) {
+        console.error('Initial wupdate() returned 0');
+        return;
+      }
 
-      // Initial canvas setup
       const g = readGlobals();
-      resizeCanvas(g.w, g.h, g.scale);
+      resizeCanvas(g.w || DEFAULT_WIDTH, g.h || DEFAULT_HEIGHT, g.scale || DEFAULT_SCALE);
 
       if (emptyState) emptyState.style.display = 'none';
       canvas.style.display = 'block';
 
-      // Init audio if available
       if (g.audioSampleRate > 0 && g.audioBpp > 0 && g.audioChannels > 0) {
         initAudio(g.audioSampleRate, g.audioChannels);
       }
 
-      // Init audio context on user gesture if needed
       if (audioCtx && audioCtx.state === 'suspended') {
         audioCtx.resume().catch(function () {});
       }
 
-      console.log('ROM loaded. Title:', readTitle() || '(untitled)');
-      console.log('Screen:', g.w + 'x' + g.h, 'bpp=' + g.bpp, 'scale=' + g.scale);
+      console.log('ROM loaded. Title:', readTitle());
+      
+      running = true;
+      var nextFrame = function () { requestAnimationFrame(frame); };
+      var target = g.targetFps;
+      if (target > 0) {
+        var delay = 1000 / target;
+        nextFrame = function () { setTimeout(frame, delay); };
+      }
+      nextFrame();
+    }).catch(function (err) {
+      console.error('Failed to load ROM:', err);
+    });
+  }
 
-    running = true;
-    // Use rAF by default; switch to setTimeout if ROM sets w_target_fps
-    var nextFrame = function () { requestAnimationFrame(frame); };
-    var target = readScalar('w_target_fps');
-    if (target > 0) {
-      var delay = 1000 / target;
-      nextFrame = function () { setTimeout(frame, delay); };
-    }
-    nextFrame();
-  }).catch(function (err) {
-    console.error('Failed to load ROM:', err);
-  });
+  function loadRom(wasmUrl) {
+    running = false;
+    stopAudio();
+    startTime = performance.now();
+
+    keysDown.fill(0);
+    gamepadBtns = 0;
+    mouseButtons = 0;
+    mouseWheel = 0;
+
+    fetch(wasmUrl).then(function (r) { return r.arrayBuffer(); })
+      .then(loadRomFromBuffer).catch(function (err) {
+        console.error('Fetch failed:', err);
+      });
   }
 
   // ── Event Listeners ────────────────────────────────────────────────────
@@ -647,8 +703,12 @@
   fileInput.addEventListener('change', function (e) {
     const file = e.target.files[0];
     if (!file) return;
-    const url = URL.createObjectURL(file);
-    loadRom(url);
+    
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+      loadRomFromBuffer(evt.target.result);
+    };
+    reader.readAsArrayBuffer(file);
   });
 
   // Keyboard

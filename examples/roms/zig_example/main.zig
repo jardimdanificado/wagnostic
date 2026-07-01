@@ -36,7 +36,13 @@ const State = extern struct {
     audio_overrun: u32,
     vram_offset: u32,
     audio_buffer_offset: u32,
-    reserved: [40]u8,
+    io_load: u32,
+    io_load_buffer: u32,
+    io_load_size: u32,
+    io_save: u32,
+    io_save_buffer: u32,
+    io_save_size: u32,
+    reserved: [16]u8,
 };
 
 const state_size = @sizeOf(State);
@@ -74,7 +80,13 @@ export var rom: Rom = .{
         .audio_overrun = 0,
         .vram_offset = 0,
         .audio_buffer_offset = 0,
-        .reserved = [_]u8{0} ** 40,
+        .io_load = 0,
+        .io_load_buffer = 0,
+        .io_load_size = 0,
+        .io_save = 0,
+        .io_save_buffer = 0,
+        .io_save_size = 0,
+        .reserved = [_]u8{0} ** 16,
     },
     .vram = [_]u8{0} ** vram_size,
 };

@@ -5,8 +5,8 @@ WASM3_SRCS := $(wildcard $(WASM3_DIR)/*.c)
 
 all: libwasm3.a wagnostic-v
 
-libwasm3.a: $(WASM3_SRCS)
-	cc -c -O2 -I$(WASM3_DIR) $(WASM3_SRCS)
+libwasm3.a: $(WASM3_SRCS) miniz.c
+	cc -c -O2 -I$(WASM3_DIR) $(WASM3_SRCS) miniz.c
 	ar rcs $@ *.o
 	rm -f *.o
 
