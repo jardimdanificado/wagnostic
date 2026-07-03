@@ -25,29 +25,138 @@ import os
 #include "wasm3.h"
 #include "m3_env.h"
 #include "SDL.h"
-#include "miniz.h"
 
-@[typedef]
-struct C.mz_zip_archive {}
-
-@[typedef]
-struct C.mz_zip_archive_file_stat {
-	m_uncomp_size u64
-	m_filename [512]char
+fn tar_extract_file(tar_path string, target_filename string) ![]u8 {
+	mut f := os.open(tar_path) or { return error('Cannot open file') }
+	defer { f.close() }
+	
+	mut header := []u8{len: 512}
+	mut best_data := []u8{}
+	
+	for {
+		read_len := f.read(mut header) or { break }
+		if read_len < 512 || header[0] == 0 { break }
+		
+		mut name := ''
+		for i in 0..100 {
+			if header[i] == 0 { break }
+			name += header[i].ascii_str()
+		}
+		
+		mut size := u32(0)
+		for i in 124..135 {
+			if header[i] >= `0` && header[i] <= `7` {
+				size = size * 8 + u32(header[i] - `0`)
+			}
+		}
+		
+		if name == target_filename {
+			best_data = []u8{len: int(size)}
+			if size > 0 {
+				f.read(mut best_data) or {}
+			}
+			remainder := (512 - (int(size) % 512)) % 512
+			f.seek(remainder, .current) or {}
+		} else {
+			skip := int(size) + ((512 - (int(size) % 512)) % 512)
+			f.seek(skip, .current) or {}
+		}
+	}
+	if best_data.len > 0 { return best_data }
+	return error('Not found')
 }
 
-fn C.mz_zip_reader_init_file(pZip &C.mz_zip_archive, pFilename &char, flags u32) int
-fn C.mz_zip_reader_locate_file(pZip &C.mz_zip_archive, pName &char, pComment &char, flags u32) int
-fn C.mz_zip_reader_file_stat(pZip &C.mz_zip_archive, file_index u32, pStat &C.mz_zip_archive_file_stat) int
-fn C.mz_zip_reader_extract_to_mem(pZip &C.mz_zip_archive, file_index u32, pBuf voidptr, buf_size usize, flags u32) int
-fn C.mz_zip_reader_end(pZip &C.mz_zip_archive) int
-fn C.mz_zip_reader_get_num_files(pZip &C.mz_zip_archive) int
+fn tar_get_file_size(tar_path string, target_filename string) u32 {
+	mut f := os.open(tar_path) or { return 0 }
+	defer { f.close() }
+	mut header := []u8{len: 512}
+	mut best_sz := u32(0)
+	
+	for {
+		read_len := f.read(mut header) or { break }
+		if read_len < 512 || header[0] == 0 { break }
+		
+		mut name := ''
+		for i in 0..100 {
+			if header[i] == 0 { break }
+			name += header[i].ascii_str()
+		}
+		mut size := u32(0)
+		for i in 124..135 {
+			if header[i] >= `0` && header[i] <= `7` {
+				size = size * 8 + u32(header[i] - `0`)
+			}
+		}
+		if name == target_filename {
+			best_sz = size
+		}
+		skip := int(size) + ((512 - (int(size) % 512)) % 512)
+		f.seek(skip, .current) or {}
+	}
+	return best_sz
+}
 
-fn C.mz_zip_writer_init_file(pZip &C.mz_zip_archive, pFilename &char, size_to_reserve_at_beginning u64) int
-fn C.mz_zip_writer_add_from_zip_reader(pZip &C.mz_zip_archive, pSource_zip &C.mz_zip_archive, src_file_index u32) int
-fn C.mz_zip_writer_add_mem(pZip &C.mz_zip_archive, pArchive_name &char, pBuf voidptr, buf_size usize, level_and_flags u32) int
-fn C.mz_zip_writer_finalize_archive(pZip &C.mz_zip_archive) int
-fn C.mz_zip_writer_end(pZip &C.mz_zip_archive) int
+fn tar_append_file(tar_path string, target_filename string, data []u8) {
+	mut f := os.open_file(tar_path, "r+", 0o666) or { return }
+	defer { f.close() }
+	
+	mut header := []u8{len: 512}
+	mut last_good_pos := i64(0)
+	
+	for {
+		read_len := f.read(mut header) or { break }
+		if read_len < 512 || header[0] == 0 { break }
+		mut size := u32(0)
+		for i in 124..135 {
+			if header[i] >= `0` && header[i] <= `7` {
+				size = size * 8 + u32(header[i] - `0`)
+			}
+		}
+		skip := int(size) + ((512 - (int(size) % 512)) % 512)
+		f.seek(skip, .current) or {}
+		last_good_pos = f.tell() or { 0 }
+	}
+	f.seek(last_good_pos, .start) or {}
+	
+	mut new_header := []u8{len: 512}
+	for i in 0..target_filename.len {
+		if i < 99 { new_header[i] = target_filename[i] }
+	}
+	
+	mode_octal := '0000644'
+	for i in 0..7 {
+		new_header[100+i] = mode_octal[i]
+	}
+	
+	size_octal := '${data.len:011o}'
+	for i in 0..11 {
+		if i < size_octal.len { new_header[124+i] = size_octal[i] }
+	}
+	new_header[135] = ` `
+	ustar := 'ustar  '
+	for i in 0..7 { new_header[257+i] = ustar[i] }
+	new_header[156] = `0`
+	for i in 148..156 { new_header[i] = ` ` }
+	
+	mut checksum := u32(0)
+	for i in 0..512 {
+		checksum += new_header[i]
+	}
+	chk_octal := '${checksum:06o}'
+	for i in 0..6 {
+		if i < chk_octal.len { new_header[148+i] = chk_octal[i] }
+	}
+	new_header[154] = 0
+	new_header[155] = ` `
+	
+	f.write(new_header) or {}
+	f.write(data) or {}
+	remainder := (512 - (data.len % 512)) % 512
+	zeros := []u8{len: 1024}
+	if remainder > 0 { f.write(zeros[..remainder]) or {} }
+	f.write(zeros) or {}
+}
+
 
 // ============================================================
 // wasm3 C declarations
@@ -485,24 +594,13 @@ fn main() {
 		return
 	}
 	mut rom_path := os.args[1]
-	mut is_zip := false
-	mut zip_archive := C.mz_zip_archive{}
+	mut is_tar := false
 	mut rom_bytes := []u8{}
 	
-	if C.mz_zip_reader_init_file(&zip_archive, &char(rom_path.str), 0) != 0 {
-		is_zip = true
-		file_index := C.mz_zip_reader_locate_file(&zip_archive, c"main.wasm", unsafe { nil }, 0)
-		if file_index < 0 {
-			eprintln('Cannot find main.wasm in WAG file: ${rom_path}')
-			return
-		}
-		mut file_stat := C.mz_zip_archive_file_stat{}
-		C.mz_zip_reader_file_stat(&zip_archive, u32(file_index), &file_stat)
-		rom_bytes = []u8{len: int(file_stat.m_uncomp_size)}
-		if C.mz_zip_reader_extract_to_mem(&zip_archive, u32(file_index), unsafe { &rom_bytes[0] }, usize(file_stat.m_uncomp_size), 0) == 0 {
-			eprintln('Failed to extract main.wasm')
-			return
-		}
+	extracted := tar_extract_file(rom_path, "main.wasm") or { []u8{} }
+	if extracted.len > 0 {
+		is_tar = true
+		rom_bytes = extracted.clone()
 	} else {
 		rom_bytes = os.read_bytes(rom_path) or {
 			println('Failed to read ROM file')
@@ -881,20 +979,19 @@ fn main() {
 		}
 
 		// Process IO
-		if state != unsafe { nil } && is_zip {
+		if state != unsafe { nil } && is_tar {
 			if state.io_load != 0 && state.io_load < mem_len {
-				path_ptr := unsafe { &char(usize(g_mem) + usize(state.io_load)) }
-				file_index := C.mz_zip_reader_locate_file(&zip_archive, path_ptr, unsafe { nil }, 0)
-				if file_index >= 0 {
-					mut file_stat := C.mz_zip_archive_file_stat{}
-					C.mz_zip_reader_file_stat(&zip_archive, u32(file_index), &file_stat)
-					file_sz := u32(file_stat.m_uncomp_size)
-					
+				path_str := unsafe { cstring_to_vstring(&char(usize(g_mem) + usize(state.io_load))) }
+				file_sz := tar_get_file_size(rom_path, path_str)
+				if file_sz > 0 {
 					if state.io_load_buffer == 0 {
 						state.io_load_size = file_sz
 					} else if state.io_load_buffer + file_sz <= mem_len {
-						dest_ptr := unsafe { voidptr(usize(g_mem) + usize(state.io_load_buffer)) }
-						C.mz_zip_reader_extract_to_mem(&zip_archive, u32(file_index), dest_ptr, usize(file_sz), 0)
+						extracted_file := tar_extract_file(rom_path, path_str) or { []u8{} }
+						if extracted_file.len > 0 {
+							dest_ptr := unsafe { voidptr(usize(g_mem) + usize(state.io_load_buffer)) }
+							unsafe { C.memcpy(dest_ptr, extracted_file.data, extracted_file.len) }
+						}
 					}
 				} else {
 					if state.io_load_buffer == 0 {
@@ -905,45 +1002,12 @@ fn main() {
 			}
 			// Process Save
 			if state.io_save != 0 && state.io_save < mem_len {
-				if is_zip {
-					path_ptr := unsafe { &char(usize(g_mem) + usize(state.io_save)) }
-					mut out_path := rom_path.clone()
-					if out_path.ends_with('.wag') || out_path.ends_with('.zip') {
-						out_path = out_path[..out_path.len - 4]
-					}
-					if out_path.ends_with('_save') {
-						out_path += '.wag'
-					} else {
-						out_path += '_save.wag'
-					}
-					tmp_path := out_path + '.tmp'
-					
-					mut writer := C.mz_zip_archive{}
-					unsafe { C.memset(&writer, 0, sizeof(C.mz_zip_archive)) }
-					if C.mz_zip_writer_init_file(&writer, &char(tmp_path.str), 0) != 0 {
-						num_files := C.mz_zip_reader_get_num_files(&zip_archive)
-						for i in 0 .. num_files {
-							mut stat := C.mz_zip_archive_file_stat{}
-							if C.mz_zip_reader_file_stat(&zip_archive, u32(i), &stat) != 0 {
-								unsafe {
-									if C.strcmp(&char(&stat.m_filename[0]), path_ptr) != 0 {
-										C.mz_zip_writer_add_from_zip_reader(&writer, &zip_archive, u32(i))
-									}
-								}
-							}
-						}
-						if state.io_save_buffer > 0 && state.io_save_buffer + state.io_save_size <= mem_len {
-							C.mz_zip_writer_add_mem(&writer, path_ptr, unsafe { voidptr(usize(g_mem) + usize(state.io_save_buffer)) }, usize(state.io_save_size), 0)
-						}
-						C.mz_zip_writer_finalize_archive(&writer)
-						C.mz_zip_writer_end(&writer)
-						
-						C.mz_zip_reader_end(&zip_archive)
-						os.mv(tmp_path, out_path) or {}
-						C.mz_zip_reader_init_file(&zip_archive, &char(out_path.str), 0)
-						rom_path = out_path
-						println("Saved to ${out_path}")
-					}
+				path_str := unsafe { cstring_to_vstring(&char(usize(g_mem) + usize(state.io_save))) }
+				if state.io_save_buffer > 0 && state.io_save_buffer + state.io_save_size <= mem_len {
+					mut data_clone := []u8{len: int(state.io_save_size)}
+					unsafe { C.memcpy(data_clone.data, voidptr(usize(g_mem) + usize(state.io_save_buffer)), usize(state.io_save_size)) }
+					tar_append_file(rom_path, path_str, data_clone)
+					println("Saved to ${rom_path}")
 				}
 				state.io_save = 0
 			}

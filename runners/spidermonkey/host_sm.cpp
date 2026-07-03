@@ -17,7 +17,113 @@
 #include <cstring>
 #include <cstdint>
 #include <cmath>
-#include "miniz.h"
+/* ================================================================
+ * TAR Helpers
+ * ================================================================ */
+
+static uint8_t* tar_extract_file(const char* tar_path, const char* target_filename, size_t* out_sz) {
+    FILE* f = fopen(tar_path, "rb");
+    if (!f) return NULL;
+    uint8_t header[512];
+    uint8_t* best_data = NULL;
+    size_t best_sz = 0;
+    while (fread(header, 1, 512, f) == 512) {
+        if (header[0] == '\0') break; // End of tar
+        char name[101];
+        memcpy(name, header, 100);
+        name[100] = '\0';
+        size_t size = 0;
+        for (int i = 0; i < 11; i++) {
+            if (header[124+i] >= '0' && header[124+i] <= '7')
+                size = size * 8 + (header[124+i] - '0');
+        }
+        if (strcmp(name, target_filename) == 0) {
+            if (best_data) free(best_data);
+            best_data = (uint8_t*)malloc(size);
+            best_sz = size;
+            fread(best_data, 1, size, f);
+            long remainder = (512 - (size % 512)) % 512;
+            fseek(f, remainder, SEEK_CUR);
+        } else {
+            long skip = size + ((512 - (size % 512)) % 512);
+            fseek(f, skip, SEEK_CUR);
+        }
+    }
+    fclose(f);
+    if (out_sz) *out_sz = best_sz;
+    return best_data;
+}
+
+static size_t tar_get_file_size(const char* tar_path, const char* target_filename) {
+    FILE* f = fopen(tar_path, "rb");
+    if (!f) return 0;
+    uint8_t header[512];
+    size_t best_sz = 0;
+    while (fread(header, 1, 512, f) == 512) {
+        if (header[0] == '\0') break;
+        char name[101];
+        memcpy(name, header, 100);
+        name[100] = '\0';
+        size_t size = 0;
+        for (int i = 0; i < 11; i++) {
+            if (header[124+i] >= '0' && header[124+i] <= '7')
+                size = size * 8 + (header[124+i] - '0');
+        }
+        if (strcmp(name, target_filename) == 0) {
+            best_sz = size;
+        }
+        long skip = size + ((512 - (size % 512)) % 512);
+        fseek(f, skip, SEEK_CUR);
+    }
+    fclose(f);
+    return best_sz;
+}
+
+static void tar_append_file(const char* tar_path, const char* target_filename, uint8_t* data, size_t size) {
+    FILE* f = fopen(tar_path, "r+b");
+    if (!f) return;
+    uint8_t header[512];
+    long last_good_pos = 0;
+    while (fread(header, 1, 512, f) == 512) {
+        if (header[0] == '\0') {
+            break;
+        }
+        size_t fsize = 0;
+        for (int i = 0; i < 11; i++) {
+            if (header[124+i] >= '0' && header[124+i] <= '7')
+                fsize = fsize * 8 + (header[124+i] - '0');
+        }
+        long skip = fsize + ((512 - (fsize % 512)) % 512);
+        fseek(f, skip, SEEK_CUR);
+        last_good_pos = ftell(f);
+    }
+    fseek(f, last_good_pos, SEEK_SET);
+    memset(header, 0, 512);
+    strncpy((char*)header, target_filename, 99);
+    sprintf((char*)header + 100, "%07o", 0644);
+    sprintf((char*)header + 124, "%011zo", size);
+    header[135] = ' '; 
+    strcpy((char*)header + 257, "ustar  ");
+    header[156] = '0'; 
+    memset(header + 148, ' ', 8);
+    
+    uint32_t checksum = 0;
+    for (int i = 0; i < 512; i++) {
+        checksum += header[i];
+    }
+    sprintf((char*)header + 148, "%06o", checksum);
+    header[154] = '\0';
+    header[155] = ' ';
+    
+    fwrite(header, 1, 512, f);
+    fwrite(data, 1, size, f);
+    uint8_t zeros[1024] = {0};
+    long remainder = (512 - (size % 512)) % 512;
+    if (remainder > 0) fwrite(zeros, 1, remainder, f);
+    fwrite(zeros, 1, 1024, f); // two empty blocks
+    fclose(f);
+}
+
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_mutex.h>
@@ -574,26 +680,11 @@ int main(int argc, char** argv) {
     // ---- Load WASM/WAG binary ----
     uint8_t* wasm_data = NULL;
     size_t wasm_size = 0;
-    mz_zip_archive zip_archive;
-    int is_zip = 0;
+    int is_tar = 0;
 
-    memset(&zip_archive, 0, sizeof(zip_archive));
-    if (mz_zip_reader_init_file(&zip_archive, argv[1], 0)) {
-        is_zip = 1;
-        int file_index = mz_zip_reader_locate_file(&zip_archive, "main.wasm", NULL, 0);
-        if (file_index < 0) {
-            fprintf(stderr, "Cannot find main.wasm in WAG file: %s\n", argv[1]);
-            return 1;
-        }
-        mz_zip_archive_file_stat file_stat;
-        mz_zip_reader_file_stat(&zip_archive, file_index, &file_stat);
-        wasm_size = file_stat.m_uncomp_size;
-        wasm_data = (uint8_t*)malloc(wasm_size);
-        if (!wasm_data) { fprintf(stderr, "OOM allocating wasm buffer\n"); return 1; }
-        if (!mz_zip_reader_extract_to_mem(&zip_archive, file_index, wasm_data, wasm_size, 0)) {
-            fprintf(stderr, "Failed to extract main.wasm\n");
-            return 1;
-        }
+    wasm_data = tar_extract_file(argv[1], "main.wasm", &wasm_size);
+    if (wasm_data) {
+        is_tar = 1;
     } else {
         FILE* f = fopen(argv[1], "rb");
         if (!f) {
@@ -866,20 +957,21 @@ int main(int argc, char** argv) {
         // ---- 6. Process IO Streams ----
         {
             WagnosticState *s = get_state();
-            if (s && is_zip) {
+            if (s && is_tar) {
                 // Process Load
                 if (s->io_load && s->io_load < wasm_memory_len) {
                     const char *path = (const char *)(wasm_memory + s->io_load);
-                    int file_index = mz_zip_reader_locate_file(&zip_archive, path, NULL, 0);
-                    if (file_index >= 0) {
-                        mz_zip_archive_file_stat file_stat;
-                        mz_zip_reader_file_stat(&zip_archive, file_index, &file_stat);
-                        size_t file_sz = file_stat.m_uncomp_size;
-                        
+                    size_t file_sz = tar_get_file_size(rom_path, path);
+                    if (file_sz > 0) {
                         if (s->io_load_buffer == 0) {
                             s->io_load_size = (uint32_t)file_sz;
                         } else if (s->io_load_buffer + file_sz <= wasm_memory_len) {
-                            mz_zip_reader_extract_to_mem(&zip_archive, file_index, wasm_memory + s->io_load_buffer, file_sz, 0);
+                            size_t exact_sz = 0;
+                            uint8_t *data = tar_extract_file(rom_path, path, &exact_sz);
+                            if (data) {
+                                memcpy(wasm_memory + s->io_load_buffer, data, exact_sz);
+                                free(data);
+                            }
                         }
                     } else {
                         if (s->io_load_buffer == 0) s->io_load_size = 0;
@@ -890,45 +982,9 @@ int main(int argc, char** argv) {
                 // Process Save
                 if (s->io_save && s->io_save < wasm_memory_len) {
                     const char *path = (const char *)(wasm_memory + s->io_save);
-                    char out_path[1024];
-                    strncpy(out_path, rom_path, 1000);
-                    char *ext = strrchr(out_path, '.');
-                    if (ext && (strcmp(ext, ".wag") == 0 || strcmp(ext, ".zip") == 0)) {
-                        *ext = '\0';
-                    }
-                    size_t len = strlen(out_path);
-                    if (len > 5 && strcmp(out_path + len - 5, "_save") == 0) {
-                        strcat(out_path, ".wag");
-                    } else {
-                        strcat(out_path, "_save.wag");
-                    }
-                    
-                    char tmp_path[1024];
-                    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", out_path);
-                    
-                    mz_zip_archive writer;
-                    memset(&writer, 0, sizeof(writer));
-                    if (mz_zip_writer_init_file(&writer, tmp_path, 0)) {
-                        int num_files = mz_zip_reader_get_num_files(&zip_archive);
-                        for (int i = 0; i < num_files; i++) {
-                            mz_zip_archive_file_stat stat;
-                            if (mz_zip_reader_file_stat(&zip_archive, i, &stat)) {
-                                if (strcmp(stat.m_filename, path) != 0) {
-                                    mz_zip_writer_add_from_zip_reader(&writer, &zip_archive, i);
-                                }
-                            }
-                        }
-                        if (s->io_save_buffer > 0 && s->io_save_buffer + s->io_save_size <= wasm_memory_len) {
-                            mz_zip_writer_add_mem(&writer, path, wasm_memory + s->io_save_buffer, s->io_save_size, MZ_DEFAULT_COMPRESSION);
-                        }
-                        mz_zip_writer_finalize_archive(&writer);
-                        mz_zip_writer_end(&writer);
-                        
-                        mz_zip_reader_end(&zip_archive);
-                        rename(tmp_path, out_path);
-                        mz_zip_reader_init_file(&zip_archive, out_path, 0);
-                        strncpy(rom_path, out_path, sizeof(rom_path)-1);
-                        printf("Saved to %s\n", out_path);
+                    if (s->io_save_buffer > 0 && s->io_save_buffer + s->io_save_size <= wasm_memory_len) {
+                        tar_append_file(rom_path, path, wasm_memory + s->io_save_buffer, s->io_save_size);
+                        printf("Saved to %s\n", rom_path);
                     }
                     s->io_save = 0;
                 }

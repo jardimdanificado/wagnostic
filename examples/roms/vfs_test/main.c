@@ -1,10 +1,7 @@
 #include <stdint.h>
+char *strcpy(char *dest, const char *src);
 
-void *strcpy(char *dest, const char *src) {
-    char *d = dest;
-    while ((*d++ = *src++));
-    return dest;
-}
+
 
 typedef struct { int x, y, w, h; } Rect;
 
@@ -46,7 +43,7 @@ int wupdate() {
         rom.s.bpp = 16;
         rom.s.vram_offset = sizeof(State);
         rom.s.target_fps = 60;
-        strcpy(rom.s.title, "Loading ZIP...");
+        strcpy(rom.s.title, "Loading VFS...");
     }
 
     if (state_phase == 0) {

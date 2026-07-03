@@ -101,7 +101,7 @@ The host reads VRAM at `(uint8_t*)state + vram_offset`.
 - `audio_buffer_offset` (uint32) — offset from state base to audio ring buffer
 
 ### IO and Virtual Disk
-Wagnostic supports loading and saving files natively from its ROM (which acts as a ZIP Virtual Disk).
+Wagnostic supports loading and saving files natively from its ROM (which acts as an uncompressed TAR Virtual Disk).
 IO operations are fully state-based and limited to **one Load and one Save operation per frame**.
 
 - `io_load` (uint32) — Pointer to a string (e.g. `"assets/level.dat"`). Set to 0 when idle.
@@ -207,9 +207,8 @@ in two separate writes.
 These are informational. ROMs can read them for debugging but should not
 depend on them for logic.
 
-## Examples
+## Example
 
-### C (no helpers — self-contained)
 ```c
 #include <stdint.h>
 
@@ -254,137 +253,6 @@ int wupdate() {
     rom.s.dirty_count = 1;
     rom.s.dirty_rects[0] = (Rect){0, 0, 320, 240};
     return (int)&rom.s;
-}
-```
-
-### AssemblyScript
-```ts
-const STATE_SIZE = 1024;
-const VRAM_SIZE = 320 * 240 * 2;
-
-let state_ptr: usize = 0;
-let vram_ptr: usize = 0;
-
-function init(): void {
-  state_ptr = memory.allocate(STATE_SIZE + VRAM_SIZE);
-  vram_ptr = state_ptr + STATE_SIZE;
-  store<u32>(state_ptr + 0, 320);   // width
-  store<u32>(state_ptr + 4, 240);   // height
-  store<u32>(state_ptr + 8, 16);    // bpp
-  store<u32>(state_ptr + 976, STATE_SIZE); // vram_offset
-}
-
-export function wupdate(): i32 {
-  if (state_ptr == 0) init();
-  // draw to vram_ptr...
-  store<u32>(state_ptr + 144, 1);  // dirty_count
-  return <i32>state_ptr;
-}
-```
-
-### Zig
-```zig
-const Rect = extern struct { x: i32, y: i32, w: i32, h: i32 };
-
-const State = extern struct {
-    width: u32, height: u32, bpp: u32, scale: u32,
-    title: [128]u8,
-    dirty_count: u32,
-    dirty_rects: [32]Rect,
-    mouse_x: i32, mouse_y: i32,
-    mouse_buttons: u32,
-    mouse_wheel: i32,
-    keys: [256]u8,
-    gamepad_buttons: u32,
-    ticks: u32,
-    target_fps: u32,
-    audio_size: u32, audio_sample_rate: u32, audio_bpp: u32, audio_channels: u32,
-    audio_write: u32, audio_read: u32,
-    audio_underrun: u32, audio_overrun: u32,
-    vram_offset: u32,
-    audio_buffer_offset: u32,
-    io_load: u32, io_load_buffer: u32, io_load_size: u32,
-    io_save: u32, io_save_buffer: u32, io_save_size: u32,
-    reserved: [16]u8,
-};
-
-const Rom = extern struct {
-    s: State,
-    vram: [320 * 240 * 2]u8,
-};
-
-var rom: Rom = .{ .s = .{ .width = 0, .height = 0, .bpp = 0, .scale = 0, /* ... */ }, .vram = .{0} ** (320 * 240 * 2) };
-
-export fn wupdate() i32 {
-    if (rom.s.width == 0) {
-        rom.s.width = 320;
-        rom.s.height = 240;
-        rom.s.bpp = 16;
-        rom.s.vram_offset = @sizeOf(State);
-    }
-    const vram = @ptrFromInt(@intFromPtr(&rom.s) + rom.s.vram_offset);
-    // draw...
-    rom.s.dirty_count = 1;
-    return @intCast(i32, @intFromPtr(&rom.s));
-}
-```
-
-### Rust
-```rust
-#[repr(C)]
-pub struct Rect { pub x: i32, pub y: i32, pub w: i32, pub h: i32 }
-
-#[repr(C)]
-pub struct State {
-    pub width: u32, pub height: u32, pub bpp: u32, pub scale: u32,
-    pub title: [u8; 128],
-    pub dirty_count: u32,
-    pub dirty_rects: [Rect; 32],
-    pub mouse_x: i32, pub mouse_y: i32,
-    pub mouse_buttons: u32,
-    pub mouse_wheel: i32,
-    pub keys: [u8; 256],
-    pub gamepad_buttons: u32,
-    pub ticks: u32,
-    pub target_fps: u32,
-    pub audio_size: u32, pub audio_sample_rate: u32, pub audio_bpp: u32, pub audio_channels: u32,
-    pub audio_write: u32, pub audio_read: u32,
-    pub audio_underrun: u32, pub audio_overrun: u32,
-    pub vram_offset: u32,
-    pub audio_buffer_offset: u32,
-    pub io_load: u32, pub io_load_buffer: u32, pub io_load_size: u32,
-    pub io_save: u32, pub io_save_buffer: u32, pub io_save_size: u32,
-    pub reserved: [u8; 16],
-}
-
-static mut ROM: State = State {
-    width: 320, height: 240, bpp: 16, scale: 1,
-    title: [0; 128],
-    dirty_count: 0,
-    dirty_rects: [Rect { x: 0, y: 0, w: 0, h: 0 }; 32],
-    mouse_x: 0, mouse_y: 0,
-    mouse_buttons: 0,
-    mouse_wheel: 0,
-    keys: [0; 256],
-    gamepad_buttons: 0,
-    ticks: 0,
-    target_fps: 0,
-    audio_size: 0, audio_sample_rate: 0, audio_bpp: 0, audio_channels: 0,
-    audio_write: 0, audio_read: 0,
-    audio_underrun: 0, audio_overrun: 0,
-    vram_offset: 0,
-    audio_buffer_offset: 0,
-    io_load: 0, io_load_buffer: 0, io_load_size: 0,
-    io_save: 0, io_save_buffer: 0, io_save_size: 0,
-    reserved: [0; 16],
-};
-
-#[no_mangle]
-pub extern "C" fn wupdate() -> i32 {
-    unsafe {
-        ROM.dirty_count = 1;
-        &ROM as *const _ as i32
-    }
 }
 ```
 

@@ -99,13 +99,13 @@ $(WASM3_DIR)/m3_api_libc.c:
 
 host: $(TARGET_HOST)
 
-$(TARGET_HOST): ../runners/wasm3/host.c ../runners/wasm3/miniz.c $(WASM3_DIR)/m3_api_libc.c
-	$(CC) $(HOST_CFLAGS) ../runners/wasm3/host.c ../runners/wasm3/miniz.c $(WASM3_SRC) -o $@ -lSDL2 -lm
+$(TARGET_HOST): ../runners/wasm3/host.c $(WASM3_DIR)/m3_api_libc.c
+	$(CC) $(HOST_CFLAGS) ../runners/wasm3/host.c $(WASM3_SRC) -o $@ -lSDL2 -lm
 
 host-sm: $(TARGET_HOST_SM)
 
-$(TARGET_HOST_SM): ../runners/spidermonkey/host_sm.cpp ../runners/wasm3/miniz.c
-	$(CXX) -std=c++17 $(SM_CXXFLAGS) ../runners/spidermonkey/host_sm.cpp ../runners/wasm3/miniz.c -o $@ $(SM_LDFLAGS) -O2 -lSDL2 -lGL
+$(TARGET_HOST_SM): ../runners/spidermonkey/host_sm.cpp
+	$(CXX) -std=c++17 $(SM_CXXFLAGS) ../runners/spidermonkey/host_sm.cpp -o $@ $(SM_LDFLAGS) -O2 -lSDL2 -lGL
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  ROM TARGETS  (delegate to sub-Makefiles)

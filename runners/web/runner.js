@@ -76,7 +76,7 @@
   let wasmExports  = null;
   let running      = false;
   let statePtr     = 0;
-  let zipArchive   = null;
+  let tarBuffer    = null;
 
   // Screen config tracking
   let prevWidth  = 0;
@@ -565,7 +565,7 @@
     }
     
     // 5. I/O Stream Check
-    if (zipArchive) {
+    if (tarBuffer) {
       if (g.ioLoad > 0) {
         const u8 = new Uint8Array(wasmMemory.buffer, g.ioLoad);
         let path = '';
@@ -573,7 +573,7 @@
           if (u8[i] === 0) break;
           path += String.fromCharCode(u8[i]);
         }
-        const fileData = zipArchive[path];
+        const fileData = extractFromTar(tarBuffer, path);
         if (fileData) {
           if (g.ioLoadBuffer === 0) {
             getMem().setUint32(statePtr + 992, fileData.length, true); // io_load_size
@@ -590,7 +590,9 @@
       }
       
       if (g.ioSave > 0) {
-        getMem().setUint32(statePtr + 996, 0, true); // clear io_save (not supported yet)
+        // web doesn't support writing to disk directly from WASM easily (unless using OPFS)
+        // for now we just consume ioSave. Append could be implemented with Blob downloads later.
+        getMem().setUint32(statePtr + 996, 0, true); // clear io_save
       }
     }
 
@@ -608,24 +610,45 @@
 
   // ── WASM Loading ───────────────────────────────────────────────────────
 
+  // Simple TAR file extraction
+  function extractFromTar(buf, filename) {
+    const dv = new DataView(buf);
+    let offset = 0;
+    let lastFound = null;
+    while (offset + 512 <= buf.byteLength) {
+      if (dv.getUint8(offset) === 0) break; // end of tar
+      let name = '';
+      for (let i = 0; i < 100; i++) {
+        let b = dv.getUint8(offset + i);
+        if (b === 0) break;
+        name += String.fromCharCode(b);
+      }
+      let sizeStr = '';
+      for (let i = 124; i < 135; i++) {
+        let b = dv.getUint8(offset + i);
+        if (b >= 48 && b <= 55) { // '0' to '7'
+           sizeStr += String.fromCharCode(b);
+        }
+      }
+      let size = parseInt(sizeStr || '0', 8);
+      if (name === filename) {
+        lastFound = new Uint8Array(buf, offset + 512, size);
+      }
+      let skip = size + ((512 - (size % 512)) % 512);
+      offset += 512 + skip;
+    }
+    return lastFound;
+  }
+
   function loadRomFromBuffer(buf) {
     let wasmBuffer = buf;
-    zipArchive = null;
+    tarBuffer = null;
     
-    // Check if ZIP
-    const u8 = new Uint8Array(buf);
-    if (u8[0] === 0x50 && u8[1] === 0x4B && u8[2] === 0x03 && u8[3] === 0x04) {
-      if (typeof fflate === 'undefined') {
-        console.error('fflate is required to load .wag ZIP files.');
-        return;
-      }
-      zipArchive = fflate.unzipSync(u8);
-      if (zipArchive['main.wasm']) {
-        wasmBuffer = zipArchive['main.wasm'].buffer;
-      } else {
-        console.error('Cannot find main.wasm in the .wag file');
-        return;
-      }
+    // Check if TAR by trying to extract main.wasm
+    const mainWasm = extractFromTar(buf, 'main.wasm');
+    if (mainWasm) {
+      tarBuffer = buf;
+      wasmBuffer = mainWasm.buffer.slice(mainWasm.byteOffset, mainWasm.byteOffset + mainWasm.byteLength);
     }
 
     const wasmImports = {};

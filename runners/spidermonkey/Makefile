@@ -11,11 +11,8 @@ all: host
 
 host: $(HOST)
 
-miniz.o: miniz.c
-	$(CC) -O2 -c miniz.c -o miniz.o
-
-$(HOST): host_sm.cpp miniz.o
-	$(CXX) -std=c++17 $(SM_CXXFLAGS) host_sm.cpp miniz.o -o $@ $(SM_LDFLAGS) -O2 -lSDL2 -lGL
+$(HOST): host_sm.cpp
+	$(CXX) -std=c++17 $(SM_CXXFLAGS) host_sm.cpp -o $@ $(SM_LDFLAGS) -O2 -lSDL2 -lGL
 
 clean:
-	rm -f $(HOST) miniz.o
+	rm -f $(HOST)

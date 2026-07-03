@@ -40,7 +40,7 @@ $(WASM3_DIR)/m3_api_libc.c:
 
 host: $(HOST)
 
-$(HOST): host.c miniz.c $(WASM3_SRC)
+$(HOST): host.c $(WASM3_SRC)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 clean:
