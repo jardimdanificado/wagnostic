@@ -75,7 +75,7 @@ All other fields are optional. The host applies sensible defaults so a ROM with 
 |-------|--------|---------|-------|
 | `width` | 0 | 320 | window width in pixels |
 | `height` | 4 | 240 | window height in pixels |
-| `bpp` | 8 | 32 | bits per pixel (8/16/32) |
+| `bpp` | 8 | 32 | bits per pixel (8/16/24/32) |
 | `scale` | 12 | 1 | window scale factor |
 | `title` | 16 | "Untitled" | window title (char[128]) |
 | `dirty_count` | 144 | 0 | 0=nothing, N=render N rects |
@@ -131,7 +131,7 @@ int wupdate() {
 |------|------|-------------|
 | `width` | `uint32` | Screen width in pixels |
 | `height` | `uint32` | Screen height in pixels |
-| `bpp` | `uint32` | Bits per pixel (8, 16, or 32) |
+| `bpp` | `uint32` | Bits per pixel (8, 16, 24, or 32) |
 | `scale` | `uint32` | Window scale factor |
 | `title` | `char[128]` | Window title |
 
@@ -243,6 +243,12 @@ pixel = ((r & 0xE0) | ((g & 0xE0) >> 3) | ((b & 0xC0) >> 6));
 ### 16-bit: RGB565
 ```c
 pixel = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+```
+
+### 24-bit: RGB888
+```c
+// 3 consecutive bytes per pixel
+pixel[0] = r; pixel[1] = g; pixel[2] = b;
 ```
 
 ### 32-bit: RGBA8888
