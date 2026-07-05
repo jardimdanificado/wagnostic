@@ -287,6 +287,17 @@ static void render_rect_to_texture(SDL_Texture *texture, uint8_t *vram,
             uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
             for (int x = 0; x < rw; x++) dst[x] = rgb565_lut[src[x]];
         }
+    } else if (BPP == 24) {
+        for (int y = ry; y < ry + rh; y++) {
+            uint8_t *src = vram + ((y * W + rx) * 3);
+            uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
+            for (int x = 0; x < rw; x++) {
+                uint8_t r = src[x*3];
+                uint8_t g = src[x*3 + 1];
+                uint8_t b = src[x*3 + 2];
+                dst[x] = (uint32_t)r | ((uint32_t)g << 8) | ((uint32_t)b << 16) | 0xFF000000u;
+            }
+        }
     } else if (BPP == 32) {
         for (int y = ry; y < ry + rh; y++) {
             uint8_t  *src = vram + (y * W + rx) * 4;
@@ -312,6 +323,16 @@ static void render_fullscreen(SDL_Texture *texture, uint8_t *vram,
         uint32_t *dst = (uint32_t *)pixels;
         uint32_t total = W * H;
         for (uint32_t i = 0; i < total; i++) dst[i] = rgb565_lut[src[i]];
+    } else if (BPP == 24) {
+        uint8_t *src = vram;
+        uint32_t *dst = (uint32_t *)pixels;
+        uint32_t total = W * H;
+        for (uint32_t i = 0; i < total; i++) {
+            uint8_t r = src[i*3];
+            uint8_t g = src[i*3 + 1];
+            uint8_t b = src[i*3 + 2];
+            dst[i] = (uint32_t)r | ((uint32_t)g << 8) | ((uint32_t)b << 16) | 0xFF000000u;
+        }
     } else if (BPP == 32) {
         memcpy(pixels, vram, W * H * 4);
     }

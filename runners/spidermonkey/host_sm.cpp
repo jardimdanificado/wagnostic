@@ -260,10 +260,13 @@ static const char* fragment_shader_src =
     "        float g = float((p >> 5) & 0x3F) / 63.0;\n"
     "        float b = float(p & 0x1F) / 31.0;\n"
     "        FragColor = vec4(r, g, b, 1.0);\n"
+    "    } else if (bpp == 24) {\n"
+    "        FragColor = vec4(texelFetch(vram, pix, 0).rgb, 1.0);\n"
     "    } else {\n"
     "        FragColor = texelFetch(vram, pix, 0);\n"
     "    }\n"
     "}\n";
+
 
 // ============================================================
 // GPU pipeline
@@ -330,14 +333,14 @@ static void init_textures_and_pbos() {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        GLenum ifmt = (BPP == 8) ? GL_R8 : (BPP == 16) ? GL_RG8 : GL_RGBA8;
-        GLenum base = (BPP == 8) ? GL_RED : (BPP == 16) ? GL_RG : GL_RGBA;
+        GLenum ifmt = (BPP == 8) ? GL_R8 : (BPP == 16) ? GL_RG8 : (BPP == 24) ? GL_RGB8 : GL_RGBA8;
+        GLenum base = (BPP == 8) ? GL_RED : (BPP == 16) ? GL_RG : (BPP == 24) ? GL_RGB : GL_RGBA;
         glTexImage2D(GL_TEXTURE_2D, 0, ifmt, W, H, 0, base, GL_UNSIGNED_BYTE, NULL);
     }
 
     if (pbos[0]) glDeleteBuffers(2, pbos);
     glGenBuffers(2, pbos);
-    size_t vram_bytes = (size_t)W * H * (BPP / 8);
+    size_t vram_bytes = (size_t)W * H * (BPP == 24 ? 3 : BPP / 8);
     for (int i = 0; i < 2; i++) {
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbos[i]);
         glBufferData(GL_PIXEL_UNPACK_BUFFER, vram_bytes, NULL, GL_STREAM_DRAW);
@@ -364,8 +367,8 @@ static void upload_and_render() {
     WagnosticState *s = get_state();
     uint8_t* vram = get_vram(s);
     if (!vram) return;
-    size_t vram_bytes = (size_t)W * H * (BPP / 8);
-    GLenum fmt = (BPP == 8) ? GL_RED : (BPP == 16) ? GL_RG : GL_RGBA;
+    size_t vram_bytes = (size_t)W * H * (BPP == 24 ? 3 : BPP / 8);
+    GLenum fmt = (BPP == 8) ? GL_RED : (BPP == 16) ? GL_RG : (BPP == 24) ? GL_RGB : GL_RGBA;
     int cur = pbo_idx, prev = 1 - pbo_idx;
     int rtex = (tex_idx + 2) % 3, utex = tex_idx;
 
@@ -399,8 +402,8 @@ static void upload_dirty_rect(const Rect& r) {
     WagnosticState *s = get_state();
     uint8_t* vram = get_vram(s);
     if (!vram) return;
-    GLenum fmt = (BPP == 8) ? GL_RED : (BPP == 16) ? GL_RG : GL_RGBA;
-    int bpp_bytes = BPP / 8;
+    GLenum fmt = (BPP == 8) ? GL_RED : (BPP == 16) ? GL_RG : (BPP == 24) ? GL_RGB : GL_RGBA;
+    int bpp_bytes = (BPP == 24) ? 3 : BPP / 8;
     size_t src_offset = ((size_t)y * W + x) * bpp_bytes;
 
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -920,7 +923,8 @@ int main(int argc, char** argv) {
                             uint8_t* vram = get_vram(s);
                             if (vram) {
                                 GLenum fmt = (BPP == 8) ? GL_RED :
-                                             (BPP == 16) ? GL_RG : GL_RGBA;
+                                             (BPP == 16) ? GL_RG :
+                                             (BPP == 24) ? GL_RGB : GL_RGBA;
                                 glBindTexture(GL_TEXTURE_2D, vram_textures[0]);
                                 glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
                                 glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H,
