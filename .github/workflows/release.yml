@@ -29,7 +29,11 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           sudo apt-get update -qq
-          sudo apt-get install -y clang
+          sudo apt-get install -y clang wget unzip
+          wget -q https://github.com/vlang/v/releases/latest/download/v_linux.zip
+          unzip -q v_linux.zip
+          sudo mv v /usr/local/vlang
+          sudo ln -s /usr/local/vlang/v /usr/local/bin/v
           make -C examples roms
       - uses: actions/upload-artifact@v4
         with:
