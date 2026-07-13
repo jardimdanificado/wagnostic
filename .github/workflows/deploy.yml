@@ -18,7 +18,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang xxd ffmpeg
+          sudo apt-get install -y clang llvm xxd ffmpeg
 
       - name: Prepare Deployment Directory
         run: |
