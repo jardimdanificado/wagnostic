@@ -54,75 +54,6 @@ static uint8_t* tar_extract_file(const char* tar_path, const char* target_filena
     return best_data;
 }
 
-static size_t tar_get_file_size(const char* tar_path, const char* target_filename) {
-    FILE* f = fopen(tar_path, "rb");
-    if (!f) return 0;
-    uint8_t header[512];
-    size_t best_sz = 0;
-    while (fread(header, 1, 512, f) == 512) {
-        if (header[0] == '\0') break;
-        char name[101];
-        memcpy(name, header, 100);
-        name[100] = '\0';
-        size_t size = 0;
-        for (int i = 0; i < 11; i++) {
-            if (header[124+i] >= '0' && header[124+i] <= '7')
-                size = size * 8 + (header[124+i] - '0');
-        }
-        if (strcmp(name, target_filename) == 0) {
-            best_sz = size;
-        }
-        long skip = size + ((512 - (size % 512)) % 512);
-        fseek(f, skip, SEEK_CUR);
-    }
-    fclose(f);
-    return best_sz;
-}
-
-static void tar_append_file(const char* tar_path, const char* target_filename, uint8_t* data, size_t size) {
-    FILE* f = fopen(tar_path, "r+b");
-    if (!f) return;
-    uint8_t header[512];
-    long last_good_pos = 0;
-    while (fread(header, 1, 512, f) == 512) {
-        if (header[0] == '\0') {
-            break;
-        }
-        size_t fsize = 0;
-        for (int i = 0; i < 11; i++) {
-            if (header[124+i] >= '0' && header[124+i] <= '7')
-                fsize = fsize * 8 + (header[124+i] - '0');
-        }
-        long skip = fsize + ((512 - (fsize % 512)) % 512);
-        fseek(f, skip, SEEK_CUR);
-        last_good_pos = ftell(f);
-    }
-    fseek(f, last_good_pos, SEEK_SET);
-    memset(header, 0, 512);
-    strncpy((char*)header, target_filename, 99);
-    sprintf((char*)header + 100, "%07o", 0644);
-    sprintf((char*)header + 124, "%011zo", size);
-    header[135] = ' '; 
-    strcpy((char*)header + 257, "ustar  ");
-    header[156] = '0'; 
-    memset(header + 148, ' ', 8);
-    
-    uint32_t checksum = 0;
-    for (int i = 0; i < 512; i++) {
-        checksum += header[i];
-    }
-    sprintf((char*)header + 148, "%06o", checksum);
-    header[154] = '\0';
-    header[155] = ' ';
-    
-    fwrite(header, 1, 512, f);
-    fwrite(data, 1, size, f);
-    uint8_t zeros[1024] = {0};
-    long remainder = (512 - (size % 512)) % 512;
-    if (remainder > 0) fwrite(zeros, 1, remainder, f);
-    fwrite(zeros, 1, 1024, f); // two empty blocks
-    fclose(f);
-}
 
 
 #include <SDL2/SDL.h>
@@ -161,13 +92,7 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint32_t io_load;
-    uint32_t io_load_buffer;
-    uint32_t io_load_size;
-    uint32_t io_save;
-    uint32_t io_save_buffer;
-    uint32_t io_save_size;
-    uint8_t reserved[16];
+    uint8_t reserved[40];
 } WagnosticState;
 
 static_assert(sizeof(WagnosticState) == 1024, "WagnosticState size mismatch — check struct layout");
@@ -958,42 +883,7 @@ int main(int argc, char** argv) {
             }
         }
 
-        // ---- 6. Process IO Streams ----
-        {
-            WagnosticState *s = get_state();
-            if (s && is_tar) {
-                // Process Load
-                if (s->io_load && s->io_load < wasm_memory_len) {
-                    const char *path = (const char *)(wasm_memory + s->io_load);
-                    size_t file_sz = tar_get_file_size(rom_path, path);
-                    if (file_sz > 0) {
-                        if (s->io_load_buffer == 0) {
-                            s->io_load_size = (uint32_t)file_sz;
-                        } else if (s->io_load_buffer + file_sz <= wasm_memory_len) {
-                            size_t exact_sz = 0;
-                            uint8_t *data = tar_extract_file(rom_path, path, &exact_sz);
-                            if (data) {
-                                memcpy(wasm_memory + s->io_load_buffer, data, exact_sz);
-                                free(data);
-                            }
-                        }
-                    } else {
-                        if (s->io_load_buffer == 0) s->io_load_size = 0;
-                    }
-                    s->io_load = 0;
-                }
 
-                // Process Save
-                if (s->io_save && s->io_save < wasm_memory_len) {
-                    const char *path = (const char *)(wasm_memory + s->io_save);
-                    if (s->io_save_buffer > 0 && s->io_save_buffer + s->io_save_size <= wasm_memory_len) {
-                        tar_append_file(rom_path, path, wasm_memory + s->io_save_buffer, s->io_save_size);
-                        printf("Saved to %s\n", rom_path);
-                    }
-                    s->io_save = 0;
-                }
-            }
-        }
 
         // ---- 7. Reset mouse wheel after consumption ----
         {

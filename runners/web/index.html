@@ -1,38 +1,167 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wagnostic Web Runner</title>
+    <meta charset="utf-8">
+    <title>Wagnostic</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: #1e1e1e;
+            color: #fff;
+            font-family: sans-serif;
+            padding: 20px;
+        }
+
+        #container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            max-width: 1200px;
+            gap: 20px;
+        }
+
+        #editor-container {
+            flex: 1;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #code {
+            width: 100%;
+            height: 400px;
+            font-family: monospace;
+            font-size: 14px;
+            background: #2d2d2d;
+            color: #ccc;
+            padding: 10px;
+            box-sizing: border-box;
+            border: 1px solid #444;
+        }
+
+        #gameCanvas {
+            width: 320px;
+            height: 240px;
+            background: #000;
+            border: 2px solid #555;
+        }
+
+        #log {
+            width: 100%;
+            max-width: 1200px;
+            height: 150px;
+            background: #111;
+            color: #0f0;
+            font-family: monospace;
+            padding: 10px;
+            overflow-y: auto;
+            margin-top: 20px;
+            border: 1px solid #444;
+            box-sizing: border-box;
+        }
+
+        button {
+            padding: 10px 20px;
+            background: #007acc;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+
+        button:hover {
+            background: #005999;
+        }
+    </style>
 </head>
+
 <body>
     <h1>Wagnostic</h1>
+    <div id="container">
+        <div>
+            <input type="file" id="wasmInput" style="display: none;">
+            <p id="emptyState" style="display: none;"></p>
+            <canvas id="gameCanvas" width="320" height="240"></canvas>
+        </div>
+        <div id="editor-container">
+            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                <button id="compileBtn">Compile & Run</button>
+                <button onclick="document.getElementById('wasmInput').click()">Load .wasm</button>
+            </div>
+            <textarea id="code" spellcheck="false">
+#include <stdint.h>
+
+typedef struct { int x, y, w, h; } Rect;
+
+typedef struct {
+    uint32_t width, height, bpp, scale;
+    char title[128];
+    uint32_t dirty_count;
+    Rect dirty_rects[32];
+    int32_t mouse_x, mouse_y;
+    uint32_t mouse_buttons;
+    int32_t mouse_wheel;
+    uint8_t keys[256];
+    uint32_t gamepad_buttons;
+    uint32_t ticks;
+    uint32_t target_fps;
+    uint32_t audio_size, audio_sample_rate, audio_bpp, audio_channels;
+    uint32_t audio_write, audio_read;
+    uint32_t audio_underrun, audio_overrun;
+    uint32_t vram_offset;
+    uint32_t audio_buffer_offset;
+    uint8_t reserved[40];
+} State;
+
+static struct {
+    State s;
+    uint8_t vram[320 * 240 * 4];
+} rom;
+
+static uint32_t* _fb = (uint32_t*)rom.vram;
+static int initialized = 0;
+
+int wupdate() {
+    if (!initialized) {
+        rom.s.width = 320;
+        rom.s.height = 240;
+        rom.s.bpp = 32;
+        rom.s.scale = 1;
+        rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
+        initialized = 1;
+    }
+
+    // Preenche a tela de azul escuro
+    for (int i = 0; i < 320 * 240; i++) {
+        _fb[i] = 0xFF222288;
+    }
     
-    <p>
-        <label for="wasmInput">Load ROM:</label>
-        <input type="file" id="wasmInput" accept=".wasm">
-    </p>
-    
-    <div id="canvasWrapper">
-        <p id="emptyState">No game loaded. Select a .wasm file above.</p>
-        <canvas id="gameCanvas" width="320" height="240"></canvas>
+    // Desenha um quadrado verde onde o mouse estiver
+    int mx = rom.s.mouse_x;
+    int my = rom.s.mouse_y;
+    for (int y = my - 10; y < my + 10; y++) {
+        for (int x = mx - 10; x < mx + 10; x++) {
+            if (x >= 0 && x < 320 && y >= 0 && y < 240) {
+                _fb[y * 320 + x] = 0xFF00FF00;
+            }
+        }
+    }
+
+    rom.s.dirty_count = 1;
+    rom.s.dirty_rects[0] = (Rect){0, 0, 320, 240};
+    return (int)&rom.s;
+}
+</textarea>
+        </div>
     </div>
-    
-    <fieldset>
-        <legend>Virtual Gamepad</legend>
-        <button data-btn="up">Up</button>
-        <button data-btn="down">Down</button>
-        <button data-btn="left">Left</button>
-        <button data-btn="right">Right</button>
-        <button data-btn="a">A</button>
-        <button data-btn="b">B</button>
-        <button data-btn="select">Select</button>
-        <button data-btn="start">Start</button>
-    </fieldset>
-    
-    <p><strong>Keyboard Controls:</strong> Arrows = D-Pad | Z / X = A / B | Enter = Start | Shift = Select</p>
-    
-    <script src="fflate.js"></script>
-    <script src="runner.js"></script>
+    <div id="log"></div>
+    <script src="runner.js?v=6"></script>
+    <script src="main.js?v=6"></script>
 </body>
+
 </html>

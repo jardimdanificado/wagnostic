@@ -20,3 +20,4 @@ wagn0/
 runners/wasm3/wasm3
 *.wag
 *.tar
+node_modules

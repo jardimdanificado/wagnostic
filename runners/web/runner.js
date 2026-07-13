@@ -163,12 +163,7 @@
       audioOverrun:    mem.getUint32(ptr + 972, true),
       vramOffset:      mem.getUint32(ptr + 976, true),
       audioBuffer:     mem.getUint32(ptr + 980, true),
-      ioLoad:          mem.getUint32(ptr + 984, true),
-      ioLoadBuffer:    mem.getUint32(ptr + 988, true),
-      ioLoadSize:      mem.getUint32(ptr + 992, true),
-      ioSave:          mem.getUint32(ptr + 996, true),
-      ioSaveBuffer:    mem.getUint32(ptr + 1000, true),
-      ioSaveSize:      mem.getUint32(ptr + 1004, true),
+
     };
   }
 
@@ -328,6 +323,7 @@
   // ── Keyboard ───────────────────────────────────────────────────────────
 
   function onKeyDown(e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
     const hid = HID_SCANCODES[e.code];
     if (hid !== undefined) {
       keysDown[hid] = 1;
@@ -345,6 +341,7 @@
   }
 
   function onKeyUp(e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
     const hid = HID_SCANCODES[e.code];
     if (hid !== undefined) {
       keysDown[hid] = 0;
@@ -564,37 +561,7 @@
       getMem().setUint32(statePtr + 144, 0, true);
     }
     
-    // 5. I/O Stream Check
-    if (tarBuffer) {
-      if (g.ioLoad > 0) {
-        const u8 = new Uint8Array(wasmMemory.buffer, g.ioLoad);
-        let path = '';
-        for (let i = 0; i < 256; i++) {
-          if (u8[i] === 0) break;
-          path += String.fromCharCode(u8[i]);
-        }
-        const fileData = extractFromTar(tarBuffer, path);
-        if (fileData) {
-          if (g.ioLoadBuffer === 0) {
-            getMem().setUint32(statePtr + 992, fileData.length, true); // io_load_size
-          } else {
-            const dest = new Uint8Array(wasmMemory.buffer, g.ioLoadBuffer, fileData.length);
-            dest.set(fileData);
-          }
-        } else {
-          if (g.ioLoadBuffer === 0) {
-             getMem().setUint32(statePtr + 992, 0, true);
-          }
-        }
-        getMem().setUint32(statePtr + 984, 0, true); // clear io_load
-      }
-      
-      if (g.ioSave > 0) {
-        // web doesn't support writing to disk directly from WASM easily (unless using OPFS)
-        // for now we just consume ioSave. Append could be implemented with Blob downloads later.
-        getMem().setUint32(statePtr + 996, 0, true); // clear io_save
-      }
-    }
+
 
     // 6. Reset mouse wheel
     resetInput();
@@ -779,6 +746,8 @@
   canvas.style.imageRendering = 'pixelated';
 
   console.log('Wagnostic Web Runner ready. Load a .wasm ROM to begin.');
+
+  window.wagnosticLoadRomFromBuffer = loadRomFromBuffer;
 
   const urlParams = new URLSearchParams(window.location.search);
   const autoRom = urlParams.get('rom');

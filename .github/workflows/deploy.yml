@@ -23,6 +23,34 @@ jobs:
       - name: Prepare Deployment Directory
         run: |
           mkdir dist
+          # Clone xcc and build cc.wasm
+          git clone https://github.com/tyfkda/xcc.git /tmp/xcc
+          cd /tmp/xcc
+          make wcc cc.wasm
+          cd $GITHUB_WORKSPACE
+          
+          # Generate sysroot.json
+          python3 -c "import os, json, base64
+          def build_tree(path):
+              tree = {}
+              if not os.path.exists(path): return tree
+              for entry in os.scandir(path):
+                  if entry.is_dir(follow_symlinks=False):
+                      subtree = build_tree(entry.path)
+                      if subtree: tree[entry.name] = subtree
+                  elif entry.is_file(follow_symlinks=False):
+                      if entry.name.endswith('.h') or entry.name.endswith('.c'):
+                          with open(entry.path, 'rb') as f:
+                              tree[entry.name] = base64.b64encode(f.read()).decode('utf-8')
+              return tree
+          sysroot = {
+              'wagner': build_tree('wagner'),
+              'include': build_tree('/tmp/xcc/include')
+          }
+          with open('runners/web/sysroot.json', 'w') as f:
+              json.dump(sysroot, f)"
+          
+          cp /tmp/xcc/cc.wasm runners/web/
           cp -r runners/web/* dist/
 
       - name: Setup Pages

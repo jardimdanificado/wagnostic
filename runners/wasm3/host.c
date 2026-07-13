@@ -41,13 +41,7 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint32_t io_load;             // +984
-    uint32_t io_load_buffer;      // +988
-    uint32_t io_load_size;        // +992
-    uint32_t io_save;             // +996
-    uint32_t io_save_buffer;      // +1000
-    uint32_t io_save_size;        // +1004
-    uint8_t reserved[16];         // +1008
+    uint8_t reserved[40];         // +984
 } WagnosticState;
 
 static int g_is_tar = 0;
@@ -90,75 +84,7 @@ static uint8_t* tar_extract_file(const char* tar_path, const char* target_filena
     return best_data;
 }
 
-static size_t tar_get_file_size(const char* tar_path, const char* target_filename) {
-    FILE* f = fopen(tar_path, "rb");
-    if (!f) return 0;
-    uint8_t header[512];
-    size_t best_sz = 0;
-    while (fread(header, 1, 512, f) == 512) {
-        if (header[0] == '\0') break;
-        char name[101];
-        memcpy(name, header, 100);
-        name[100] = '\0';
-        size_t size = 0;
-        for (int i = 0; i < 11; i++) {
-            if (header[124+i] >= '0' && header[124+i] <= '7')
-                size = size * 8 + (header[124+i] - '0');
-        }
-        if (strcmp(name, target_filename) == 0) {
-            best_sz = size;
-        }
-        long skip = size + ((512 - (size % 512)) % 512);
-        fseek(f, skip, SEEK_CUR);
-    }
-    fclose(f);
-    return best_sz;
-}
 
-static void tar_append_file(const char* tar_path, const char* target_filename, uint8_t* data, size_t size) {
-    FILE* f = fopen(tar_path, "r+b");
-    if (!f) return;
-    uint8_t header[512];
-    long last_good_pos = 0;
-    while (fread(header, 1, 512, f) == 512) {
-        if (header[0] == '\0') {
-            break;
-        }
-        size_t fsize = 0;
-        for (int i = 0; i < 11; i++) {
-            if (header[124+i] >= '0' && header[124+i] <= '7')
-                fsize = fsize * 8 + (header[124+i] - '0');
-        }
-        long skip = fsize + ((512 - (fsize % 512)) % 512);
-        fseek(f, skip, SEEK_CUR);
-        last_good_pos = ftell(f);
-    }
-    fseek(f, last_good_pos, SEEK_SET);
-    memset(header, 0, 512);
-    strncpy((char*)header, target_filename, 99);
-    sprintf((char*)header + 100, "%07o", 0644);
-    sprintf((char*)header + 124, "%011zo", size);
-    header[135] = ' '; 
-    strcpy((char*)header + 257, "ustar  ");
-    header[156] = '0'; 
-    memset(header + 148, ' ', 8);
-    
-    uint32_t checksum = 0;
-    for (int i = 0; i < 512; i++) {
-        checksum += header[i];
-    }
-    sprintf((char*)header + 148, "%06o", checksum);
-    header[154] = '\0';
-    header[155] = ' ';
-    
-    fwrite(header, 1, 512, f);
-    fwrite(data, 1, size, f);
-    uint8_t zeros[1024] = {0};
-    long remainder = (512 - (size % 512)) % 512;
-    if (remainder > 0) fwrite(zeros, 1, remainder, f);
-    fwrite(zeros, 1, 1024, f);
-    fclose(f);
-}
 
 
 static_assert(sizeof(WagnosticState) == 1024, "WagnosticState size mismatch — check struct layout");
@@ -723,42 +649,7 @@ int main(int argc, char **argv) {
         refresh_memory();
         state = get_state();
 
-        /* ---- Process IO Streams ---- */
-        if (state && g_is_tar) {
-            // Process Load
-            if (state->io_load && state->io_load < g_mem_len) {
-                const char *path = (const char *)(g_mem + state->io_load);
-                size_t file_sz = tar_get_file_size(g_rom_path, path);
-                if (file_sz > 0) {
-                    if (state->io_load_buffer == 0) {
-                        // Probe phase
-                        state->io_load_size = (uint32_t)file_sz;
-                    } else if (state->io_load_buffer + file_sz <= g_mem_len) {
-                        // Read phase
-                        size_t exact_sz = 0;
-                        uint8_t *data = tar_extract_file(g_rom_path, path, &exact_sz);
-                        if (data) {
-                            memcpy(g_mem + state->io_load_buffer, data, exact_sz);
-                            free(data);
-                        }
-                    }
-                } else {
-                    // Not found
-                    if (state->io_load_buffer == 0) state->io_load_size = 0;
-                }
-                state->io_load = 0; // consumed
-            }
 
-            // Process Save
-            if (state->io_save && state->io_save < g_mem_len) {
-                const char *path = (const char *)(g_mem + state->io_save);
-                if (state->io_save_buffer > 0 && state->io_save_buffer + state->io_save_size <= g_mem_len) {
-                    tar_append_file(g_rom_path, path, g_mem + state->io_save_buffer, state->io_save_size);
-                    printf("Saved to %s\n", g_rom_path);
-                }
-                state->io_save = 0; // consumed
-            }
-        }
 
         /* ---- Step 3: Read config and detect changes ---- */
         read_screen_config(state, &W, &H, &BPP, &SCALE);
