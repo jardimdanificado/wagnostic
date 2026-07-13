@@ -29,7 +29,11 @@ self.onmessage = async (e) => {
         
         function buildTree(pathsAndContents) {
             let root = new Map();
-            for (const [path, content] of Object.entries(pathsAndContents)) {
+            for (const [path, base64Str] of Object.entries(pathsAndContents)) {
+                const binString = atob(base64Str);
+                const bytes = new Uint8Array(binString.length);
+                for (let i = 0; i < binString.length; i++) bytes[i] = binString.charCodeAt(i);
+                
                 const parts = path.split('/').filter(p => p);
                 let current = root;
                 for (let i = 0; i < parts.length - 1; i++) {
@@ -38,7 +42,7 @@ self.onmessage = async (e) => {
                     }
                     current = current.get(parts[i]);
                 }
-                current.set(parts[parts.length - 1], new File(new Uint8Array(content)));
+                current.set(parts[parts.length - 1], new File(bytes));
             }
             
             function toDirOrFile(map) {
@@ -68,18 +72,9 @@ self.onmessage = async (e) => {
             "-o", "/main.wasm",
             "-nostdlib",
             "-nodefaultlibs",
-            "-I/sysroot/wagner/include",
-            "-I/sysroot/wagner/lib/include",
-            "-I/sysroot/wagner/lib/decoders",
             "-I/sysroot/include",
-            "-D", "WAGNER_TITLE=\"web\"",
-            "-D", "WAGNER_CFG_W=320",
-            "-D", "WAGNER_CFG_H=240",
-            "-D", "WAGNER_CFG_BPP=32",
-            "-D", "WAGNER_CFG_SCALE=1",
             "--entry-point=",
             "-ewupdate",
-            "--stack-size=16777216",
             "/combined.c"
         ];
         
