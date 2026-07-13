@@ -26,7 +26,9 @@ jobs:
           # Clone xcc and build cc.wasm
           git clone https://github.com/tyfkda/xcc.git /tmp/xcc
           cd /tmp/xcc
-          make wcc cc.wasm
+          make wcc
+          rm -rf obj
+          make cc.wasm CC=./wcc
           cd $GITHUB_WORKSPACE
           
           # Generate sysroot.json
