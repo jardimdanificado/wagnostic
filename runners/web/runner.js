@@ -163,6 +163,8 @@
       audioOverrun:    mem.getUint32(ptr + 972, true),
       vramOffset:      mem.getUint32(ptr + 976, true),
       audioBuffer:     mem.getUint32(ptr + 980, true),
+      paletteOffset:   mem.getUint32(ptr + 984, true),
+      paletteCount:    mem.getUint32(ptr + 988, true),
 
     };
   }
@@ -197,13 +199,39 @@
     prevScale  = scale;
   }
 
-  function renderFullFrame(w, h, bpp, vramPtr) {
+  function renderFullFrame(w, h, bpp, vramPtr, palettePtr) {
     initPixelLuts();
 
-    const buf = new Uint8Array(wasmMemory.buffer, vramPtr, w * h * (bpp >> 3));
+    const bufSize = (bpp >= 8) ? w * h * (bpp >> 3) : Math.ceil(w * h * bpp / 8);
+    const buf = new Uint8Array(wasmMemory.buffer, vramPtr, bufSize);
     const pixels = imageData.data;
 
-    if (bpp === 8) {
+    if (bpp === 1) {
+      const u32 = new Uint32Array(pixels.buffer);
+      const pal = new Uint32Array(wasmMemory.buffer, palettePtr, 2);
+      for (let i = 0; i < w * h; i++) {
+        const byte = buf[Math.floor(i / 8)];
+        const bit = (byte >> (7 - (i % 8))) & 1;
+        u32[i] = pal[bit];
+      }
+    } else if (bpp === 2) {
+      const u32 = new Uint32Array(pixels.buffer);
+      const pal = new Uint32Array(wasmMemory.buffer, palettePtr, 4);
+      for (let i = 0; i < w * h; i++) {
+        const byte = buf[Math.floor(i / 4)];
+        const shift = 6 - ((i % 4) * 2);
+        const idx = (byte >> shift) & 3;
+        u32[i] = pal[idx];
+      }
+    } else if (bpp === 4) {
+      const u32 = new Uint32Array(pixels.buffer);
+      const pal = new Uint32Array(wasmMemory.buffer, palettePtr, 16);
+      for (let i = 0; i < w * h; i++) {
+        const byte = buf[Math.floor(i / 2)];
+        const idx = (i % 2 === 0) ? (byte >> 4) : (byte & 0x0F);
+        u32[i] = pal[idx];
+      }
+    } else if (bpp === 8) {
       const u32 = new Uint32Array(pixels.buffer);
       for (let i = 0; i < w * h; i++) {
         u32[i] = rgb332_lut[buf[i]];
@@ -225,7 +253,7 @@
     ctx.putImageData(imageData, 0, 0);
   }
 
-  function renderDirtyRects(w, h, bpp, vramPtr, dirtyCount, dirtyRectsPtr) {
+  function renderDirtyRects(w, h, bpp, vramPtr, dirtyCount, dirtyRectsPtr, palettePtr) {
     initPixelLuts();
     const bppBytes = bpp >> 3;
     const dataView = new DataView(wasmMemory.buffer, dirtyRectsPtr, MAX_DIRTY_RECTS * RECT_STRIDE);
@@ -236,7 +264,7 @@
       dataView.getInt32(12, true) === h;
 
     if (isFullScreen) {
-      renderFullFrame(w, h, bpp, vramPtr);
+      renderFullFrame(w, h, bpp, vramPtr, palettePtr);
       return;
     }
 
@@ -259,7 +287,44 @@
       const rectData = ctx.createImageData(cw, ch);
       const pixels = rectData.data;
 
-      if (bpp === 8) {
+      if (bpp === 1) {
+        const u32 = new Uint32Array(pixels.buffer);
+        const pal = new Uint32Array(wasmMemory.buffer, palettePtr, 2);
+        for (let row = 0; row < ch; row++) {
+          const dstOff = row * cw;
+          for (let col = 0; col < cw; col++) {
+            const srcOff = (cy + row) * w + (cx + col);
+            const byte = new Uint8Array(wasmMemory.buffer, vramPtr + Math.floor(srcOff / 8), 1)[0];
+            const bit = (byte >> (7 - (srcOff % 8))) & 1;
+            u32[dstOff + col] = pal[bit];
+          }
+        }
+      } else if (bpp === 2) {
+        const u32 = new Uint32Array(pixels.buffer);
+        const pal = new Uint32Array(wasmMemory.buffer, palettePtr, 4);
+        for (let row = 0; row < ch; row++) {
+          const dstOff = row * cw;
+          for (let col = 0; col < cw; col++) {
+            const srcOff = (cy + row) * w + (cx + col);
+            const byte = new Uint8Array(wasmMemory.buffer, vramPtr + Math.floor(srcOff / 4), 1)[0];
+            const shift = 6 - ((srcOff % 4) * 2);
+            const idx = (byte >> shift) & 3;
+            u32[dstOff + col] = pal[idx];
+          }
+        }
+      } else if (bpp === 4) {
+        const u32 = new Uint32Array(pixels.buffer);
+        const pal = new Uint32Array(wasmMemory.buffer, palettePtr, 16);
+        for (let row = 0; row < ch; row++) {
+          const dstOff = row * cw;
+          for (let col = 0; col < cw; col++) {
+            const srcOff = (cy + row) * w + (cx + col);
+            const byte = new Uint8Array(wasmMemory.buffer, vramPtr + Math.floor(srcOff / 2), 1)[0];
+            const idx = (srcOff % 2 === 0) ? (byte >> 4) : (byte & 0x0F);
+            u32[dstOff + col] = pal[idx];
+          }
+        }
+      } else if (bpp === 8) {
         const u32 = new Uint32Array(pixels.buffer);
         for (let row = 0; row < ch; row++) {
           const srcOff = (cy + row) * w + cx;
@@ -556,7 +621,7 @@
 
     // 4. Render dirty rects
     if (g.dirtyCount > 0) {
-      renderDirtyRects(w, h, bpp, statePtr + g.vramOffset, g.dirtyCount, g.dirtyRects);
+      renderDirtyRects(w, h, bpp, statePtr + g.vramOffset, g.dirtyCount, g.dirtyRects, statePtr + g.paletteOffset);
       // Reset dirty count
       getMem().setUint32(statePtr + 144, 0, true);
     }

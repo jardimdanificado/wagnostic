@@ -1,0 +1,88 @@
+// bpp1_test - 1bpp (Monochrome) example
+#include <stdint.h>
+
+typedef struct { int x, y, w, h; } Rect;
+
+typedef struct {
+    uint32_t width, height, bpp, scale;
+    char title[128];
+    uint32_t dirty_count;
+    Rect dirty_rects[32];
+    int32_t mouse_x, mouse_y;
+    uint32_t mouse_buttons;
+    int32_t mouse_wheel;
+    uint8_t keys[256];
+    uint32_t gamepad_buttons;
+    uint32_t ticks;
+    uint32_t target_fps;
+    uint32_t audio_size, audio_sample_rate, audio_bpp, audio_channels;
+    uint32_t audio_write, audio_read;
+    uint32_t audio_underrun, audio_overrun;
+    uint32_t vram_offset;
+    uint32_t audio_buffer_offset;
+    uint32_t palette_offset;
+    uint32_t palette_count;
+    uint8_t reserved[32];
+} State;
+
+static struct {
+    State s;
+    uint32_t palette[2];
+    uint8_t vram[(320 * 240) / 8];
+} rom;
+
+static int initialized = 0;
+
+int wupdate() {
+    if (!initialized) {
+        rom.s.width = 320;
+        rom.s.height = 240;
+        rom.s.bpp = 1;
+        rom.s.scale = 2;
+        rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
+        rom.s.palette_offset = (uint32_t)((uint8_t*)rom.palette - (uint8_t*)&rom.s);
+        rom.s.palette_count = 2;
+        
+        char* t = rom.s.title;
+        const char* src = "1bpp Test (Monochrome)";
+        int i = 0; while (src[i] && i < 127) { t[i] = src[i]; i++; } t[i] = '\0';
+        
+        // Palette: Black and Green
+        rom.palette[0] = 0xFF000000;
+        rom.palette[1] = 0xFF00FF00;
+        
+        initialized = 1;
+    }
+    
+    // Redraw the 40-pixel wide vertical stripes every frame to clear the old cube
+    for (int y = 0; y < 240; y++) {
+        for (int x = 0; x < 320; x++) {
+            int stripe = (x / 40) % 2;
+            int byte_idx = (y * 320 + x) / 8;
+            int bit_idx = 7 - (x % 8);
+            if (stripe) {
+                rom.vram[byte_idx] |= (1 << bit_idx);
+            } else {
+                rom.vram[byte_idx] &= ~(1 << bit_idx);
+            }
+        }
+    }
+    
+    // Draw a moving 20x20 square
+    int px = (rom.s.ticks / 10) % 320;
+    int py = 110; 
+    
+    for (int sy = 0; sy < 20; sy++) {
+        for (int sx = 0; sx < 20; sx++) {
+            int cx = (px + sx) % 320;
+            int cy = py + sy;
+            int byte_idx = (cy * 320 + cx) / 8;
+            int bit_idx = 7 - (cx % 8);
+            rom.vram[byte_idx] ^= (1 << bit_idx); // Invert
+        }
+    }
+    
+    rom.s.dirty_count = 1;
+    rom.s.dirty_rects[0] = (Rect){0, 0, 320, 240};
+    return (int)&rom.s;
+}

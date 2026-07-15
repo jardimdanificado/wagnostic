@@ -41,7 +41,9 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint8_t reserved[40];         // +984
+    uint32_t palette_offset;      // +984
+    uint32_t palette_count;       // +988
+    uint8_t reserved[32];         // +992
 } WagnosticState;
 
 static int g_is_tar = 0;
@@ -131,6 +133,11 @@ static inline uint8_t *get_audio_buffer(WagnosticState *s) {
     return (uint8_t *)s + s->audio_buffer_offset;
 }
 
+static inline uint32_t *get_palette(WagnosticState *s) {
+    if (!s || s->palette_offset == 0) return NULL;
+    return (uint32_t *)((uint8_t *)s + s->palette_offset);
+}
+
 /* ================================================================
  * Screen config with defaults
  * ================================================================ */
@@ -187,7 +194,7 @@ static void init_pixel_luts(void) {
  * Render helpers
  * ================================================================ */
 
-static void render_rect_to_texture(SDL_Texture *texture, uint8_t *vram,
+static void render_rect_to_texture(SDL_Texture *texture, uint8_t *vram, uint32_t *palette,
                                    int rx, int ry, int rw, int rh,
                                    uint32_t W, uint32_t H, uint32_t BPP) {
     if (rx < 0) { rw += rx; rx = 0; }
@@ -201,7 +208,38 @@ static void render_rect_to_texture(SDL_Texture *texture, uint8_t *vram,
     int pitch;
     SDL_LockTexture(texture, &sdl_rect, &pixels, &pitch);
 
-    if (BPP == 8) {
+    if (BPP == 1 && palette) {
+        for (int y = ry; y < ry + rh; y++) {
+            uint8_t  *src = vram + (y * W) / 8;
+            uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
+            for (int x = rx; x < rx + rw; x++) {
+                uint8_t byte = src[x / 8];
+                uint8_t bit = (byte >> (7 - (x % 8))) & 1;
+                dst[x - rx] = palette[bit];
+            }
+        }
+    } else if (BPP == 2 && palette) {
+        for (int y = ry; y < ry + rh; y++) {
+            uint8_t  *src = vram + (y * W) / 4;
+            uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
+            for (int x = rx; x < rx + rw; x++) {
+                uint8_t byte = src[x / 4];
+                uint8_t shift = 6 - ((x % 4) * 2);
+                uint8_t idx = (byte >> shift) & 3;
+                dst[x - rx] = palette[idx];
+            }
+        }
+    } else if (BPP == 4 && palette) {
+        for (int y = ry; y < ry + rh; y++) {
+            uint8_t  *src = vram + (y * W) / 2;
+            uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
+            for (int x = rx; x < rx + rw; x++) {
+                uint8_t byte = src[x / 2];
+                uint8_t idx = (x % 2 == 0) ? (byte >> 4) : (byte & 0x0F);
+                dst[x - rx] = palette[idx];
+            }
+        }
+    } else if (BPP == 8) {
         for (int y = ry; y < ry + rh; y++) {
             uint8_t  *src = vram + y * W + rx;
             uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
@@ -234,12 +272,37 @@ static void render_rect_to_texture(SDL_Texture *texture, uint8_t *vram,
     SDL_UnlockTexture(texture);
 }
 
-static void render_fullscreen(SDL_Texture *texture, uint8_t *vram,
+static void render_fullscreen(SDL_Texture *texture, uint8_t *vram, uint32_t *palette,
                               uint32_t W, uint32_t H, uint32_t BPP) {
     void *pixels;
     int pitch;
     SDL_LockTexture(texture, NULL, &pixels, &pitch);
-    if (BPP == 8) {
+    if (BPP == 1 && palette) {
+        uint32_t *dst = (uint32_t *)pixels;
+        uint32_t total = W * H;
+        for (uint32_t i = 0; i < total; i++) {
+            uint8_t byte = vram[i / 8];
+            uint8_t bit = (byte >> (7 - (i % 8))) & 1;
+            dst[i] = palette[bit];
+        }
+    } else if (BPP == 2 && palette) {
+        uint32_t *dst = (uint32_t *)pixels;
+        uint32_t total = W * H;
+        for (uint32_t i = 0; i < total; i++) {
+            uint8_t byte = vram[i / 4];
+            uint8_t shift = 6 - ((i % 4) * 2);
+            uint8_t idx = (byte >> shift) & 3;
+            dst[i] = palette[idx];
+        }
+    } else if (BPP == 4 && palette) {
+        uint32_t *dst = (uint32_t *)pixels;
+        uint32_t total = W * H;
+        for (uint32_t i = 0; i < total; i++) {
+            uint8_t byte = vram[i / 2];
+            uint8_t idx = (i % 2 == 0) ? (byte >> 4) : (byte & 0x0F);
+            dst[i] = palette[idx];
+        }
+    } else if (BPP == 8) {
         uint8_t  *src = vram;
         uint32_t *dst = (uint32_t *)pixels;
         uint32_t total = W * H;
@@ -723,6 +786,7 @@ int main(int argc, char **argv) {
         /* ---- Step 4: Render dirty rects ---- */
         if (state) {
             uint8_t *vram = get_vram(state);
+            uint32_t *palette = get_palette(state);
             uint32_t dirty_count = state->dirty_count;
 
             if (vram && dirty_count > 0) {
@@ -733,9 +797,9 @@ int main(int argc, char **argv) {
                     int rh = state->dirty_rects[0].h;
                     if (rx == 0 && ry == 0 &&
                         (uint32_t)rw == W && (uint32_t)rh == H) {
-                        render_fullscreen(texture, vram, W, H, BPP);
+                        render_fullscreen(texture, vram, palette, W, H, BPP);
                     } else {
-                        render_rect_to_texture(texture, vram,
+                        render_rect_to_texture(texture, vram, palette,
                             rx, ry, rw, rh, W, H, BPP);
                     }
                 } else {
@@ -746,7 +810,7 @@ int main(int argc, char **argv) {
                         int ry = state->dirty_rects[i].y;
                         int rw = state->dirty_rects[i].w;
                         int rh = state->dirty_rects[i].h;
-                        render_rect_to_texture(texture, vram,
+                        render_rect_to_texture(texture, vram, palette,
                             rx, ry, rw, rh, W, H, BPP);
                     }
                 }

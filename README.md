@@ -33,6 +33,8 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
+    uint32_t palette_offset;
+    uint32_t palette_count;
 } State;
 
 static struct {
@@ -98,6 +100,8 @@ All other fields are optional. The host applies sensible defaults so a ROM with 
 | `audio_overrun` | 972 | 0 | Overrun counter (Host → ROM) |
 | `vram_offset` | 976 | 0 | Offset from state base to VRAM buffer |
 | `audio_buffer_offset` | 980 | 0 | Offset from state base to audio buffer |
+| `palette_offset` | 984 | 0 | Offset from state base to palette buffer |
+| `palette_count` | 988 | 0 | Number of colors in the palette |
 
 **Total struct size: 1024 bytes.**
 

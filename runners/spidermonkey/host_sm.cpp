@@ -92,7 +92,9 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint8_t reserved[40];
+    uint32_t palette_offset;
+    uint32_t palette_count;
+    uint8_t reserved[32];
 } WagnosticState;
 
 static_assert(sizeof(WagnosticState) == 1024, "WagnosticState size mismatch — check struct layout");
@@ -148,6 +150,11 @@ static inline uint8_t *get_vram(WagnosticState *s) {
 static inline uint8_t *get_audio_buffer(WagnosticState *s) {
     if (!s || s->audio_buffer_offset == 0) return NULL;
     return (uint8_t *)s + s->audio_buffer_offset;
+}
+
+static inline uint32_t *get_palette(WagnosticState *s) {
+    if (!s || s->palette_offset == 0) return NULL;
+    return (uint32_t *)((uint8_t *)s + s->palette_offset);
 }
 
 // ============================================================
@@ -265,7 +272,7 @@ static void init_textures_and_pbos() {
 
     if (pbos[0]) glDeleteBuffers(2, pbos);
     glGenBuffers(2, pbos);
-    size_t vram_bytes = (size_t)W * H * (BPP == 24 ? 3 : BPP / 8);
+    size_t vram_bytes = (size_t)W * H * (BPP <= 4 ? 4 : (BPP == 24 ? 3 : BPP / 8));
     for (int i = 0; i < 2; i++) {
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbos[i]);
         glBufferData(GL_PIXEL_UNPACK_BUFFER, vram_bytes, NULL, GL_STREAM_DRAW);
@@ -292,14 +299,49 @@ static void upload_and_render() {
     WagnosticState *s = get_state();
     uint8_t* vram = get_vram(s);
     if (!vram) return;
-    size_t vram_bytes = (size_t)W * H * (BPP == 24 ? 3 : BPP / 8);
+    size_t vram_bytes = (size_t)W * H * (BPP <= 4 ? 4 : (BPP == 24 ? 3 : BPP / 8));
     GLenum fmt = (BPP == 8) ? GL_RED : (BPP == 16) ? GL_RG : (BPP == 24) ? GL_RGB : GL_RGBA;
     int cur = pbo_idx, prev = 1 - pbo_idx;
     int rtex = (tex_idx + 2) % 3, utex = tex_idx;
 
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbos[cur]);
     void* ptr = glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY);
-    if (ptr) memcpy(ptr, vram, vram_bytes);
+    if (ptr) {
+        if (BPP == 1) {
+            uint32_t *pal = get_palette(s);
+            uint32_t *dst = (uint32_t*)ptr;
+            if (pal) {
+                for (size_t i = 0; i < (size_t)W * H; i++) {
+                    uint8_t byte = vram[i / 8];
+                    uint8_t bit = (byte >> (7 - (i % 8))) & 1;
+                    dst[i] = pal[bit];
+                }
+            }
+        } else if (BPP == 2) {
+            uint32_t *pal = get_palette(s);
+            uint32_t *dst = (uint32_t*)ptr;
+            if (pal) {
+                for (size_t i = 0; i < (size_t)W * H; i++) {
+                    uint8_t byte = vram[i / 4];
+                    uint8_t shift = 6 - ((i % 4) * 2);
+                    uint8_t idx = (byte >> shift) & 3;
+                    dst[i] = pal[idx];
+                }
+            }
+        } else if (BPP == 4) {
+            uint32_t *pal = get_palette(s);
+            uint32_t *dst = (uint32_t*)ptr;
+            if (pal) {
+                for (size_t i = 0; i < (size_t)W * H; i++) {
+                    uint8_t byte = vram[i / 2];
+                    uint8_t idx = (i % 2 == 0) ? (byte >> 4) : (byte & 0x0F);
+                    dst[i] = pal[idx];
+                }
+            }
+        } else {
+            memcpy(ptr, vram, vram_bytes);
+        }
+    }
     glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
 
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbos[prev]);
@@ -331,12 +373,44 @@ static void upload_dirty_rect(const Rect& r) {
     int bpp_bytes = (BPP == 24) ? 3 : BPP / 8;
     size_t src_offset = ((size_t)y * W + x) * bpp_bytes;
 
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, (GLint)W);
-    glBindTexture(GL_TEXTURE_2D, vram_textures[tex_idx]);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, fmt, GL_UNSIGNED_BYTE,
-                    vram + src_offset);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    if (BPP <= 4) {
+        uint32_t *pal = get_palette(s);
+        if (pal) {
+            uint32_t *tmp = new uint32_t[w * h];
+            for (int row = 0; row < h; row++) {
+                for (int col = 0; col < w; col++) {
+                    int px = x + col;
+                    int py = y + row;
+                    if (BPP == 1) {
+                        uint8_t byte = vram[(py * W + px) / 8];
+                        uint8_t bit = (byte >> (7 - (px % 8))) & 1;
+                        tmp[row * w + col] = pal[bit];
+                    } else if (BPP == 2) {
+                        uint8_t byte = vram[(py * W + px) / 4];
+                        uint8_t shift = 6 - ((px % 4) * 2);
+                        uint8_t idx = (byte >> shift) & 3;
+                        tmp[row * w + col] = pal[idx];
+                    } else if (BPP == 4) {
+                        uint8_t byte = vram[(py * W + px) / 2];
+                        uint8_t idx = (px % 2 == 0) ? (byte >> 4) : (byte & 0x0F);
+                        tmp[row * w + col] = pal[idx];
+                    }
+                }
+            }
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+            glBindTexture(GL_TEXTURE_2D, vram_textures[tex_idx]);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, tmp);
+            delete[] tmp;
+        }
+    } else {
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, (GLint)W);
+        glBindTexture(GL_TEXTURE_2D, vram_textures[tex_idx]);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, fmt, GL_UNSIGNED_BYTE,
+                        vram + src_offset);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    }
 }
 
 static void set_viewport_with_letterbox() {
