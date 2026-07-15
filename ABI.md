@@ -53,7 +53,9 @@ typedef struct {
     uint32_t audio_overrun;   // +972
     uint32_t vram_offset;     // +976
     uint32_t audio_buffer_offset; // +980
-    uint8_t reserved[40];         // +984
+    uint32_t palette_offset;  // +984
+    uint32_t palette_count;   // +988
+    uint8_t reserved[32];     // +992
 } WagnosticState;  // size = 1024
 ```
 
@@ -74,6 +76,14 @@ rom.state.vram_offset = sizeof(WagnosticState);
 
 The host reads VRAM at `(uint8_t*)state + vram_offset`.
 
+## 5. Video Formats
+
+### 1, 2, and 4-bit: Indexed Palette
+Packed pixels. 1-bit packs 8 pixels per byte, 2-bit packs 4 pixels per byte, 4-bit packs 2 pixels per byte.
+The host maps these indices using the `palette_offset` buffer (an array of `uint32_t` RGBA8888 colors).
+
+### 8-bit: RGB332
+
 ### Dirty Rectangles
 - `dirty_count` (uint32) — 0=nothing, N=render N rects
 - `dirty_rects` (Rect[32]) — `{ int x, y, w, h; }`, 16 bytes each
@@ -93,6 +103,15 @@ The host reads VRAM at `(uint8_t*)state + vram_offset`.
 - `audio_write`, `audio_read` (uint32)
 - `audio_underrun`, `audio_overrun` (uint32) — diagnostic counters
 - `audio_buffer_offset` (uint32) — offset from state base to audio ring buffer
+
+### Screen Configuration (ROM writes, Host reads)
+| Name | Type | Description |
+|------|------|-------------|
+| `width` | `uint32` | Screen width in pixels |
+| `height` | `uint32` | Screen height in pixels |
+| `bpp` | `uint32` | Bits per pixel (1, 2, 4, 8, 16, 24, or 32) |
+| `scale` | `uint32` | Window scale factor |
+| `title` | `char[128]` | Window title |
 
 ## Functions
 
@@ -204,7 +223,9 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint8_t reserved[40];
+    uint32_t palette_offset;
+    uint32_t palette_count;
+    uint8_t reserved[32];
 } State;
 
 static struct {

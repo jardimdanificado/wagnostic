@@ -77,7 +77,7 @@ All other fields are optional. The host applies sensible defaults so a ROM with 
 |-------|--------|---------|-------|
 | `width` | 0 | 320 | window width in pixels |
 | `height` | 4 | 240 | window height in pixels |
-| `bpp` | 8 | 32 | bits per pixel (8/16/24/32) |
+| `bpp` | 8 | 32 | bits per pixel (1/2/4/8/16/24/32) |
 | `scale` | 12 | 1 | window scale factor |
 | `title` | 16 | "Untitled" | window title (char[128]) |
 | `dirty_count` | 144 | 0 | 0=nothing, N=render N rects |
@@ -238,6 +238,10 @@ int wupdate() {
 ```
 
 ## 5. Video Formats
+
+### 1, 2, and 4-bit: Indexed Palette
+Packed pixels. 1-bit packs 8 pixels per byte, 2-bit packs 4 pixels per byte, 4-bit packs 2 pixels per byte.
+The host maps these indices using the `palette_offset` buffer (an array of `uint32_t` RGBA8888 colors).
 
 ### 8-bit: RGB332
 ```c
