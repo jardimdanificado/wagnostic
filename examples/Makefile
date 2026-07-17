@@ -18,7 +18,9 @@ ROM_DIRS = \
 	roms/fallback_test \
 	roms/bpp1_test \
 	roms/bpp2_test \
-	roms/bpp4_test
+	roms/bpp4_test \
+	roms/exotic1_test \
+	roms/exotic2_test
 
 
 

@@ -23,7 +23,15 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint8_t reserved[40];
+    uint32_t r_bits;
+    uint32_t r_shift;
+    uint32_t g_bits;
+    uint32_t g_shift;
+    uint32_t b_bits;
+    uint32_t b_shift;
+    uint32_t a_bits;
+    uint32_t a_shift;
+    uint8_t reserved[8];
 } State;
 
 static struct {
@@ -88,7 +96,10 @@ static void init_audio(void) {
 
     int err = 0;
     stb_vorbis* v = stb_vorbis_open_memory(audio_bin, audio_bin_len, &err, &alloc);
-    if (!v) return;
+    if (!v) {
+        // We can write to memory and exit or something.
+        return;
+    }
     stb_vorbis_info info = stb_vorbis_get_info(v);
     src_rate = info.sample_rate;
     src_ch   = info.channels;

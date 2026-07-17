@@ -33,8 +33,15 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint32_t palette_offset;
-    uint32_t palette_count;
+    uint32_t r_bits;
+    uint32_t r_shift;
+    uint32_t g_bits;
+    uint32_t g_shift;
+    uint32_t b_bits;
+    uint32_t b_shift;
+    uint32_t a_bits;
+    uint32_t a_shift;
+    uint8_t reserved[8];
 } State;
 
 static struct {
@@ -77,7 +84,7 @@ All other fields are optional. The host applies sensible defaults so a ROM with 
 |-------|--------|---------|-------|
 | `width` | 0 | 320 | window width in pixels |
 | `height` | 4 | 240 | window height in pixels |
-| `bpp` | 8 | 32 | bits per pixel (1/2/4/8/16/24/32) |
+| `bpp` | 8 | 32 | bits per pixel (1, 2, 4, 8, 16, 24, 32, 64) |
 | `scale` | 12 | 1 | window scale factor |
 | `title` | 16 | "Untitled" | window title (char[128]) |
 | `dirty_count` | 144 | 0 | 0=nothing, N=render N rects |
@@ -100,8 +107,14 @@ All other fields are optional. The host applies sensible defaults so a ROM with 
 | `audio_overrun` | 972 | 0 | Overrun counter (Host → ROM) |
 | `vram_offset` | 976 | 0 | Offset from state base to VRAM buffer |
 | `audio_buffer_offset` | 980 | 0 | Offset from state base to audio buffer |
-| `palette_offset` | 984 | 0 | Offset from state base to palette buffer |
-| `palette_count` | 988 | 0 | Number of colors in the palette |
+| `r_bits` | 984 | 0 | Red bit count |
+| `r_shift` | 988 | 0 | Red bit shift |
+| `g_bits` | 992 | 0 | Green bit count |
+| `g_shift` | 996 | 0 | Green bit shift |
+| `b_bits` | 1000 | 0 | Blue bit count |
+| `b_shift` | 1004 | 0 | Blue bit shift |
+| `a_bits` | 1008 | 0 | Alpha bit count |
+| `a_shift` | 1012 | 0 | Alpha bit shift |
 
 **Total struct size: 1024 bytes.**
 
@@ -135,7 +148,7 @@ int wupdate() {
 |------|------|-------------|
 | `width` | `uint32` | Screen width in pixels |
 | `height` | `uint32` | Screen height in pixels |
-| `bpp` | `uint32` | Bits per pixel (8, 16, 24, or 32) |
+| `bpp` | `uint32` | Bits per pixel (1, 2, 4, 8, 16, 24, 32, or 64) |
 | `scale` | `uint32` | Window scale factor |
 | `title` | `char[128]` | Window title |
 
@@ -239,30 +252,11 @@ int wupdate() {
 
 ## 5. Video Formats
 
-### 1, 2, and 4-bit: Indexed Palette
-Packed pixels. 1-bit packs 8 pixels per byte, 2-bit packs 4 pixels per byte, 4-bit packs 2 pixels per byte.
-The host maps these indices using the `palette_offset` buffer (an array of `uint32_t` RGBA8888 colors).
-
-### 8-bit: RGB332
-```c
-pixel = ((r & 0xE0) | ((g & 0xE0) >> 3) | ((b & 0xC0) >> 6));
-```
-
-### 16-bit: RGB565
-```c
-pixel = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
-```
-
-### 24-bit: RGB888
-```c
-// 3 consecutive bytes per pixel
-pixel[0] = r; pixel[1] = g; pixel[2] = b;
-```
-
-### 32-bit: RGBA8888
-```c
-pixel = (a << 24) | (b << 16) | (g << 8) | r;
-```
+Wagnostic uses **Dynamic Bitfield Pixel Formats**.
+The bit depths can be any valid power of 2: **1, 2, 4, 8, 16, 24, 32, 64**.
+Instead of predefined formats (like RGB565) or indexed color palettes, the Host decodes pixels using the `r_bits`/`r_shift`, `g_bits`/`g_shift`, `b_bits`/`b_shift`, and `a_bits`/`a_shift` fields.
+The fields indicate how many bits each channel occupies and how far left they are shifted in the pixel integer.
+If `r_bits`, `g_bits`, and `b_bits` are all `0`, but `a_bits > 0`, the format is treated as **Grayscale / Luminance**, where the Alpha channel is replicated into R, G, and B.
 
 ## 6. Audio
 

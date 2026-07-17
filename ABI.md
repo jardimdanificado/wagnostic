@@ -53,14 +53,21 @@ typedef struct {
     uint32_t audio_overrun;   // +972
     uint32_t vram_offset;     // +976
     uint32_t audio_buffer_offset; // +980
-    uint32_t palette_offset;  // +984
-    uint32_t palette_count;   // +988
-    uint8_t reserved[32];     // +992
+    uint32_t r_bits;          // +984
+    uint32_t r_shift;         // +988
+    uint32_t g_bits;          // +992
+    uint32_t g_shift;         // +996
+    uint32_t b_bits;          // +1000
+    uint32_t b_shift;         // +1004
+    uint32_t a_bits;          // +1008
+    uint32_t a_shift;         // +1012
+    uint8_t reserved[8];      // +1016
 } WagnosticState;  // size = 1024
 ```
 
 ### Screen
-- `width`, `height`, `bpp`, `scale` (uint32)
+- `width`, `height`, `scale` (uint32)
+- `bpp` (uint32) - Bits per pixel. Defaults to `32` (RGBA8888) if `0` or omitted.
 - `title` (char[128])
 
 ### VRAM
@@ -78,11 +85,11 @@ The host reads VRAM at `(uint8_t*)state + vram_offset`.
 
 ## 5. Video Formats
 
-### 1, 2, and 4-bit: Indexed Palette
-Packed pixels. 1-bit packs 8 pixels per byte, 2-bit packs 4 pixels per byte, 4-bit packs 2 pixels per byte.
-The host maps these indices using the `palette_offset` buffer (an array of `uint32_t` RGBA8888 colors).
-
-### 8-bit: RGB332
+Wagnostic uses **Dynamic Bitfield Pixel Formats**.
+The bit depths can be any valid power of 2: **1, 2, 4, 8, 16, 24, 32, 64**.
+Instead of predefined formats (like RGB565) or indexed color palettes, the Host decodes pixels using the `r_bits`/`r_shift`, `g_bits`/`g_shift`, `b_bits`/`b_shift`, and `a_bits`/`a_shift` fields.
+The fields indicate how many bits each channel occupies and how far left they are shifted in the pixel integer.
+If `r_bits`, `g_bits`, and `b_bits` are all `0`, but `a_bits > 0`, the format is treated as **Grayscale / Luminance**, where the Alpha channel is replicated into R, G, and B.
 
 ### Dirty Rectangles
 - `dirty_count` (uint32) — 0=nothing, N=render N rects
@@ -109,7 +116,7 @@ The host maps these indices using the `palette_offset` buffer (an array of `uint
 |------|------|-------------|
 | `width` | `uint32` | Screen width in pixels |
 | `height` | `uint32` | Screen height in pixels |
-| `bpp` | `uint32` | Bits per pixel (1, 2, 4, 8, 16, 24, or 32) |
+| `bpp` | `uint32` | Bits per pixel (1, 2, 4, 8, 16, 24, 32, or 64) |
 | `scale` | `uint32` | Window scale factor |
 | `title` | `char[128]` | Window title |
 
@@ -222,10 +229,15 @@ typedef struct {
     uint32_t audio_write, audio_read;
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
-    uint32_t audio_buffer_offset;
-    uint32_t palette_offset;
-    uint32_t palette_count;
-    uint8_t reserved[32];
+    uint32_t r_bits;
+    uint32_t r_shift;
+    uint32_t g_bits;
+    uint32_t g_shift;
+    uint32_t b_bits;
+    uint32_t b_shift;
+    uint32_t a_bits;
+    uint32_t a_shift;
+    uint8_t reserved[8];
 } State;
 
 static struct {

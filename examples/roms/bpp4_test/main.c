@@ -20,14 +20,19 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint32_t palette_offset;
-    uint32_t palette_count;
-    uint8_t reserved[32];
+    uint32_t r_bits;
+    uint32_t r_shift;
+    uint32_t g_bits;
+    uint32_t g_shift;
+    uint32_t b_bits;
+    uint32_t b_shift;
+    uint32_t a_bits;
+    uint32_t a_shift;
+    uint8_t reserved[8];
 } State;
 
 static struct {
     State s;
-    uint32_t palette[16];
     uint8_t vram[(320 * 240) / 2];
 } rom;
 
@@ -38,23 +43,16 @@ int wupdate() {
         rom.s.width = 320;
         rom.s.height = 240;
         rom.s.bpp = 4;
+        rom.s.a_bits = 4; rom.s.a_shift = 0;
+
         rom.s.scale = 2;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
-        rom.s.palette_offset = (uint32_t)((uint8_t*)rom.palette - (uint8_t*)&rom.s);
-        rom.s.palette_count = 16;
         
         char* t = rom.s.title;
         const char* src = "4bpp Test (16 Colors EGA)";
         int i = 0; while (src[i] && i < 127) { t[i] = src[i]; i++; } t[i] = '\0';
         
-        // Classic 16 color palette
-        uint32_t ega[16] = {
-            0xFF000000, 0xFFAA0000, 0xFF00AA00, 0xFFAAAA00,
-            0xFF0000AA, 0xFFAA00AA, 0xFF00AAAA, 0xFFAAAAAA,
-            0xFF555555, 0xFFFF5555, 0xFF55FF55, 0xFFFFFF55,
-            0xFF5555FF, 0xFFFF55FF, 0xFF55FFFF, 0xFFFFFFFF
-        };
-        for (int j = 0; j < 16; j++) rom.palette[j] = ega[j];
+
         
         // Fill VRAM with color bars
         for (int y = 0; y < 240; y++) {

@@ -20,14 +20,19 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint32_t palette_offset;
-    uint32_t palette_count;
-    uint8_t reserved[32];
+    uint32_t r_bits;
+    uint32_t r_shift;
+    uint32_t g_bits;
+    uint32_t g_shift;
+    uint32_t b_bits;
+    uint32_t b_shift;
+    uint32_t a_bits;
+    uint32_t a_shift;
+    uint8_t reserved[8];
 } State;
 
 static struct {
     State s;
-    uint32_t palette[4];
     uint8_t vram[(320 * 240) / 4];
 } rom;
 
@@ -38,20 +43,16 @@ int wupdate() {
         rom.s.width = 320;
         rom.s.height = 240;
         rom.s.bpp = 2;
+        rom.s.a_bits = 2; rom.s.a_shift = 0;
+
         rom.s.scale = 2;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
-        rom.s.palette_offset = (uint32_t)((uint8_t*)rom.palette - (uint8_t*)&rom.s);
-        rom.s.palette_count = 4;
         
         char* t = rom.s.title;
         const char* src = "2bpp Test (GameBoy Style)";
         int i = 0; while (src[i] && i < 127) { t[i] = src[i]; i++; } t[i] = '\0';
         
         // GameBoy Palette
-        rom.palette[0] = 0xFF2B3315;
-        rom.palette[1] = 0xFF7B993D;
-        rom.palette[2] = 0xFFA9CC66;
-        rom.palette[3] = 0xFFD7FF99;
         
         // Fill VRAM with 4 large colored blocks
         for (int y = 0; y < 240; y++) {

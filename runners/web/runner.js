@@ -102,29 +102,7 @@
   let imageData = null;
 
   // Pixel lookup tables (LUTs) for fast format conversion
-  const rgb332_lut = new Uint32Array(256);
-  const rgb565_lut = new Uint32Array(65536);
-  let pixel_lut_initialized = false;
 
-  function initPixelLuts() {
-    if (pixel_lut_initialized) return;
-
-    for (let i = 0; i < 256; i++) {
-      const r = ((i >> 5) & 0x07) * 36;
-      const g = ((i >> 2) & 0x07) * 36;
-      const b = (i & 0x03) * 85;
-      rgb332_lut[i] = 0xFF000000 | (b << 16) | (g << 8) | r;
-    }
-
-    for (let i = 0; i < 65536; i++) {
-      const r = ((i >> 11) & 0x1F) * 255 / 31 | 0;
-      const g = ((i >> 5) & 0x3F) * 255 / 63 | 0;
-      const b = (i & 0x1F) * 255 / 31 | 0;
-      rgb565_lut[i] = 0xFF000000 | (b << 16) | (g << 8) | r;
-    }
-
-    pixel_lut_initialized = true;
-  }
 
   // Timing
   let startTime = performance.now();
@@ -140,7 +118,7 @@
     const mem = getMem();
     const ptr = statePtr;
 
-    return {
+    let s = {
       w:               mem.getUint32(ptr + 0, true),
       h:               mem.getUint32(ptr + 4, true),
       bpp:             mem.getUint32(ptr + 8, true),
@@ -164,10 +142,30 @@
       audioOverrun:    mem.getUint32(ptr + 972, true),
       vramOffset:      mem.getUint32(ptr + 976, true),
       audioBuffer:     mem.getUint32(ptr + 980, true),
-      paletteOffset:   mem.getUint32(ptr + 984, true),
-      paletteCount:    mem.getUint32(ptr + 988, true),
-
+      rBits:           mem.getUint32(ptr + 984, true),
+      rShift:          mem.getUint32(ptr + 988, true),
+      gBits:           mem.getUint32(ptr + 992, true),
+      gShift:          mem.getUint32(ptr + 996, true),
+      bBits:           mem.getUint32(ptr + 1000, true),
+      bShift:          mem.getUint32(ptr + 1004, true),
+      aBits:           mem.getUint32(ptr + 1008, true),
+      aShift:          mem.getUint32(ptr + 1012, true),
     };
+    if (!s.bpp) s.bpp = 32;
+    if (!s.rBits && !s.gBits && !s.bBits && !s.aBits) {
+        if (s.bpp === 32) {
+            s.aBits = 8; s.aShift = 24; s.bBits = 8; s.bShift = 16; s.gBits = 8; s.gShift = 8; s.rBits = 8; s.rShift = 0;
+        } else if (s.bpp === 24) {
+            s.bBits = 8; s.bShift = 16; s.gBits = 8; s.gShift = 8; s.rBits = 8; s.rShift = 0;
+        } else if (s.bpp === 16) {
+            s.rBits = 5; s.rShift = 11; s.gBits = 6; s.gShift = 5; s.bBits = 5; s.bShift = 0;
+        } else if (s.bpp === 8) {
+            s.rBits = 3; s.rShift = 5; s.gBits = 3; s.gShift = 2; s.bBits = 2; s.bShift = 0;
+        } else if (s.bpp === 4 || s.bpp === 2 || s.bpp === 1) {
+            s.aBits = s.bpp; s.aShift = 0;
+        }
+    }
+    return s;
   }
 
   function readTitle() {
@@ -200,62 +198,73 @@
     prevScale  = scale;
   }
 
-  function renderFullFrame(w, h, bpp, vramPtr, palettePtr) {
-    initPixelLuts();
+  function unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch, rb, rs, gb, gs, bb, bs, ab, ash, isGrayscale) {
+    const mem = getMem();
+    for (let row = 0; row < ch; row++) {
+      const dstOff = row * cw;
+      for (let col = 0; col < cw; col++) {
+        const idx = (cy + row) * w + (cx + col);
+        let px = 0;
+        if (bpp === 64) px = mem.getBigUint64(vramPtr + idx * 8, true);
+        else if (bpp === 32) px = mem.getUint32(vramPtr + idx * 4, true);
+        else if (bpp === 24) {
+          px = mem.getUint8(vramPtr + idx * 3) | (mem.getUint8(vramPtr + idx * 3 + 1) << 8) | (mem.getUint8(vramPtr + idx * 3 + 2) << 16);
+        }
+        else if (bpp === 16) px = mem.getUint16(vramPtr + idx * 2, true);
+        else if (bpp === 8) px = mem.getUint8(vramPtr + idx);
+        else if (bpp === 4) {
+          const byte = mem.getUint8(vramPtr + Math.floor(idx / 2));
+          px = (idx % 2 === 0) ? (byte >> 4) : (byte & 0x0F);
+        }
+        else if (bpp === 2) {
+          const byte = mem.getUint8(vramPtr + Math.floor(idx / 4));
+          px = (byte >> (6 - (idx % 4) * 2)) & 0x03;
+        }
+        else if (bpp === 1) {
+          const byte = mem.getUint8(vramPtr + Math.floor(idx / 8));
+          px = (byte >> (7 - (idx % 8))) & 1;
+        }
+        
+        // Ensure px is treated as BigInt if 64-bit, or Number otherwise
+        // To be safe in JS, let's treat px as Number (safe up to 53 bits). Since max is 64 but shift logic might exceed 52, we use BigInt for 64bpp.
+        let val = (bpp === 64) ? BigInt(px) : Number(px);
 
-    const bufSize = (bpp >= 8) ? w * h * (bpp >> 3) : Math.ceil(w * h * bpp / 8);
-    const buf = new Uint8Array(wasmMemory.buffer, vramPtr, bufSize);
-    const pixels = imageData.data;
-
-    if (bpp === 1) {
-      const u32 = new Uint32Array(pixels.buffer);
-      const pal = new Uint32Array(wasmMemory.buffer, palettePtr, 2);
-      for (let i = 0; i < w * h; i++) {
-        const byte = buf[Math.floor(i / 8)];
-        const bit = (byte >> (7 - (i % 8))) & 1;
-        u32[i] = pal[bit];
-      }
-    } else if (bpp === 2) {
-      const u32 = new Uint32Array(pixels.buffer);
-      const pal = new Uint32Array(wasmMemory.buffer, palettePtr, 4);
-      for (let i = 0; i < w * h; i++) {
-        const byte = buf[Math.floor(i / 4)];
-        const shift = 6 - ((i % 4) * 2);
-        const idx = (byte >> shift) & 3;
-        u32[i] = pal[idx];
-      }
-    } else if (bpp === 4) {
-      const u32 = new Uint32Array(pixels.buffer);
-      const pal = new Uint32Array(wasmMemory.buffer, palettePtr, 16);
-      for (let i = 0; i < w * h; i++) {
-        const byte = buf[Math.floor(i / 2)];
-        const idx = (i % 2 === 0) ? (byte >> 4) : (byte & 0x0F);
-        u32[i] = pal[idx];
-      }
-    } else if (bpp === 8) {
-      const u32 = new Uint32Array(pixels.buffer);
-      for (let i = 0; i < w * h; i++) {
-        u32[i] = rgb332_lut[buf[i]];
-      }
-    } else if (bpp === 16) {
-      const u16 = new Uint16Array(wasmMemory.buffer, vramPtr, w * h);
-      const u32 = new Uint32Array(pixels.buffer);
-      for (let i = 0; i < w * h; i++) {
-        u32[i] = rgb565_lut[u16[i]];
-      }
-    } else if (bpp === 32) {
-      const u32 = new Uint32Array(wasmMemory.buffer, vramPtr, w * h);
-      const dst = new Uint32Array(pixels.buffer);
-      for (let i = 0; i < w * h; i++) {
-        const v = u32[i];
-        dst[i] = 0xFF000000 | ((v >> 16) & 0xFF) << 16 | ((v >> 8) & 0xFF) << 8 | (v & 0xFF);
+        let r = 0, g = 0, b = 0, a = 255;
+        if (isGrayscale) {
+            let lum = 0;
+            if (bpp === 64) lum = Number((val >> BigInt(ash)) & ((1n << BigInt(ab)) - 1n));
+            else lum = (val >> ash) & ((1 << ab) - 1);
+            lum = (lum * 255 / ((1 << ab) - 1)) | 0;
+            r = g = b = lum;
+            a = 255;
+        } else {
+            if (bpp === 64) {
+                if (rb) r = Number((val >> BigInt(rs)) & ((1n << BigInt(rb)) - 1n)) * 255 / ((1 << rb) - 1) | 0;
+                if (gb) g = Number((val >> BigInt(gs)) & ((1n << BigInt(gb)) - 1n)) * 255 / ((1 << gb) - 1) | 0;
+                if (bb) b = Number((val >> BigInt(bs)) & ((1n << BigInt(bb)) - 1n)) * 255 / ((1 << bb) - 1) | 0;
+                if (ab) a = Number((val >> BigInt(ash)) & ((1n << BigInt(ab)) - 1n)) * 255 / ((1 << ab) - 1) | 0;
+            } else {
+                if (rb) r = ((val >> rs) & ((1 << rb) - 1)) * 255 / ((1 << rb) - 1) | 0;
+                if (gb) g = ((val >> gs) & ((1 << gb) - 1)) * 255 / ((1 << gb) - 1) | 0;
+                if (bb) b = ((val >> bs) & ((1 << bb) - 1)) * 255 / ((1 << bb) - 1) | 0;
+                if (ab) a = ((val >> ash) & ((1 << ab) - 1)) * 255 / ((1 << ab) - 1) | 0;
+            }
+        }
+        if (row === 0 && col === 0) console.log("Unpacked px:", val, "r:", r, "g:", g, "b:", b, "a:", a, "u32_val:", (a << 24) | (b << 16) | (g << 8) | r);
+        u32[dstOff + col] = (a << 24) | (b << 16) | (g << 8) | r;
       }
     }
+  }
+
+  function renderFullFrame(state, w, h, bpp, vramPtr) {
+    const isGrayscale = (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits > 0);
+    const u32 = new Uint32Array(imageData.data.buffer);
+    unpackPixelsToImageData(w, h, bpp, vramPtr, imageData.data, u32, 0, 0, w, h, state.rBits, state.rShift, state.gBits, state.gShift, state.bBits, state.bShift, state.aBits, state.aShift, isGrayscale);
     ctx.putImageData(imageData, 0, 0);
   }
 
-  function renderDirtyRects(w, h, bpp, vramPtr, dirtyCount, dirtyRectsPtr, palettePtr) {
-    initPixelLuts();
+  function renderDirtyRects(state, w, h, bpp, vramPtr, dirtyCount, dirtyRectsPtr) {
+    const isGrayscale = (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits > 0);
     const bppBytes = bpp >> 3;
     const dataView = new DataView(wasmMemory.buffer, dirtyRectsPtr, MAX_DIRTY_RECTS * RECT_STRIDE);
     const isFullScreen = dirtyCount === 1 &&
@@ -265,7 +274,7 @@
       dataView.getInt32(12, true) === h;
 
     if (isFullScreen) {
-      renderFullFrame(w, h, bpp, vramPtr, palettePtr);
+      renderFullFrame(state, w, h, bpp, vramPtr);
       return;
     }
 
@@ -276,7 +285,6 @@
       const rw = dataView.getInt32(off + 8, true);
       const rh = dataView.getInt32(off + 12, true);
 
-      // Clamp to screen bounds (match native runners)
       let cx = rx, cy = ry, cw = rw, ch = rh;
       if (cx < 0) { cw += cx; cx = 0; }
       if (cy < 0) { ch += cy; cy = 0; }
@@ -284,83 +292,15 @@
       if (cy + ch > h) ch = h - cy;
       if (cw <= 0 || ch <= 0) continue;
 
-      // Create temp ImageData for this rect
       const rectData = ctx.createImageData(cw, ch);
       const pixels = rectData.data;
+      const u32 = new Uint32Array(pixels.buffer);
 
-      if (bpp === 1) {
-        const u32 = new Uint32Array(pixels.buffer);
-        const pal = new Uint32Array(wasmMemory.buffer, palettePtr, 2);
-        for (let row = 0; row < ch; row++) {
-          const dstOff = row * cw;
-          for (let col = 0; col < cw; col++) {
-            const srcOff = (cy + row) * w + (cx + col);
-            const byte = new Uint8Array(wasmMemory.buffer, vramPtr + Math.floor(srcOff / 8), 1)[0];
-            const bit = (byte >> (7 - (srcOff % 8))) & 1;
-            u32[dstOff + col] = pal[bit];
-          }
-        }
-      } else if (bpp === 2) {
-        const u32 = new Uint32Array(pixels.buffer);
-        const pal = new Uint32Array(wasmMemory.buffer, palettePtr, 4);
-        for (let row = 0; row < ch; row++) {
-          const dstOff = row * cw;
-          for (let col = 0; col < cw; col++) {
-            const srcOff = (cy + row) * w + (cx + col);
-            const byte = new Uint8Array(wasmMemory.buffer, vramPtr + Math.floor(srcOff / 4), 1)[0];
-            const shift = 6 - ((srcOff % 4) * 2);
-            const idx = (byte >> shift) & 3;
-            u32[dstOff + col] = pal[idx];
-          }
-        }
-      } else if (bpp === 4) {
-        const u32 = new Uint32Array(pixels.buffer);
-        const pal = new Uint32Array(wasmMemory.buffer, palettePtr, 16);
-        for (let row = 0; row < ch; row++) {
-          const dstOff = row * cw;
-          for (let col = 0; col < cw; col++) {
-            const srcOff = (cy + row) * w + (cx + col);
-            const byte = new Uint8Array(wasmMemory.buffer, vramPtr + Math.floor(srcOff / 2), 1)[0];
-            const idx = (srcOff % 2 === 0) ? (byte >> 4) : (byte & 0x0F);
-            u32[dstOff + col] = pal[idx];
-          }
-        }
-      } else if (bpp === 8) {
-        const u32 = new Uint32Array(pixels.buffer);
-        for (let row = 0; row < ch; row++) {
-          const srcOff = (cy + row) * w + cx;
-          const dstOff = row * cw;
-          for (let col = 0; col < cw; col++) {
-            const v = new Uint8Array(wasmMemory.buffer, vramPtr + srcOff + col, 1)[0];
-            u32[dstOff + col] = rgb332_lut[v];
-          }
-        }
-      } else if (bpp === 16) {
-        const u32 = new Uint32Array(pixels.buffer);
-        for (let row = 0; row < ch; row++) {
-          const srcOff = ((cy + row) * w + cx);
-          const srcU16 = new Uint16Array(wasmMemory.buffer, vramPtr + srcOff * 2, cw);
-          const dstOff = row * cw;
-          for (let col = 0; col < cw; col++) {
-            u32[dstOff + col] = rgb565_lut[srcU16[col]];
-          }
-        }
-      } else if (bpp === 32) {
-        const u32 = new Uint32Array(pixels.buffer);
-        for (let row = 0; row < ch; row++) {
-          const srcOff = ((cy + row) * w + cx);
-          const srcU32 = new Uint32Array(wasmMemory.buffer, vramPtr + srcOff * 4, cw);
-          const dstOff = row * cw;
-          for (let col = 0; col < cw; col++) {
-            const v = srcU32[col];
-            u32[dstOff + col] = 0xFF000000 | ((v >> 16) & 0xFF) << 16 | ((v >> 8) & 0xFF) << 8 | (v & 0xFF);
-          }
-        }
-      }
-
+      unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch, state.rBits, state.rShift, state.gBits, state.gShift, state.bBits, state.bShift, state.aBits, state.aShift, isGrayscale);
       ctx.putImageData(rectData, cx, cy);
     }
   }
+
 
   // ── Input ──────────────────────────────────────────────────────────────
 
@@ -660,7 +600,7 @@
 
     // 4. Render dirty rects
     if (g.dirtyCount > 0) {
-      renderDirtyRects(w, h, bpp, statePtr + g.vramOffset, g.dirtyCount, g.dirtyRects, statePtr + g.paletteOffset);
+      renderDirtyRects(g, w, h, bpp, statePtr + g.vramOffset, g.dirtyCount, g.dirtyRects);
       // Reset dirty count
       getMem().setUint32(statePtr + 144, 0, true);
     }

@@ -92,9 +92,15 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint32_t palette_offset;
-    uint32_t palette_count;
-    uint8_t reserved[32];
+    uint32_t r_bits;
+    uint32_t r_shift;
+    uint32_t g_bits;
+    uint32_t g_shift;
+    uint32_t b_bits;
+    uint32_t b_shift;
+    uint32_t a_bits;
+    uint32_t a_shift;
+    uint8_t reserved[8];
 } WagnosticState;
 
 static_assert(sizeof(WagnosticState) == 1024, "WagnosticState size mismatch — check struct layout");
@@ -121,9 +127,8 @@ static uint32_t prev_audio_rate = 0, prev_audio_channels = 0, prev_audio_size = 
 static GLuint render_program = 0;
 static GLuint vram_textures[3] = {0};
 static GLuint pbos[2] = {0};
-static int tex_idx = 0, pbo_idx = 0, first_frame = 1;
+static int tex_idx = 0, pbo_idx = 0;
 static GLuint vao = 0, vbo = 0;
-static GLint bpp_uniform_loc = -1;
 
 // SpiderMonkey
 static JSContext* gCx = NULL;
@@ -152,10 +157,6 @@ static inline uint8_t *get_audio_buffer(WagnosticState *s) {
     return (uint8_t *)s + s->audio_buffer_offset;
 }
 
-static inline uint32_t *get_palette(WagnosticState *s) {
-    if (!s || s->palette_offset == 0) return NULL;
-    return (uint32_t *)((uint8_t *)s + s->palette_offset);
-}
 
 // ============================================================
 // GLSL 130 shaders
@@ -176,27 +177,9 @@ static const char* fragment_shader_src =
     "in vec2 TexCoord;\n"
     "out vec4 FragColor;\n"
     "uniform sampler2D vram;\n"
-    "uniform int bpp;\n"
     "void main() {\n"
     "    ivec2 pix = ivec2(floor(TexCoord * vec2(textureSize(vram, 0))));\n"
-    "    if (bpp == 8) {\n"
-    "        int raw = int(texelFetch(vram, pix, 0).r * 255.0);\n"
-    "        float r = float((raw >> 5) & 7) / 7.0;\n"
-    "        float g = float((raw >> 2) & 7) / 7.0;\n"
-    "        float b = float(raw & 3) / 3.0;\n"
-    "        FragColor = vec4(r, g, b, 1.0);\n"
-    "    } else if (bpp == 16) {\n"
-    "        vec4 t = texelFetch(vram, pix, 0);\n"
-    "        int p = int(t.r * 255.0) | (int(t.g * 255.0) << 8);\n"
-    "        float r = float((p >> 11) & 0x1F) / 31.0;\n"
-    "        float g = float((p >> 5) & 0x3F) / 63.0;\n"
-    "        float b = float(p & 0x1F) / 31.0;\n"
-    "        FragColor = vec4(r, g, b, 1.0);\n"
-    "    } else if (bpp == 24) {\n"
-    "        FragColor = vec4(texelFetch(vram, pix, 0).rgb, 1.0);\n"
-    "    } else {\n"
-    "        FragColor = texelFetch(vram, pix, 0);\n"
-    "    }\n"
+    "    FragColor = texelFetch(vram, pix, 0);\n"
     "}\n";
 
 
@@ -236,7 +219,6 @@ static void init_gpu_pipeline() {
 
     glDeleteShader(vs);
     glDeleteShader(fs);
-    bpp_uniform_loc = glGetUniformLocation(render_program, "bpp");
 
     float quad[] = {
         -1, -1,  0, 1,
@@ -265,14 +247,12 @@ static void init_textures_and_pbos() {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        GLenum ifmt = (BPP == 8) ? GL_R8 : (BPP == 16) ? GL_RG8 : (BPP == 24) ? GL_RGB8 : GL_RGBA8;
-        GLenum base = (BPP == 8) ? GL_RED : (BPP == 16) ? GL_RG : (BPP == 24) ? GL_RGB : GL_RGBA;
-        glTexImage2D(GL_TEXTURE_2D, 0, ifmt, W, H, 0, base, GL_UNSIGNED_BYTE, NULL);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
     }
 
     if (pbos[0]) glDeleteBuffers(2, pbos);
     glGenBuffers(2, pbos);
-    size_t vram_bytes = (size_t)W * H * (BPP <= 4 ? 4 : (BPP == 24 ? 3 : BPP / 8));
+    size_t vram_bytes = (size_t)W * H * 4;
     for (int i = 0; i < 2; i++) {
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbos[i]);
         glBufferData(GL_PIXEL_UNPACK_BUFFER, vram_bytes, NULL, GL_STREAM_DRAW);
@@ -280,7 +260,6 @@ static void init_textures_and_pbos() {
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     tex_idx = 0;
     pbo_idx = 0;
-    first_frame = 1;
 }
 
 static void render_quad(GLuint tex_id) {
@@ -288,66 +267,97 @@ static void render_quad(GLuint tex_id) {
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tex_id);
     glUniform1i(glGetUniformLocation(render_program, "vram"), 0);
-    glUniform1i(bpp_uniform_loc, (GLint)BPP);
     glBindVertexArray(vao);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glBindVertexArray(0);
     glUseProgram(0);
 }
 
+static void unpack_rect_cpu(WagnosticState *s, uint8_t* vram, uint32_t* dst, int rx, int ry, int rw, int rh) {
+    uint32_t r_b = s ? s->r_bits : 0;
+    uint32_t r_s = s ? s->r_shift : 0;
+    uint32_t g_b = s ? s->g_bits : 0;
+    uint32_t g_s = s ? s->g_shift : 0;
+    uint32_t b_b = s ? s->b_bits : 0;
+    uint32_t b_s = s ? s->b_shift : 0;
+    uint32_t a_b = s ? s->a_bits : 0;
+    uint32_t a_s = s ? s->a_shift : 0;
+    
+    if (!r_b && !g_b && !b_b && !a_b) {
+        if (BPP == 32) {
+            a_b = 8; a_s = 24; b_b = 8; b_s = 16; g_b = 8; g_s = 8; r_b = 8; r_s = 0;
+        } else if (BPP == 24) {
+            b_b = 8; b_s = 16; g_b = 8; g_s = 8; r_b = 8; r_s = 0;
+        } else if (BPP == 16) {
+            r_b = 5; r_s = 11; g_b = 6; g_s = 5; b_b = 5; b_s = 0;
+        } else if (BPP == 8) {
+            r_b = 3; r_s = 5; g_b = 3; g_s = 2; b_b = 2; b_s = 0;
+        } else if (BPP == 4 || BPP == 2 || BPP == 1) {
+            a_b = BPP; a_s = 0;
+        }
+    }
+    
+    int is_grayscale = (!r_b && !g_b && !b_b && a_b);
+    
+    for (int y = ry; y < ry + rh; y++) {
+        for (int x = rx; x < rx + rw; x++) {
+            uint32_t idx = y * W + x;
+            uint64_t px = 0;
+            if (BPP == 64) px = ((uint64_t*)vram)[idx];
+            else if (BPP == 32) px = ((uint32_t*)vram)[idx];
+            else if (BPP == 24) {
+                uint8_t *p = vram + idx * 3;
+                px = p[0] | (p[1] << 8) | (p[2] << 16);
+            }
+            else if (BPP == 16) px = ((uint16_t*)vram)[idx];
+            else if (BPP == 8) px = vram[idx];
+            else if (BPP == 4) {
+                uint8_t b_val = vram[idx / 2];
+                px = (idx % 2 == 0) ? (b_val >> 4) : (b_val & 0x0F);
+            }
+            else if (BPP == 2) {
+                uint8_t b_val = vram[idx / 4];
+                px = (b_val >> (6 - (idx % 4) * 2)) & 0x03;
+            }
+            else if (BPP == 1) {
+                uint8_t b_val = vram[idx / 8];
+                px = (b_val >> (7 - (idx % 8))) & 1;
+            }
+
+            uint32_t r = 0, g = 0, b = 0, a = 255;
+            if (is_grayscale) {
+                uint32_t lum = (uint32_t)(((px >> a_s) & ((1ULL << a_b) - 1)) * 255 / ((1ULL << a_b) - 1));
+                r = g = b = lum;
+                a = 255;
+            } else {
+                if (r_b) r = (uint32_t)(((px >> r_s) & ((1ULL << r_b) - 1)) * 255 / ((1ULL << r_b) - 1));
+                if (g_b) g = (uint32_t)(((px >> g_s) & ((1ULL << g_b) - 1)) * 255 / ((1ULL << g_b) - 1));
+                if (b_b) b = (uint32_t)(((px >> b_s) & ((1ULL << b_b) - 1)) * 255 / ((1ULL << b_b) - 1));
+                if (a_b) a = (uint32_t)(((px >> a_s) & ((1ULL << a_b) - 1)) * 255 / ((1ULL << a_b) - 1));
+            }
+            dst[(y - ry) * rw + (x - rx)] = (a << 24) | (b << 16) | (g << 8) | r;
+        }
+    }
+}
+
 static void upload_and_render() {
     WagnosticState *s = get_state();
     uint8_t* vram = get_vram(s);
     if (!vram) return;
-    size_t vram_bytes = (size_t)W * H * (BPP <= 4 ? 4 : (BPP == 24 ? 3 : BPP / 8));
-    GLenum fmt = (BPP == 8) ? GL_RED : (BPP == 16) ? GL_RG : (BPP == 24) ? GL_RGB : GL_RGBA;
     int cur = pbo_idx, prev = 1 - pbo_idx;
     int rtex = (tex_idx + 2) % 3, utex = tex_idx;
 
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbos[cur]);
     void* ptr = glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY);
     if (ptr) {
-        if (BPP == 1) {
-            uint32_t *pal = get_palette(s);
-            uint32_t *dst = (uint32_t*)ptr;
-            if (pal) {
-                for (size_t i = 0; i < (size_t)W * H; i++) {
-                    uint8_t byte = vram[i / 8];
-                    uint8_t bit = (byte >> (7 - (i % 8))) & 1;
-                    dst[i] = pal[bit];
-                }
-            }
-        } else if (BPP == 2) {
-            uint32_t *pal = get_palette(s);
-            uint32_t *dst = (uint32_t*)ptr;
-            if (pal) {
-                for (size_t i = 0; i < (size_t)W * H; i++) {
-                    uint8_t byte = vram[i / 4];
-                    uint8_t shift = 6 - ((i % 4) * 2);
-                    uint8_t idx = (byte >> shift) & 3;
-                    dst[i] = pal[idx];
-                }
-            }
-        } else if (BPP == 4) {
-            uint32_t *pal = get_palette(s);
-            uint32_t *dst = (uint32_t*)ptr;
-            if (pal) {
-                for (size_t i = 0; i < (size_t)W * H; i++) {
-                    uint8_t byte = vram[i / 2];
-                    uint8_t idx = (i % 2 == 0) ? (byte >> 4) : (byte & 0x0F);
-                    dst[i] = pal[idx];
-                }
-            }
-        } else {
-            memcpy(ptr, vram, vram_bytes);
-        }
+        unpack_rect_cpu(s, vram, (uint32_t*)ptr, 0, 0, W, H);
     }
     glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
 
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbos[prev]);
     glBindTexture(GL_TEXTURE_2D, vram_textures[utex]);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H, fmt, GL_UNSIGNED_BYTE, NULL);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
     glClear(GL_COLOR_BUFFER_BIT);
@@ -369,48 +379,15 @@ static void upload_dirty_rect(const Rect& r) {
     WagnosticState *s = get_state();
     uint8_t* vram = get_vram(s);
     if (!vram) return;
-    GLenum fmt = (BPP == 8) ? GL_RED : (BPP == 16) ? GL_RG : (BPP == 24) ? GL_RGB : GL_RGBA;
-    int bpp_bytes = (BPP == 24) ? 3 : BPP / 8;
-    size_t src_offset = ((size_t)y * W + x) * bpp_bytes;
-
-    if (BPP <= 4) {
-        uint32_t *pal = get_palette(s);
-        if (pal) {
-            uint32_t *tmp = new uint32_t[w * h];
-            for (int row = 0; row < h; row++) {
-                for (int col = 0; col < w; col++) {
-                    int px = x + col;
-                    int py = y + row;
-                    if (BPP == 1) {
-                        uint8_t byte = vram[(py * W + px) / 8];
-                        uint8_t bit = (byte >> (7 - (px % 8))) & 1;
-                        tmp[row * w + col] = pal[bit];
-                    } else if (BPP == 2) {
-                        uint8_t byte = vram[(py * W + px) / 4];
-                        uint8_t shift = 6 - ((px % 4) * 2);
-                        uint8_t idx = (byte >> shift) & 3;
-                        tmp[row * w + col] = pal[idx];
-                    } else if (BPP == 4) {
-                        uint8_t byte = vram[(py * W + px) / 2];
-                        uint8_t idx = (px % 2 == 0) ? (byte >> 4) : (byte & 0x0F);
-                        tmp[row * w + col] = pal[idx];
-                    }
-                }
-            }
-            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-            glBindTexture(GL_TEXTURE_2D, vram_textures[tex_idx]);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, tmp);
-            delete[] tmp;
-        }
-    } else {
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, (GLint)W);
-        glBindTexture(GL_TEXTURE_2D, vram_textures[tex_idx]);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, fmt, GL_UNSIGNED_BYTE,
-                        vram + src_offset);
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    }
+    
+    uint32_t *tmp = new uint32_t[w * h];
+    unpack_rect_cpu(s, vram, tmp, x, y, w, h);
+    
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glBindTexture(GL_TEXTURE_2D, vram_textures[tex_idx]);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, tmp);
+    delete[] tmp;
 }
 
 static void set_viewport_with_letterbox() {
@@ -918,25 +895,7 @@ int main(int argc, char** argv) {
                     Rect r = s->dirty_rects[0];
                     if (r.x == 0 && r.y == 0 &&
                         (uint32_t)r.w == W && (uint32_t)r.h == H) {
-                        if (first_frame) {
-                            uint8_t* vram = get_vram(s);
-                            if (vram) {
-                                GLenum fmt = (BPP == 8) ? GL_RED :
-                                             (BPP == 16) ? GL_RG :
-                                             (BPP == 24) ? GL_RGB : GL_RGBA;
-                                glBindTexture(GL_TEXTURE_2D, vram_textures[0]);
-                                glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-                                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H,
-                                                fmt, GL_UNSIGNED_BYTE, vram);
-                                tex_idx = 1;
-                                first_frame = 0;
-                                glClear(GL_COLOR_BUFFER_BIT);
-                                render_quad(vram_textures[0]);
-                                SDL_GL_SwapWindow(window);
-                            }
-                        } else {
-                            upload_and_render();
-                        }
+                        upload_and_render();
                     } else {
                         upload_dirty_rect(r);
                         glClear(GL_COLOR_BUFFER_BIT);

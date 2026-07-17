@@ -1,0 +1,92 @@
+#include <stdint.h>
+
+#define WASM_EXPORT __attribute__((visibility("default")))
+
+typedef struct { int x, y, w, h; } Rect;
+
+typedef struct {
+    uint32_t width, height, bpp, scale;
+    char title[128];
+    uint32_t dirty_count;
+    Rect dirty_rects[32];
+    int32_t mouse_x, mouse_y;
+    uint32_t mouse_buttons;
+    int32_t mouse_wheel;
+    uint8_t keys[256];
+    uint32_t gamepad_buttons;
+    uint32_t ticks;
+    uint32_t target_fps;
+    uint32_t audio_size, audio_sample_rate, audio_bpp, audio_channels;
+    uint32_t audio_write, audio_read;
+    uint32_t audio_underrun, audio_overrun;
+    uint32_t vram_offset;
+    uint32_t audio_buffer_offset;
+    uint32_t r_bits, r_shift, g_bits, g_shift, b_bits, b_shift, a_bits, a_shift;
+    uint8_t reserved[8];
+} WagnosticState;
+
+static struct {
+    WagnosticState s;
+    uint16_t vram[320 * 240];
+} rom;
+
+static int initialized = 0;
+
+static void set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    if (x < 0 || x >= (int)rom.s.width || y < 0 || y >= (int)rom.s.height) return;
+    int idx = y * (int)rom.s.width + x;
+    
+    // R5 G1 B5 A5
+    // R in bits 11..15 (5 bits)
+    // G in bit 10      (1 bit)
+    // B in bits 5..9   (5 bits)
+    // A in bits 0..4   (5 bits)
+    
+    uint16_t r_val = (r >> 3) & 0x1F;
+    uint16_t g_val = (g >> 7) & 0x01;
+    uint16_t b_val = (b >> 3) & 0x1F;
+    uint16_t a_val = (a >> 3) & 0x1F;
+    
+    rom.vram[idx] = (r_val << 11) | (g_val << 10) | (b_val << 5) | a_val;
+}
+
+WASM_EXPORT int wupdate() {
+    if (!initialized) {
+        rom.s.width = 320;
+        rom.s.height = 240;
+        rom.s.bpp = 16;
+        rom.s.scale = 2;
+        rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
+        
+        rom.s.r_bits = 5; rom.s.r_shift = 11;
+        rom.s.g_bits = 1; rom.s.g_shift = 10;
+        rom.s.b_bits = 5; rom.s.b_shift = 5;
+        rom.s.a_bits = 5; rom.s.a_shift = 0;
+        
+        char* t = rom.s.title;
+        const char* src = "Exotic1 Test (R5 G1 B5 A5)";
+        int i = 0;
+        while (src[i] && i < 127) { t[i] = src[i]; i++; }
+        t[i] = '\0';
+        
+        // Draw a test pattern
+        for (int y = 0; y < 240; y++) {
+            for (int x = 0; x < 320; x++) {
+                uint8_t r = (x * 255) / 320;
+                uint8_t b = (y * 255) / 240;
+                // Since G only has 1 bit, we will make it alternate columns to be visible
+                uint8_t g = (x / 20) % 2 == 0 ? 255 : 0;
+                // Alpha fade out to the right
+                uint8_t a = 255 - ((x * 255) / 320);
+                
+                set_pixel(x, y, r, g, b, a);
+            }
+        }
+        
+        initialized = 1;
+    }
+
+    rom.s.dirty_count = 1;
+    rom.s.dirty_rects[0] = (Rect){0, 0, 320, 240};
+    return (int)&rom.s;
+}

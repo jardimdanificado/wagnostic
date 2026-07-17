@@ -41,9 +41,15 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint32_t palette_offset;      // +984
-    uint32_t palette_count;       // +988
-    uint8_t reserved[32];         // +992
+    uint32_t r_bits;
+    uint32_t r_shift;
+    uint32_t g_bits;
+    uint32_t g_shift;
+    uint32_t b_bits;
+    uint32_t b_shift;
+    uint32_t a_bits;
+    uint32_t a_shift;
+    uint8_t reserved[8];
 } WagnosticState;
 
 static int g_is_tar = 0;
@@ -105,10 +111,7 @@ static uint32_t g_mem_len = 0;
  * The audio callback reads from this pointer. */
 static uint32_t g_state_ptr = 0;
 
-/* Pixel lookup tables (LUTs) for fast format conversion */
-static uint32_t rgb332_lut[256];
-static uint32_t rgb565_lut[65536];
-static int pixel_lut_initialized = 0;
+
 
 /* Audio buffer lock */
 static SDL_mutex *g_audio_mutex = NULL;
@@ -133,10 +136,7 @@ static inline uint8_t *get_audio_buffer(WagnosticState *s) {
     return (uint8_t *)s + s->audio_buffer_offset;
 }
 
-static inline uint32_t *get_palette(WagnosticState *s) {
-    if (!s || s->palette_offset == 0) return NULL;
-    return (uint32_t *)((uint8_t *)s + s->palette_offset);
-}
+
 
 /* ================================================================
  * Screen config with defaults
@@ -173,28 +173,13 @@ static inline uint32_t rgb565_to_abgr8888(uint16_t p) {
     return 0xFF000000u | (b << 16) | (g << 8) | r;
 }
 
-static void init_pixel_luts(void) {
-    if (pixel_lut_initialized) return;
-    for (int i = 0; i < 256; i++) {
-        uint32_t r = ((i >> 5) & 0x07) * 36;
-        uint32_t g = ((i >> 2) & 0x07) * 36;
-        uint32_t b = (i & 0x03) * 85;
-        rgb332_lut[i] = 0xFF000000u | (b << 16) | (g << 8) | r;
-    }
-    for (int i = 0; i < 65536; i++) {
-        uint32_t r = ((i >> 11) & 0x1F) * 255 / 31;
-        uint32_t g = ((i >> 5) & 0x3F) * 255 / 63;
-        uint32_t b = (i & 0x1F) * 255 / 31;
-        rgb565_lut[i] = 0xFF000000u | (b << 16) | (g << 8) | r;
-    }
-    pixel_lut_initialized = 1;
-}
+
 
 /* ================================================================
  * Render helpers
  * ================================================================ */
 
-static void render_rect_to_texture(SDL_Texture *texture, uint8_t *vram, uint32_t *palette,
+static void render_rect_to_texture(SDL_Texture *texture, uint8_t *vram, WagnosticState *s,
                                    int rx, int ry, int rw, int rh,
                                    uint32_t W, uint32_t H, uint32_t BPP) {
     if (rx < 0) { rw += rx; rx = 0; }
@@ -207,125 +192,79 @@ static void render_rect_to_texture(SDL_Texture *texture, uint8_t *vram, uint32_t
     void *pixels;
     int pitch;
     SDL_LockTexture(texture, &sdl_rect, &pixels, &pitch);
+    
+    uint32_t r_b = s ? s->r_bits : 0;
+    uint32_t r_s = s ? s->r_shift : 0;
+    uint32_t g_b = s ? s->g_bits : 0;
+    uint32_t g_s = s ? s->g_shift : 0;
+    uint32_t b_b = s ? s->b_bits : 0;
+    uint32_t b_s = s ? s->b_shift : 0;
+    uint32_t a_b = s ? s->a_bits : 0;
+    uint32_t a_s = s ? s->a_shift : 0;
 
-    if (BPP == 1 && palette) {
-        for (int y = ry; y < ry + rh; y++) {
-            uint8_t  *src = vram + (y * W) / 8;
-            uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
-            for (int x = rx; x < rx + rw; x++) {
-                uint8_t byte = src[x / 8];
-                uint8_t bit = (byte >> (7 - (x % 8))) & 1;
-                dst[x - rx] = palette[bit];
-            }
-        }
-    } else if (BPP == 2 && palette) {
-        for (int y = ry; y < ry + rh; y++) {
-            uint8_t  *src = vram + (y * W) / 4;
-            uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
-            for (int x = rx; x < rx + rw; x++) {
-                uint8_t byte = src[x / 4];
-                uint8_t shift = 6 - ((x % 4) * 2);
-                uint8_t idx = (byte >> shift) & 3;
-                dst[x - rx] = palette[idx];
-            }
-        }
-    } else if (BPP == 4 && palette) {
-        for (int y = ry; y < ry + rh; y++) {
-            uint8_t  *src = vram + (y * W) / 2;
-            uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
-            for (int x = rx; x < rx + rw; x++) {
-                uint8_t byte = src[x / 2];
-                uint8_t idx = (x % 2 == 0) ? (byte >> 4) : (byte & 0x0F);
-                dst[x - rx] = palette[idx];
-            }
-        }
-    } else if (BPP == 8) {
-        for (int y = ry; y < ry + rh; y++) {
-            uint8_t  *src = vram + y * W + rx;
-            uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
-            for (int x = 0; x < rw; x++) dst[x] = rgb332_lut[src[x]];
-        }
-    } else if (BPP == 16) {
-        for (int y = ry; y < ry + rh; y++) {
-            uint16_t *src = (uint16_t *)(vram + (y * W + rx) * 2);
-            uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
-            for (int x = 0; x < rw; x++) dst[x] = rgb565_lut[src[x]];
-        }
-    } else if (BPP == 24) {
-        for (int y = ry; y < ry + rh; y++) {
-            uint8_t *src = vram + ((y * W + rx) * 3);
-            uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
-            for (int x = 0; x < rw; x++) {
-                uint8_t r = src[x*3];
-                uint8_t g = src[x*3 + 1];
-                uint8_t b = src[x*3 + 2];
-                dst[x] = (uint32_t)r | ((uint32_t)g << 8) | ((uint32_t)b << 16) | 0xFF000000u;
-            }
-        }
-    } else if (BPP == 32) {
-        for (int y = ry; y < ry + rh; y++) {
-            uint8_t  *src = vram + (y * W + rx) * 4;
-            uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
-            memcpy(dst, src, rw * 4);
+    if (!r_b && !g_b && !b_b && !a_b) {
+        if (BPP == 32) {
+            a_b = 8; a_s = 24; b_b = 8; b_s = 16; g_b = 8; g_s = 8; r_b = 8; r_s = 0;
+        } else if (BPP == 24) {
+            b_b = 8; b_s = 16; g_b = 8; g_s = 8; r_b = 8; r_s = 0;
+        } else if (BPP == 16) {
+            r_b = 5; r_s = 11; g_b = 6; g_s = 5; b_b = 5; b_s = 0;
+        } else if (BPP == 8) {
+            r_b = 3; r_s = 5; g_b = 3; g_s = 2; b_b = 2; b_s = 0;
+        } else if (BPP == 4 || BPP == 2 || BPP == 1) {
+            a_b = BPP; a_s = 0;
         }
     }
+
+    int is_grayscale = (!r_b && !g_b && !b_b && a_b);
+
+    for (int y = ry; y < ry + rh; y++) {
+        uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
+        for (int x = rx; x < rx + rw; x++) {
+            uint64_t px = 0;
+            size_t idx = y * W + x;
+            if (BPP == 64) px = ((uint64_t*)vram)[idx];
+            else if (BPP == 32) px = ((uint32_t*)vram)[idx];
+            else if (BPP == 24) {
+                uint8_t *p = vram + idx * 3;
+                px = p[0] | (p[1] << 8) | (p[2] << 16);
+            }
+            else if (BPP == 16) px = ((uint16_t*)vram)[idx];
+            else if (BPP == 8) px = vram[idx];
+            else if (BPP == 4) {
+                uint8_t b = vram[idx / 2];
+                px = (idx % 2 == 0) ? (b >> 4) : (b & 0x0F);
+            }
+            else if (BPP == 2) {
+                uint8_t b = vram[idx / 4];
+                px = (b >> (6 - (idx % 4) * 2)) & 0x03;
+            }
+            else if (BPP == 1) {
+                uint8_t b = vram[idx / 8];
+                px = (b >> (7 - (idx % 8))) & 1;
+            }
+
+            uint32_t r = 0, g = 0, b = 0, a = 255;
+            if (is_grayscale) {
+                uint32_t lum = (uint32_t)(((px >> a_s) & ((1ULL << a_b) - 1)) * 255 / ((1ULL << a_b) - 1));
+                r = g = b = lum;
+                a = 255;
+            } else {
+                if (r_b) r = (uint32_t)(((px >> r_s) & ((1ULL << r_b) - 1)) * 255 / ((1ULL << r_b) - 1));
+                if (g_b) g = (uint32_t)(((px >> g_s) & ((1ULL << g_b) - 1)) * 255 / ((1ULL << g_b) - 1));
+                if (b_b) b = (uint32_t)(((px >> b_s) & ((1ULL << b_b) - 1)) * 255 / ((1ULL << b_b) - 1));
+                if (a_b) a = (uint32_t)(((px >> a_s) & ((1ULL << a_b) - 1)) * 255 / ((1ULL << a_b) - 1));
+            }
+            dst[x - rx] = (a << 24) | (b << 16) | (g << 8) | r;
+        }
+    }
+
     SDL_UnlockTexture(texture);
 }
 
-static void render_fullscreen(SDL_Texture *texture, uint8_t *vram, uint32_t *palette,
+static void render_fullscreen(SDL_Texture *texture, uint8_t *vram, WagnosticState *s,
                               uint32_t W, uint32_t H, uint32_t BPP) {
-    void *pixels;
-    int pitch;
-    SDL_LockTexture(texture, NULL, &pixels, &pitch);
-    if (BPP == 1 && palette) {
-        uint32_t *dst = (uint32_t *)pixels;
-        uint32_t total = W * H;
-        for (uint32_t i = 0; i < total; i++) {
-            uint8_t byte = vram[i / 8];
-            uint8_t bit = (byte >> (7 - (i % 8))) & 1;
-            dst[i] = palette[bit];
-        }
-    } else if (BPP == 2 && palette) {
-        uint32_t *dst = (uint32_t *)pixels;
-        uint32_t total = W * H;
-        for (uint32_t i = 0; i < total; i++) {
-            uint8_t byte = vram[i / 4];
-            uint8_t shift = 6 - ((i % 4) * 2);
-            uint8_t idx = (byte >> shift) & 3;
-            dst[i] = palette[idx];
-        }
-    } else if (BPP == 4 && palette) {
-        uint32_t *dst = (uint32_t *)pixels;
-        uint32_t total = W * H;
-        for (uint32_t i = 0; i < total; i++) {
-            uint8_t byte = vram[i / 2];
-            uint8_t idx = (i % 2 == 0) ? (byte >> 4) : (byte & 0x0F);
-            dst[i] = palette[idx];
-        }
-    } else if (BPP == 8) {
-        uint8_t  *src = vram;
-        uint32_t *dst = (uint32_t *)pixels;
-        uint32_t total = W * H;
-        for (uint32_t i = 0; i < total; i++) dst[i] = rgb332_lut[src[i]];
-    } else if (BPP == 16) {
-        uint16_t *src = (uint16_t *)vram;
-        uint32_t *dst = (uint32_t *)pixels;
-        uint32_t total = W * H;
-        for (uint32_t i = 0; i < total; i++) dst[i] = rgb565_lut[src[i]];
-    } else if (BPP == 24) {
-        uint8_t *src = vram;
-        uint32_t *dst = (uint32_t *)pixels;
-        uint32_t total = W * H;
-        for (uint32_t i = 0; i < total; i++) {
-            uint8_t r = src[i*3];
-            uint8_t g = src[i*3 + 1];
-            uint8_t b = src[i*3 + 2];
-            dst[i] = (uint32_t)r | ((uint32_t)g << 8) | ((uint32_t)b << 16) | 0xFF000000u;
-        }
-    } else if (BPP == 32) {
-        memcpy(pixels, vram, W * H * 4);
-    }
-    SDL_UnlockTexture(texture);
+    render_rect_to_texture(texture, vram, s, 0, 0, W, H, W, H, BPP);
 }
 
 /* ================================================================
@@ -516,7 +455,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    init_pixel_luts();
+
     g_audio_mutex = SDL_CreateMutex();
     if (!g_audio_mutex) {
         fprintf(stderr, "SDL_CreateMutex failed: %s\n", SDL_GetError());
@@ -786,7 +725,7 @@ int main(int argc, char **argv) {
         /* ---- Step 4: Render dirty rects ---- */
         if (state) {
             uint8_t *vram = get_vram(state);
-            uint32_t *palette = get_palette(state);
+
             uint32_t dirty_count = state->dirty_count;
 
             if (vram && dirty_count > 0) {
@@ -797,9 +736,9 @@ int main(int argc, char **argv) {
                     int rh = state->dirty_rects[0].h;
                     if (rx == 0 && ry == 0 &&
                         (uint32_t)rw == W && (uint32_t)rh == H) {
-                        render_fullscreen(texture, vram, palette, W, H, BPP);
+                        render_fullscreen(texture, vram, state, W, H, BPP);
                     } else {
-                        render_rect_to_texture(texture, vram, palette,
+                        render_rect_to_texture(texture, vram, state,
                             rx, ry, rw, rh, W, H, BPP);
                     }
                 } else {
@@ -810,7 +749,7 @@ int main(int argc, char **argv) {
                         int ry = state->dirty_rects[i].y;
                         int rw = state->dirty_rects[i].w;
                         int rh = state->dirty_rects[i].h;
-                        render_rect_to_texture(texture, vram, palette,
+                        render_rect_to_texture(texture, vram, state,
                             rx, ry, rw, rh, W, H, BPP);
                     }
                 }

@@ -20,14 +20,19 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint32_t palette_offset;
-    uint32_t palette_count;
-    uint8_t reserved[32];
+    uint32_t r_bits;
+    uint32_t r_shift;
+    uint32_t g_bits;
+    uint32_t g_shift;
+    uint32_t b_bits;
+    uint32_t b_shift;
+    uint32_t a_bits;
+    uint32_t a_shift;
+    uint8_t reserved[8];
 } State;
 
 static struct {
     State s;
-    uint32_t palette[2];
     uint8_t vram[(320 * 240) / 8];
 } rom;
 
@@ -38,18 +43,14 @@ int wupdate() {
         rom.s.width = 320;
         rom.s.height = 240;
         rom.s.bpp = 1;
+        rom.s.a_bits = 1; rom.s.a_shift = 0;
+
         rom.s.scale = 2;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
-        rom.s.palette_offset = (uint32_t)((uint8_t*)rom.palette - (uint8_t*)&rom.s);
-        rom.s.palette_count = 2;
         
         char* t = rom.s.title;
         const char* src = "1bpp Test (Monochrome)";
         int i = 0; while (src[i] && i < 127) { t[i] = src[i]; i++; } t[i] = '\0';
-        
-        // Palette: Black and Green
-        rom.palette[0] = 0xFF000000;
-        rom.palette[1] = 0xFF00FF00;
         
         initialized = 1;
     }
