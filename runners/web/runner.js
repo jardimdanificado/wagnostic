@@ -225,16 +225,18 @@
           px = (byte >> (7 - (idx % 8))) & 1;
         }
         
-        // Ensure px is treated as BigInt if 64-bit, or Number otherwise
-        // To be safe in JS, let's treat px as Number (safe up to 53 bits). Since max is 64 but shift logic might exceed 52, we use BigInt for 64bpp.
         let val = (bpp === 64) ? BigInt(px) : Number(px);
 
         let r = 0, g = 0, b = 0, a = 255;
         if (isGrayscale) {
             let lum = 0;
-            if (bpp === 64) lum = Number((val >> BigInt(ash)) & ((1n << BigInt(ab)) - 1n));
-            else lum = (val >> ash) & ((1 << ab) - 1);
-            lum = (lum * 255 / ((1 << ab) - 1)) | 0;
+            if (ab > 0) {
+                if (bpp === 64) lum = Number((val >> BigInt(ash)) & ((1n << BigInt(ab)) - 1n));
+                else lum = (val >> ash) & ((1 << ab) - 1);
+                lum = (lum * 255 / ((1 << ab) - 1)) | 0;
+            } else {
+                lum = val ? 255 : 0;
+            }
             r = g = b = lum;
             a = 255;
         } else {
@@ -250,21 +252,24 @@
                 if (ab) a = ((val >> ash) & ((1 << ab) - 1)) * 255 / ((1 << ab) - 1) | 0;
             }
         }
-        if (row === 0 && col === 0) console.log("Unpacked px:", val, "r:", r, "g:", g, "b:", b, "a:", a, "u32_val:", (a << 24) | (b << 16) | (g << 8) | r);
         u32[dstOff + col] = (a << 24) | (b << 16) | (g << 8) | r;
       }
     }
   }
 
   function renderFullFrame(state, w, h, bpp, vramPtr) {
-    const isGrayscale = (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits > 0);
+    const isGrayscale = (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits > 0) || 
+                        (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits === 0 && bpp < 8);
+    let ab = state.aBits > 0 ? state.aBits : (bpp < 8 ? bpp : 0);
     const u32 = new Uint32Array(imageData.data.buffer);
-    unpackPixelsToImageData(w, h, bpp, vramPtr, imageData.data, u32, 0, 0, w, h, state.rBits, state.rShift, state.gBits, state.gShift, state.bBits, state.bShift, state.aBits, state.aShift, isGrayscale);
+    unpackPixelsToImageData(w, h, bpp, vramPtr, imageData.data, u32, 0, 0, w, h, state.rBits, state.rShift, state.gBits, state.gShift, state.bBits, state.bShift, ab, state.aShift, isGrayscale);
     ctx.putImageData(imageData, 0, 0);
   }
 
   function renderDirtyRects(state, w, h, bpp, vramPtr, dirtyCount, dirtyRectsPtr) {
-    const isGrayscale = (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits > 0);
+    const isGrayscale = (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits > 0) || 
+                        (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits === 0 && bpp < 8);
+    let ab = state.aBits > 0 ? state.aBits : (bpp < 8 ? bpp : 0);
     const bppBytes = bpp >> 3;
     const dataView = new DataView(wasmMemory.buffer, dirtyRectsPtr, MAX_DIRTY_RECTS * RECT_STRIDE);
     const isFullScreen = dirtyCount === 1 &&
@@ -296,7 +301,7 @@
       const pixels = rectData.data;
       const u32 = new Uint32Array(pixels.buffer);
 
-      unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch, state.rBits, state.rShift, state.gBits, state.gShift, state.bBits, state.bShift, state.aBits, state.aShift, isGrayscale);
+      unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch, state.rBits, state.rShift, state.gBits, state.gShift, state.bBits, state.bShift, ab, state.aShift, isGrayscale);
       ctx.putImageData(rectData, cx, cy);
     }
   }

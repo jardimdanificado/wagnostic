@@ -283,17 +283,18 @@ static void unpack_rect_cpu(WagnosticState *s, uint8_t* vram, uint32_t* dst, int
     uint32_t a_b = s ? s->a_bits : 0;
     uint32_t a_s = s ? s->a_shift : 0;
     
+    uint32_t bpp = s ? s->bpp : 32;
     if (!r_b && !g_b && !b_b && !a_b) {
-        if (BPP == 32) {
+        if (bpp == 32) {
             a_b = 8; a_s = 24; b_b = 8; b_s = 16; g_b = 8; g_s = 8; r_b = 8; r_s = 0;
-        } else if (BPP == 24) {
+        } else if (bpp == 24) {
             b_b = 8; b_s = 16; g_b = 8; g_s = 8; r_b = 8; r_s = 0;
-        } else if (BPP == 16) {
+        } else if (bpp == 16) {
             r_b = 5; r_s = 11; g_b = 6; g_s = 5; b_b = 5; b_s = 0;
-        } else if (BPP == 8) {
+        } else if (bpp == 8) {
             r_b = 3; r_s = 5; g_b = 3; g_s = 2; b_b = 2; b_s = 0;
-        } else if (BPP == 4 || BPP == 2 || BPP == 1) {
-            a_b = BPP; a_s = 0;
+        } else if (bpp == 4 || bpp == 2 || bpp == 1) {
+            a_b = bpp; a_s = 0;
         }
     }
     
@@ -303,30 +304,33 @@ static void unpack_rect_cpu(WagnosticState *s, uint8_t* vram, uint32_t* dst, int
         for (int x = rx; x < rx + rw; x++) {
             uint32_t idx = y * W + x;
             uint64_t px = 0;
-            if (BPP == 64) px = ((uint64_t*)vram)[idx];
-            else if (BPP == 32) px = ((uint32_t*)vram)[idx];
-            else if (BPP == 24) {
+            uint32_t bpp = s ? s->bpp : 32;
+            if (bpp == 64) px = ((uint64_t*)vram)[idx];
+            else if (bpp == 32) px = ((uint32_t*)vram)[idx];
+            else if (bpp == 24) {
                 uint8_t *p = vram + idx * 3;
                 px = p[0] | (p[1] << 8) | (p[2] << 16);
             }
-            else if (BPP == 16) px = ((uint16_t*)vram)[idx];
-            else if (BPP == 8) px = vram[idx];
-            else if (BPP == 4) {
+            else if (bpp == 16) px = ((uint16_t*)vram)[idx];
+            else if (bpp == 8) px = vram[idx];
+            else if (bpp == 4) {
                 uint8_t b_val = vram[idx / 2];
                 px = (idx % 2 == 0) ? (b_val >> 4) : (b_val & 0x0F);
             }
-            else if (BPP == 2) {
+            else if (bpp == 2) {
                 uint8_t b_val = vram[idx / 4];
                 px = (b_val >> (6 - (idx % 4) * 2)) & 0x03;
             }
-            else if (BPP == 1) {
+            else if (bpp == 1) {
                 uint8_t b_val = vram[idx / 8];
                 px = (b_val >> (7 - (idx % 8))) & 1;
             }
 
             uint32_t r = 0, g = 0, b = 0, a = 255;
             if (is_grayscale) {
-                uint32_t lum = (uint32_t)(((px >> a_s) & ((1ULL << a_b) - 1)) * 255 / ((1ULL << a_b) - 1));
+                uint32_t lum = 0;
+                if (a_b > 0) lum = (uint32_t)(((px >> a_s) & ((1ULL << a_b) - 1)) * 255 / ((1ULL << a_b) - 1));
+                else lum = px ? 255 : 0;
                 r = g = b = lum;
                 a = 255;
             } else {
