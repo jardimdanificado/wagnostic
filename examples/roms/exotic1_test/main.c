@@ -1,13 +1,9 @@
+typedef struct { int x, y, w, h; } Rect;
 #include <stdint.h>
 
 #define WASM_EXPORT __attribute__((visibility("default")))
 
-typedef struct { int x, y, w, h; } Rect;
 
-static struct {
-    uint32_t count;
-    Rect rects[32];
-} my_dirty_list;
 
 typedef struct {
     uint32_t width, height, scale;
@@ -30,9 +26,10 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
-    uint32_t is_signed, is_float, is_shared_exponent;
-    uint8_t reserved[504];
+    uint8_t reserved[516];
 } WagnosticState;
+
+static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
 
 static struct {
     WagnosticState s;
@@ -63,7 +60,8 @@ WASM_EXPORT int wupdate() {
     if (!initialized) {
         rom.s.width = 320;
         rom.s.height = 240;
-                rom.s.scale = 2;
+        
+        rom.s.scale = 2;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
         
         rom.s.r_bits = 5; rom.s.r_shift = 11;

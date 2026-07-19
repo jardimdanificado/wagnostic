@@ -1,11 +1,7 @@
+typedef struct { int x, y, w, h; } Rect;
 #include <stdint.h>
 
-typedef struct { int x, y, w, h; } Rect;
 
-static struct {
-    uint32_t count;
-    Rect rects[32];
-} my_dirty_list;
 
 typedef struct {
     uint32_t width, height, scale;
@@ -28,30 +24,10 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
-    uint32_t is_signed, is_float, is_shared_exponent;
-    uint8_t reserved[504];
+    uint8_t reserved[516];
 } State;
 
-static void SET_BPP(State* s, int bpp) {
-    if (bpp == 32) {
-        s->a_bits = 8; s->a_shift = 24; s->b_bits = 8; s->b_shift = 16;
-        s->g_bits = 8; s->g_shift = 8;  s->r_bits = 8; s->r_shift = 0;
-    } else if (bpp == 24) {
-        s->a_bits = 0; s->a_shift = 0;  s->b_bits = 8; s->b_shift = 16;
-        s->g_bits = 8; s->g_shift = 8;  s->r_bits = 8; s->r_shift = 0;
-    } else if (bpp == 16) {
-        s->a_bits = 0; s->a_shift = 0;  s->r_bits = 5; s->r_shift = 11;
-        s->g_bits = 6; s->g_shift = 5;  s->b_bits = 5; s->b_shift = 0;
-    } else if (bpp == 8) {
-        s->a_bits = 0; s->a_shift = 0;  s->r_bits = 3; s->r_shift = 5;
-        s->g_bits = 3; s->g_shift = 2;  s->b_bits = 2; s->b_shift = 0;
-    } else if (bpp == 4 || bpp == 2 || bpp == 1) {
-        s->a_bits = bpp; s->a_shift = 0;
-        s->r_bits = 0; s->r_shift = 0;
-        s->g_bits = 0; s->g_shift = 0;
-        s->b_bits = 0; s->b_shift = 0;
-    }
-}
+static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
 
 static struct {
     State s;
@@ -82,7 +58,8 @@ int wupdate() {
     if (!initialized) {
         rom.s.width = 320;
         rom.s.height = 240;
-                rom.s.scale = 4;
+        
+        rom.s.scale = 4;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
         char* t = rom.s.title;
         const char* src = "Buttons & Mouse Test";
@@ -90,7 +67,6 @@ int wupdate() {
         while (src[i] && i < 127) { t[i] = src[i]; i++; }
         t[i] = '\0';
         initialized = 1;
-        SET_BPP(&rom.s, 16);
     }
 
     for (int i = 0; i < 320 * 240; i++) _fb[i] = W_RGB565(51, 51, 51);

@@ -113,16 +113,68 @@
     return new DataView(wasmMemory.buffer);
   }
 
+  function computeBpp(s) {
+    // Derive BPP from the highest (shift + bits) of any active channel.
+    // x_bits/x_shift are for padding/unused channels that still consume bits.
+    let maxBit = 0;
+    function check(bits, shift) {
+      if (bits > 0 && (shift + bits) > maxBit) maxBit = shift + bits;
+    }
+    check(s.rBits, s.rShift);
+    check(s.gBits, s.gShift);
+    check(s.bBits, s.bShift);
+    check(s.aBits, s.aShift);
+    check(s.xBits, s.xShift);
+    if (maxBit <= 0)  return 32;  // no channel info → assume 32bpp
+    if (maxBit <= 1)  return 1;
+    if (maxBit <= 2)  return 2;
+    if (maxBit <= 4)  return 4;
+    if (maxBit <= 8)  return 8;
+    if (maxBit <= 16) return 16;
+    if (maxBit <= 24) return 24;
+    return 32;
+  }
+
   function readGlobals() {
     if (!statePtr) return {};
     const mem = getMem();
     const ptr = statePtr;
 
+    // Layout (1024 bytes, no packing):
+    // +0   width      uint32
+    // +4   height     uint32
+    // +8   scale      uint32
+    // +12  title      char[128]
+    // +140 dirty_rects uint32  (WASM pointer to { uint32 count; Rect rects[32]; })
+    // +144 mouse_x    int32
+    // +148 mouse_y    int32
+    // +152 mouse_buttons uint32
+    // +156 mouse_wheel int32
+    // +160 keys       uint8[256]
+    // +416 gamepad_buttons uint32
+    // +420 ticks      uint32
+    // +424 target_fps uint32
+    // +428 audio_size uint32
+    // +432 audio_sample_rate uint32
+    // +436 audio_bpp  uint32
+    // +440 audio_channels uint32
+    // +444 audio_write uint32
+    // +448 audio_read uint32
+    // +452 audio_underrun uint32
+    // +456 audio_overrun uint32
+    // +460 vram_offset uint32
+    // +464 audio_buffer_offset uint32
+    // +468 r_bits uint32  +472 r_shift uint32
+    // +476 g_bits uint32  +480 g_shift uint32
+    // +484 b_bits uint32  +488 b_shift uint32
+    // +492 a_bits uint32  +496 a_shift uint32
+    // +500 x_bits uint32  +504 x_shift uint32
+    // +508 reserved[516]
     let s = {
       w:               mem.getUint32(ptr + 0, true),
       h:               mem.getUint32(ptr + 4, true),
       scale:           mem.getUint32(ptr + 8, true),
-      dirtyRects:      mem.getUint32(ptr + 140, true),
+      dirtyRectsPtr:   mem.getUint32(ptr + 140, true),
       mouseX:          mem.getInt32(ptr + 144, true),
       mouseY:          mem.getInt32(ptr + 148, true),
       mouseButtons:    mem.getUint32(ptr + 152, true),
@@ -150,37 +202,32 @@
       aShift:          mem.getUint32(ptr + 496, true),
       xBits:           mem.getUint32(ptr + 500, true),
       xShift:          mem.getUint32(ptr + 504, true),
-      isSigned:        mem.getUint32(ptr + 508, true),
-      isFloat:         mem.getUint32(ptr + 512, true),
-      isSharedExp:     mem.getUint32(ptr + 516, true)
     };
 
-    let max_bit = 0;
-    if (s.rBits && s.rShift + s.rBits > max_bit) max_bit = s.rShift + s.rBits;
-    if (s.gBits && s.gShift + s.gBits > max_bit) max_bit = s.gShift + s.gBits;
-    if (s.bBits && s.bShift + s.bBits > max_bit) max_bit = s.bShift + s.bBits;
-    if (s.aBits && s.aShift + s.aBits > max_bit) max_bit = s.aShift + s.aBits;
-    if (s.xBits && s.xShift + s.xBits > max_bit) max_bit = s.xShift + s.xBits;
-    
-    let bpp = 256;
-    if (max_bit <= 1) bpp = 1;
-    else if (max_bit <= 2) bpp = 2;
-    else if (max_bit <= 4) bpp = 4;
-    else if (max_bit <= 8) bpp = 8;
-    else if (max_bit <= 16) bpp = 16;
-    else if (max_bit <= 24) bpp = 24;
-    else if (max_bit <= 32) bpp = 32;
-    else if (max_bit <= 64) bpp = 64;
-    else if (max_bit <= 128) bpp = 128;
-    else bpp = 256;
-    s.bpp = bpp;
+    // Derive BPP from channel info
+    s.bpp = computeBpp(s);
 
+    // If no channel bits set, fill in defaults based on computed BPP
+    if (!s.rBits && !s.gBits && !s.bBits && !s.aBits && !s.xBits) {
+        if (s.bpp === 32) {
+            s.aBits = 8; s.aShift = 24; s.bBits = 8; s.bShift = 16; s.gBits = 8; s.gShift = 8; s.rBits = 8; s.rShift = 0;
+        } else if (s.bpp === 24) {
+            s.bBits = 8; s.bShift = 16; s.gBits = 8; s.gShift = 8; s.rBits = 8; s.rShift = 0;
+        } else if (s.bpp === 16) {
+            s.rBits = 5; s.rShift = 11; s.gBits = 6; s.gShift = 5; s.bBits = 5; s.bShift = 0;
+        } else if (s.bpp === 8) {
+            s.rBits = 3; s.rShift = 5; s.gBits = 3; s.gShift = 2; s.bBits = 2; s.bShift = 0;
+        } else if (s.bpp === 4 || s.bpp === 2 || s.bpp === 1) {
+            s.aBits = s.bpp; s.aShift = 0;
+        }
+    }
     return s;
   }
 
   function readTitle() {
     if (!statePtr) return '(untitled)';
-    const u8 = new Uint8Array(wasmMemory.buffer, statePtr + 16, TITLE_MAX);
+    // title starts at offset +12
+    const u8 = new Uint8Array(wasmMemory.buffer, statePtr + 12, TITLE_MAX);
     let end = 0;
     while (end < TITLE_MAX && u8[end] !== 0) end++;
     return new TextDecoder().decode(u8.subarray(0, end));
@@ -208,229 +255,108 @@
     prevScale  = scale;
   }
 
-
-
-  const floatBuffer = new ArrayBuffer(8);
-  const floatBufferU32 = new Uint32Array(floatBuffer);
-  const floatBufferU64 = new BigUint64Array(floatBuffer);
-  const floatBufferF32 = new Float32Array(floatBuffer);
-  const floatBufferF64 = new Float64Array(floatBuffer);
-
-  // Float16 decode helper
-  function decodeFloat16(binary) {
-      let sign = (binary & 0x8000) ? -1 : 1;
-      let exp = (binary & 0x7C00) >> 10;
-      let frac = binary & 0x03FF;
-      if (exp === 0) {
-          if (frac === 0) return 0;
-          return sign * Math.pow(2, -14) * (frac / 1024);
-      } else if (exp === 0x1F) {
-          return frac === 0 ? sign * Infinity : NaN;
-      }
-      return sign * Math.pow(2, exp - 15) * (1 + frac / 1024);
-  }
-  
-  // Shared Exponent decode helper (RGB9E5)
-  function decodeSharedExp(val, bits, shift, totalExp) {
-      let mantissa = Number((val >> BigInt(shift)) & ((1n << BigInt(bits)) - 1n));
-      let exp = totalExp - 15;
-      let norm = mantissa / Number((1n << BigInt(bits)) - 1n);
-      return norm * Math.pow(2, exp);
-  }
-
-  function unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch, rb, rs, gb, gs, bb, bs, ab, ash, isGrayscale, isSigned, isFloat, isSharedExp) {
+  function unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch, rb, rs, gb, gs, bb, bs, ab, ash, isGrayscale) {
     const mem = getMem();
-    const bppBytes = bpp >> 3;
-    
-    // FAST PATH: standard 32bpp (ABGR8888 or RGBA8888 depending on endianness)
-    if (bpp === 32 && !isFloat && !isSigned && !isSharedExp && rb === 8 && gb === 8 && bb === 8) {
-      const u32Mem = new Uint32Array(wasmMemory.buffer);
-      const vramU32 = vramPtr >>> 2;
-      for (let row = 0; row < ch; row++) {
-        let srcIdx = vramU32 + (cy + row) * w + cx;
-        let dstIdx = row * cw;
-        for (let col = 0; col < cw; col++) {
-           let p = u32Mem[srcIdx++];
-           if (ab === 0) p |= 0xFF000000;
-           u32[dstIdx++] = p;
-        }
-      }
-      return;
-    }
-    
-    // FAST PATH: standard 16bpp (RGB565)
-    if (bpp === 16 && !isFloat && !isSigned && !isSharedExp && rb === 5 && rs === 11 && gb === 6 && gs === 5 && bb === 5 && bs === 0 && ab === 0) {
-      const u16Mem = new Uint16Array(wasmMemory.buffer);
-      const vramU16 = vramPtr >>> 1;
-      for (let row = 0; row < ch; row++) {
-        let srcIdx = vramU16 + (cy + row) * w + cx;
-        let dstIdx = row * cw;
-        for (let col = 0; col < cw; col++) {
-           let p = u16Mem[srcIdx++];
-           let r = ((p >> 11) & 0x1F) * 255 / 31;
-           let g = ((p >> 5) & 0x3F) * 255 / 63;
-           let b = (p & 0x1F) * 255 / 31;
-           u32[dstIdx++] = (255 << 24) | (b << 16) | (g << 8) | r;
-        }
-      }
-      return;
-    }
-    
-    function extractChannel(px, px2, px3, px4, bits, shift) {
-        if (bits === 0) return 0;
-        let val = 0n;
-        if (shift < 64) {
-            val = (px >> BigInt(shift)) & ((1n << BigInt(bits)) - 1n);
-        } else if (shift < 128) {
-            val = (px2 >> BigInt(shift - 64)) & ((1n << BigInt(bits)) - 1n);
-        } else if (shift < 192) {
-            val = (px3 >> BigInt(shift - 128)) & ((1n << BigInt(bits)) - 1n);
-        } else {
-            val = (px4 >> BigInt(shift - 192)) & ((1n << BigInt(bits)) - 1n);
-        }
-        
-        if (isSharedExp) {
-            let sharedExp = Number((px >> BigInt(ash)) & ((1n << BigInt(ab)) - 1n));
-            let floatVal = decodeSharedExp(px, bits, shift, sharedExp);
-            return Math.max(0, Math.min(255, floatVal * 255)) | 0;
-        }
-        
-        if (isFloat) {
-            let f = 0.0;
-            if (bits === 16) f = decodeFloat16(Number(val));
-            else if (bits === 32) {
-                floatBufferU32[0] = Number(val);
-                f = floatBufferF32[0];
-            }
-            else if (bits === 64) {
-                floatBufferU64[0] = val;
-                f = floatBufferF64[0];
-            }
-            return Math.max(0, Math.min(255, f * 255)) | 0;
-        }
-        
-        if (isSigned) {
-            let maxVal = (1n << BigInt(bits - 1)) - 1n;
-            let signBit = (val >> BigInt(bits - 1)) & 1n;
-            let sVal = val;
-            if (signBit) {
-                sVal = val - (1n << BigInt(bits));
-            }
-            let mapped = Number(sVal) * 255 / Number(maxVal);
-            if (mapped < 0) mapped = 0;
-            return mapped | 0;
-        }
-        
-        // Default Unsigned Normalized (UNORM)
-        let maxVal = (1n << BigInt(bits)) - 1n;
-        return Number(val) * 255 / Number(maxVal) | 0;
-    }
-
-    // FALLBACK PATH: generic bit extraction
     for (let row = 0; row < ch; row++) {
       const dstOff = row * cw;
       for (let col = 0; col < cw; col++) {
         const idx = (cy + row) * w + (cx + col);
-        let px = 0n, px2 = 0n, px3 = 0n, px4 = 0n;
-        const off = vramPtr + idx * bppBytes;
-        
-        if (bpp === 256) {
-          px = mem.getBigUint64(off, true);
-          px2 = mem.getBigUint64(off + 8, true);
-          px3 = mem.getBigUint64(off + 16, true);
-          px4 = mem.getBigUint64(off + 24, true);
-        } else if (bpp === 128) {
-          px = mem.getBigUint64(off, true);
-          px2 = mem.getBigUint64(off + 8, true);
-        } else if (bpp === 96) {
-          px = mem.getBigUint64(off, true);
-          px2 = BigInt(mem.getUint32(off + 8, true));
-        } else if (bpp === 64) {
-          px = mem.getBigUint64(off, true);
-        } else if (bpp === 32) {
-          px = BigInt(mem.getUint32(off, true));
-        } else if (bpp === 24) {
-          px = BigInt(mem.getUint8(off) | (mem.getUint8(off + 1) << 8) | (mem.getUint8(off + 2) << 16));
-        } else if (bpp === 16) {
-          px = BigInt(mem.getUint16(off, true));
-        } else if (bpp === 8) {
-          px = BigInt(mem.getUint8(off));
-        } else if (bpp === 4) {
-          const byte = mem.getUint8(vramPtr + Math.floor(idx / 2));
-          px = BigInt((idx % 2 === 0) ? (byte >> 4) : (byte & 0x0F));
-        } else if (bpp === 2) {
-          const byte = mem.getUint8(vramPtr + Math.floor(idx / 4));
-          px = BigInt((byte >> (6 - (idx % 4) * 2)) & 0x03);
-        } else if (bpp === 1) {
-          const byte = mem.getUint8(vramPtr + Math.floor(idx / 8));
-          px = BigInt((byte >> (7 - (idx % 8))) & 1);
+        let px = 0;
+        if (bpp === 64) px = mem.getBigUint64(vramPtr + idx * 8, true);
+        else if (bpp === 32) px = mem.getUint32(vramPtr + idx * 4, true);
+        else if (bpp === 24) {
+          px = mem.getUint8(vramPtr + idx * 3) | (mem.getUint8(vramPtr + idx * 3 + 1) << 8) | (mem.getUint8(vramPtr + idx * 3 + 2) << 16);
         }
+        else if (bpp === 16) px = mem.getUint16(vramPtr + idx * 2, true);
+        else if (bpp === 8) px = mem.getUint8(vramPtr + idx);
+        else if (bpp === 4) {
+          const byte = mem.getUint8(vramPtr + Math.floor(idx / 2));
+          px = (idx % 2 === 0) ? (byte >> 4) : (byte & 0x0F);
+        }
+        else if (bpp === 2) {
+          const byte = mem.getUint8(vramPtr + Math.floor(idx / 4));
+          px = (byte >> (6 - (idx % 4) * 2)) & 0x03;
+        }
+        else if (bpp === 1) {
+          const byte = mem.getUint8(vramPtr + Math.floor(idx / 8));
+          px = (byte >> (7 - (idx % 8))) & 1;
+        }
+        
+        let val = (bpp === 64) ? BigInt(px) : Number(px);
 
         let r = 0, g = 0, b = 0, a = 255;
-        
         if (isGrayscale) {
             let lum = 0;
             if (ab > 0) {
-                lum = extractChannel(px, px2, px3, px4, ab, ash);
+                if (bpp === 64) lum = Number((val >> BigInt(ash)) & ((1n << BigInt(ab)) - 1n));
+                else lum = (val >> ash) & ((1 << ab) - 1);
+                lum = (lum * 255 / ((1 << ab) - 1)) | 0;
             } else {
-                lum = px ? 255 : 0;
+                lum = val ? 255 : 0;
             }
             r = g = b = lum;
             a = 255;
         } else {
-            r = extractChannel(px, px2, px3, px4, rb, rs);
-            g = extractChannel(px, px2, px3, px4, gb, gs);
-            b = extractChannel(px, px2, px3, px4, bb, bs);
-            if (ab > 0 && !isSharedExp) {
-                a = extractChannel(px, px2, px3, px4, ab, ash);
+            if (bpp === 64) {
+                if (rb) r = Number((val >> BigInt(rs)) & ((1n << BigInt(rb)) - 1n)) * 255 / ((1 << rb) - 1) | 0;
+                if (gb) g = Number((val >> BigInt(gs)) & ((1n << BigInt(gb)) - 1n)) * 255 / ((1 << gb) - 1) | 0;
+                if (bb) b = Number((val >> BigInt(bs)) & ((1n << BigInt(bb)) - 1n)) * 255 / ((1 << bb) - 1) | 0;
+                if (ab) a = Number((val >> BigInt(ash)) & ((1n << BigInt(ab)) - 1n)) * 255 / ((1 << ab) - 1) | 0;
+            } else {
+                if (rb) r = ((val >> rs) & ((1 << rb) - 1)) * 255 / ((1 << rb) - 1) | 0;
+                if (gb) g = ((val >> gs) & ((1 << gb) - 1)) * 255 / ((1 << gb) - 1) | 0;
+                if (bb) b = ((val >> bs) & ((1 << bb) - 1)) * 255 / ((1 << bb) - 1) | 0;
+                if (ab) a = ((val >> ash) & ((1 << ab) - 1)) * 255 / ((1 << ab) - 1) | 0;
             }
         }
-        
         u32[dstOff + col] = (a << 24) | (b << 16) | (g << 8) | r;
       }
     }
   }
-function renderFullFrame(state, w, h, bpp, vramPtr) {
+
+  function renderFullFrame(state, w, h, bpp, vramPtr) {
     const isGrayscale = (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits > 0) || 
                         (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits === 0 && bpp < 8);
     let ab = state.aBits > 0 ? state.aBits : (bpp < 8 ? bpp : 0);
     const u32 = new Uint32Array(imageData.data.buffer);
-    unpackPixelsToImageData(w, h, bpp, vramPtr, imageData.data, u32, 0, 0, w, h, state.rBits, state.rShift, state.gBits, state.gShift, state.bBits, state.bShift, ab, state.aShift, isGrayscale, state.isSigned, state.isFloat, state.isSharedExp);
+    unpackPixelsToImageData(w, h, bpp, vramPtr, imageData.data, u32, 0, 0, w, h, state.rBits, state.rShift, state.gBits, state.gShift, state.bBits, state.bShift, ab, state.aShift, isGrayscale);
     ctx.putImageData(imageData, 0, 0);
   }
 
-  function renderDirtyRects(state, w, h, bpp, vramPtr, dirtyRectsOffset) {
+  function renderDirtyRects(state, w, h, bpp, vramPtr, dirtyRectsWasmPtr) {
+    // dirtyRectsWasmPtr points to: { uint32 count; Rect rects[32]; }
+    // where Rect = { int32 x, y, w, h; } (16 bytes each)
+    if (!dirtyRectsWasmPtr) return;
+    const mem = getMem();
+    const dirtyCount = mem.getUint32(dirtyRectsWasmPtr, true);
+    if (dirtyCount === 0) return;
+
     const isGrayscale = (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits > 0) || 
                         (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits === 0 && bpp < 8);
     let ab = state.aBits > 0 ? state.aBits : (bpp < 8 ? bpp : 0);
-    const bppBytes = bpp >> 3;
-    
-    if (dirtyRectsOffset === 0) {
-        renderFullFrame(state, w, h, bpp, vramPtr);
-        return;
-    }
-    
-    const memView = new DataView(wasmMemory.buffer);
-    const count = memView.getUint32(dirtyRectsOffset, true);
-    const rectsPtr = dirtyRectsOffset + 4;
-    
+    // Rects start at offset +4 in the dirty list struct
+    const rectsBase = dirtyRectsWasmPtr + 4;
+    const count = Math.min(dirtyCount, MAX_DIRTY_RECTS);
+
     const isFullScreen = count === 1 &&
-      memView.getInt32(rectsPtr + 0, true) === 0 &&
-      memView.getInt32(rectsPtr + 4, true) === 0 &&
-      memView.getInt32(rectsPtr + 8, true) === w &&
-      memView.getInt32(rectsPtr + 12, true) === h;
+      mem.getInt32(rectsBase + 0, true) === 0 &&
+      mem.getInt32(rectsBase + 4, true) === 0 &&
+      mem.getInt32(rectsBase + 8, true) === w &&
+      mem.getInt32(rectsBase + 12, true) === h;
 
     if (isFullScreen) {
       renderFullFrame(state, w, h, bpp, vramPtr);
+      // Clear the pointer so we don't render again next frame
+      getMem().setUint32(statePtr + 140, 0, true);
       return;
     }
 
     for (let r = 0; r < count; r++) {
-      const off = rectsPtr + r * RECT_STRIDE;
-      const rx = memView.getInt32(off, true);
-      const ry = memView.getInt32(off + 4, true);
-      const rw = memView.getInt32(off + 8, true);
-      const rh = memView.getInt32(off + 12, true);
+      const off = rectsBase + r * RECT_STRIDE;
+      const rx = mem.getInt32(off + 0, true);
+      const ry = mem.getInt32(off + 4, true);
+      const rw = mem.getInt32(off + 8, true);
+      const rh = mem.getInt32(off + 12, true);
 
       let cx = rx, cy = ry, cw = rw, ch = rh;
       if (cx < 0) { cw += cx; cx = 0; }
@@ -443,9 +369,11 @@ function renderFullFrame(state, w, h, bpp, vramPtr) {
       const pixels = rectData.data;
       const u32 = new Uint32Array(pixels.buffer);
 
-      unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch, state.rBits, state.rShift, state.gBits, state.gShift, state.bBits, state.bShift, ab, state.aShift, isGrayscale, state.isSigned, state.isFloat, state.isSharedExp);
+      unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch, state.rBits, state.rShift, state.gBits, state.gShift, state.bBits, state.bShift, ab, state.aShift, isGrayscale);
       ctx.putImageData(rectData, cx, cy);
     }
+    // Clear the dirty rects pointer
+    getMem().setUint32(statePtr + 140, 0, true);
   }
 
 
@@ -459,7 +387,7 @@ function renderFullFrame(state, w, h, bpp, vramPtr) {
     mem.setInt32(ptr + 148, mouseY, true);
     mem.setUint32(ptr + 152, mouseButtons, true);
     mem.setInt32(ptr + 156, mouseWheel, true);
-    
+
     const keysMem = new Uint8Array(wasmMemory.buffer, ptr + 160, KEYS_COUNT);
     keysMem.set(keysDown);
 
@@ -685,9 +613,9 @@ function renderFullFrame(state, w, h, bpp, vramPtr) {
       }
 
       if (statePtr) {
-        memView.setUint32(statePtr + 448, readPtr, true);
+        memView.setUint32(statePtr + 964, readPtr, true);
         if (underrun) {
-          const uOff = statePtr + 452;
+          const uOff = statePtr + 968;
           memView.setUint32(uOff, memView.getUint32(uOff, true) + 1, true);
         }
       }
@@ -745,9 +673,9 @@ function renderFullFrame(state, w, h, bpp, vramPtr) {
       }
     }
 
-    // 4. Render dirty rects
-    if (g.dirtyRects !== 0) {
-      renderDirtyRects(g, w, h, bpp, statePtr + g.vramOffset, g.dirtyRects);
+    // 4. Render dirty rects (via pointer)
+    if (g.dirtyRectsPtr) {
+      renderDirtyRects(g, w, h, bpp, statePtr + g.vramOffset, g.dirtyRectsPtr);
     }
     
 

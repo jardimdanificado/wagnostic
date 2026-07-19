@@ -1,13 +1,9 @@
+typedef struct { int x, y, w, h; } Rect;
 // display_test — Tests all video modes and dirty rectangles
 
 #include <stdint.h>
 
-typedef struct { int x, y, w, h; } Rect;
 
-static struct {
-    uint32_t count;
-    Rect rects[32];
-} my_dirty_list;
 
 typedef struct {
     uint32_t width, height, scale;
@@ -30,30 +26,10 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
-    uint32_t is_signed, is_float, is_shared_exponent;
-    uint8_t reserved[504];
+    uint8_t reserved[516];
 } State;
 
-static void SET_BPP(State* s, int bpp) {
-    if (bpp == 32) {
-        s->a_bits = 8; s->a_shift = 24; s->b_bits = 8; s->b_shift = 16;
-        s->g_bits = 8; s->g_shift = 8;  s->r_bits = 8; s->r_shift = 0;
-    } else if (bpp == 24) {
-        s->a_bits = 0; s->a_shift = 0;  s->b_bits = 8; s->b_shift = 16;
-        s->g_bits = 8; s->g_shift = 8;  s->r_bits = 8; s->r_shift = 0;
-    } else if (bpp == 16) {
-        s->a_bits = 0; s->a_shift = 0;  s->r_bits = 5; s->r_shift = 11;
-        s->g_bits = 6; s->g_shift = 5;  s->b_bits = 5; s->b_shift = 0;
-    } else if (bpp == 8) {
-        s->a_bits = 0; s->a_shift = 0;  s->r_bits = 3; s->r_shift = 5;
-        s->g_bits = 3; s->g_shift = 2;  s->b_bits = 2; s->b_shift = 0;
-    } else if (bpp == 4 || bpp == 2 || bpp == 1) {
-        s->a_bits = bpp; s->a_shift = 0;
-        s->r_bits = 0; s->r_shift = 0;
-        s->g_bits = 0; s->g_shift = 0;
-        s->b_bits = 0; s->b_shift = 0;
-    }
-}
+static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
 
 static struct {
     State s;
@@ -156,7 +132,8 @@ int wupdate() {
     if (!initialized) {
         rom.s.width = 320;
         rom.s.height = 240;
-                rom.s.scale = 2;
+        
+        rom.s.scale = 2;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
         char* t = rom.s.title;
         const char* src = "Display Test - 16bpp";
@@ -164,7 +141,6 @@ int wupdate() {
         while (src[i] && i < 127) { t[i] = src[i]; i++; }
         t[i] = '\0';
         initialized = 1;
-        SET_BPP(&rom.s, current_bpp);
     }
 
     frame_phase++;
@@ -209,18 +185,17 @@ int wupdate() {
     r_was_down = r_down;
 
     int k1 = rom.s.keys[30];
-    if (k1 && !key1_was_down) { current_bpp = 8; SET_BPP(&rom.s, current_bpp); }
+    if (k1 && !key1_was_down) current_bpp = 8;
     key1_was_down = k1;
 
     int k2 = rom.s.keys[31];
-    if (k2 && !key2_was_down) { current_bpp = 16; SET_BPP(&rom.s, current_bpp); }
+    if (k2 && !key2_was_down) current_bpp = 16;
     key2_was_down = k2;
 
     int k3 = rom.s.keys[32];
-    if (k3 && !key3_was_down) { current_bpp = 32; SET_BPP(&rom.s, current_bpp); }
+    if (k3 && !key3_was_down) current_bpp = 32;
     key3_was_down = k3;
 
-    // 
 
     clear_screen(32, 32, 32);
     draw_color_bars();

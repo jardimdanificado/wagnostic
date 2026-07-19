@@ -1,3 +1,4 @@
+typedef struct { int x, y, w, h; } Rect;
 // audio_mp3 — embedded MP3 decoder (dr_mp3) playing a sine tone
 
 #include <stdint.h>
@@ -7,12 +8,7 @@
 #include "../audio_common/decoders/dr_mp3.h"
 #include "data/audio.h"
 
-typedef struct { int x, y, w, h; } Rect;
 
-static struct {
-    uint32_t count;
-    Rect rects[32];
-} my_dirty_list;
 
 typedef struct {
     uint32_t width, height, scale;
@@ -35,30 +31,10 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
-    uint32_t is_signed, is_float, is_shared_exponent;
-    uint8_t reserved[504];
+    uint8_t reserved[516];
 } State;
 
-static void SET_BPP(State* s, int bpp) {
-    if (bpp == 32) {
-        s->a_bits = 8; s->a_shift = 24; s->b_bits = 8; s->b_shift = 16;
-        s->g_bits = 8; s->g_shift = 8;  s->r_bits = 8; s->r_shift = 0;
-    } else if (bpp == 24) {
-        s->a_bits = 0; s->a_shift = 0;  s->b_bits = 8; s->b_shift = 16;
-        s->g_bits = 8; s->g_shift = 8;  s->r_bits = 8; s->r_shift = 0;
-    } else if (bpp == 16) {
-        s->a_bits = 0; s->a_shift = 0;  s->r_bits = 5; s->r_shift = 11;
-        s->g_bits = 6; s->g_shift = 5;  s->b_bits = 5; s->b_shift = 0;
-    } else if (bpp == 8) {
-        s->a_bits = 0; s->a_shift = 0;  s->r_bits = 3; s->r_shift = 5;
-        s->g_bits = 3; s->g_shift = 2;  s->b_bits = 2; s->b_shift = 0;
-    } else if (bpp == 4 || bpp == 2 || bpp == 1) {
-        s->a_bits = bpp; s->a_shift = 0;
-        s->r_bits = 0; s->r_shift = 0;
-        s->g_bits = 0; s->g_shift = 0;
-        s->b_bits = 0; s->b_shift = 0;
-    }
-}
+static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
 
 static struct {
     State s;
@@ -187,7 +163,8 @@ int wupdate() {
     if (!initialized) {
         rom.s.width = 320;
         rom.s.height = 240;
-                rom.s.scale = 2;
+        
+        rom.s.scale = 2;
         rom.s.audio_size = 16384;
         rom.s.audio_sample_rate = 22050;
         rom.s.audio_bpp = 2;
@@ -201,7 +178,6 @@ int wupdate() {
         t[i] = '\0';
         init_audio();
         initialized = 1;
-        SET_BPP(&rom.s, 16);
     }
     if (rom.s.keys[41]) return 0;
     static int sp_was = 0;

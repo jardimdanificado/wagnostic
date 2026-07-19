@@ -30,47 +30,44 @@ typedef struct { int x, y, w, h; } Rect;
 typedef struct {
     uint32_t width;           // +0
     uint32_t height;          // +4
-    uint32_t scale;           // +8
-    char title[128];          // +12
-    uint32_t dirty_rects;     // +140
-    int32_t mouse_x;          // +144
-    int32_t mouse_y;          // +148
-    uint32_t mouse_buttons;   // +152
-    int32_t mouse_wheel;      // +156
-    uint8_t keys[256];        // +160
-    uint32_t gamepad_buttons; // +416
-    uint32_t ticks;           // +420
-    uint32_t target_fps;      // +424
-    uint32_t audio_size;      // +428
-    uint32_t audio_sample_rate; // +432
-    uint32_t audio_bpp;       // +436
-    uint32_t audio_channels;  // +440
-    uint32_t audio_write;     // +444
-    uint32_t audio_read;      // +448
-    uint32_t audio_underrun;  // +452
-    uint32_t audio_overrun;   // +456
-    uint32_t vram_offset;     // +460
-    uint32_t audio_buffer_offset; // +464
-    uint32_t r_bits;          // +468
-    uint32_t r_shift;         // +472
-    uint32_t g_bits;          // +476
-    uint32_t g_shift;         // +480
-    uint32_t b_bits;          // +484
-    uint32_t b_shift;         // +488
-    uint32_t a_bits;          // +492
-    uint32_t a_shift;         // +496
-    uint32_t x_bits;          // +500
-    uint32_t x_shift;         // +504
-    uint8_t is_signed;        // +508
-    uint8_t is_float;         // +509
-    uint8_t is_shared_exponent; // +510
-    uint8_t format_padding;   // +511
-    uint8_t reserved[512];    // +512
+    uint32_t bpp;             // +8
+    uint32_t scale;           // +12
+    char title[128];          // +16
+    uint32_t dirty_count;     // +144
+    Rect dirty_rects[32];     // +148
+    int32_t mouse_x;          // +660
+    int32_t mouse_y;          // +664
+    uint32_t mouse_buttons;   // +668
+    int32_t mouse_wheel;      // +672
+    uint8_t keys[256];        // +676
+    uint32_t gamepad_buttons; // +932
+    uint32_t ticks;           // +936
+    uint32_t target_fps;      // +940
+    uint32_t audio_size;      // +944
+    uint32_t audio_sample_rate; // +948
+    uint32_t audio_bpp;       // +952
+    uint32_t audio_channels;  // +956
+    uint32_t audio_write;     // +960
+    uint32_t audio_read;      // +964
+    uint32_t audio_underrun;  // +968
+    uint32_t audio_overrun;   // +972
+    uint32_t vram_offset;     // +976
+    uint32_t audio_buffer_offset; // +980
+    uint32_t r_bits;          // +984
+    uint32_t r_shift;         // +988
+    uint32_t g_bits;          // +992
+    uint32_t g_shift;         // +996
+    uint32_t b_bits;          // +1000
+    uint32_t b_shift;         // +1004
+    uint32_t a_bits;          // +1008
+    uint32_t a_shift;         // +1012
+    uint8_t reserved[8];      // +1016
 } WagnosticState;  // size = 1024
 ```
 
 ### Screen
 - `width`, `height`, `scale` (uint32)
+- `bpp` (uint32) - Bits per pixel. Defaults to `32` (RGBA8888) if `0` or omitted.
 - `title` (char[128])
 
 ### VRAM
@@ -89,20 +86,14 @@ The host reads VRAM at `(uint8_t*)state + vram_offset`.
 ## 5. Video Formats
 
 Wagnostic uses **Dynamic Bitfield Pixel Formats**.
-Instead of predefined formats (like RGB565) or indexed color palettes, the Host decodes pixels using the `r_bits`/`r_shift`, `g_bits`/`g_shift`, `b_bits`/`b_shift`, `a_bits`/`a_shift`, and `x_bits`/`x_shift` fields.
-
-Wagnostic computes the pixel size (stride) automatically in real-time by finding the `MAX(shift + bits)` of all 5 channels. The developer has total freedom to specify overlapping bits, empty padding bits (`x`), and the engine handles reading the exact memory footprint naturally without assumptions.
-
-Additionally, three flags control the data type interpretation of these bits:
-- `is_signed` (uint8): If `1`, the bits are interpreted as two's complement signed normalized integers (e.g., SNORM).
-- `is_float` (uint8): If `1`, the bits are decoded as IEEE 754 floating point numbers (16-bit half, 32-bit single, or 64-bit double).
-- `is_shared_exponent` (uint8): If `1`, the alpha channel bits (`a_bits`/`a_shift`) are treated as a shared exponent applied to the RGB mantissas (e.g., RGB9E5).
+The bit depths can be any valid power of 2: **1, 2, 4, 8, 16, 24, 32, 64**.
+Instead of predefined formats (like RGB565) or indexed color palettes, the Host decodes pixels using the `r_bits`/`r_shift`, `g_bits`/`g_shift`, `b_bits`/`b_shift`, and `a_bits`/`a_shift` fields.
+The fields indicate how many bits each channel occupies and how far left they are shifted in the pixel integer.
 If `r_bits`, `g_bits`, and `b_bits` are all `0`, but `a_bits > 0`, the format is treated as **Grayscale / Luminance**, where the Alpha channel is replicated into R, G, and B.
 
 ### Dirty Rectangles
-- `dirty_rects` (uint32) — Pointer offset (relative to base) to an external array of Rects.
-  - If `dirty_rects == 0`, the host will perform a **Full Redraw** of the entire screen.
-  - If `dirty_rects > 0`, the host reads `(uint32_t)count` at that offset, followed by `count` structs of `Rect { int32_t x, y, w, h }` (16 bytes each).
+- `dirty_count` (uint32) — 0=nothing, N=render N rects
+- `dirty_rects` (Rect[32]) — `{ int x, y, w, h; }`, 16 bytes each
 
 ### Input
 - `mouse_x`, `mouse_y` (int32)
@@ -125,6 +116,7 @@ If `r_bits`, `g_bits`, and `b_bits` are all `0`, but `a_bits > 0`, the format is
 |------|------|-------------|
 | `width` | `uint32` | Screen width in pixels |
 | `height` | `uint32` | Screen height in pixels |
+| `bpp` | `uint32` | Bits per pixel (1, 2, 4, 8, 16, 24, 32, or 64) |
 | `scale` | `uint32` | Window scale factor |
 | `title` | `char[128]` | Window title |
 
@@ -222,9 +214,10 @@ depend on them for logic.
 typedef struct { int x, y, w, h; } Rect;
 
 typedef struct {
-    uint32_t width, height, scale;
+    uint32_t width, height, bpp, scale;
     char title[128];
-    uint32_t dirty_rects;
+    uint32_t dirty_count;
+    Rect dirty_rects[32];
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
     int32_t mouse_wheel;
@@ -236,14 +229,15 @@ typedef struct {
     uint32_t audio_write, audio_read;
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
-    uint32_t audio_buffer_offset;
-    uint32_t r_bits, r_shift;
-    uint32_t g_bits, g_shift;
-    uint32_t b_bits, b_shift;
-    uint32_t a_bits, a_shift;
-    uint32_t x_bits, x_shift;
-    uint32_t is_signed, is_float, is_shared_exponent;
-    uint8_t reserved[504];
+    uint32_t r_bits;
+    uint32_t r_shift;
+    uint32_t g_bits;
+    uint32_t g_shift;
+    uint32_t b_bits;
+    uint32_t b_shift;
+    uint32_t a_bits;
+    uint32_t a_shift;
+    uint8_t reserved[8];
 } State;
 
 static struct {
@@ -255,14 +249,13 @@ int wupdate() {
     if (rom.s.width == 0) {
         rom.s.width = 320;
         rom.s.height = 240;
-        rom.s.r_bits = 5; rom.s.r_shift = 11;
-        rom.s.g_bits = 6; rom.s.g_shift = 5;
-        rom.s.b_bits = 5; rom.s.b_shift = 0;
+        rom.s.bpp = 16;
         rom.s.vram_offset = sizeof(State);
     }
     uint16_t* vram = (uint16_t*)((uint8_t*)&rom.s + rom.s.vram_offset);
     vram[rom.s.mouse_y * rom.s.width + rom.s.mouse_x] = 0xF800;
-    rom.s.dirty_rects = 0; // 0 = Full redraw
+    rom.s.dirty_count = 1;
+    rom.s.dirty_rects[0] = (Rect){0, 0, 320, 240};
     return (int)&rom.s;
 }
 ```
