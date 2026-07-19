@@ -150,9 +150,9 @@
       aShift:          mem.getUint32(ptr + 496, true),
       xBits:           mem.getUint32(ptr + 500, true),
       xShift:          mem.getUint32(ptr + 504, true),
-      isSigned:        mem.getUint8(ptr + 508),
-      isFloat:         mem.getUint8(ptr + 509),
-      isSharedExp:     mem.getUint8(ptr + 510)
+      isSigned:        mem.getUint32(ptr + 508, true),
+      isFloat:         mem.getUint32(ptr + 512, true),
+      isSharedExp:     mem.getUint32(ptr + 516, true)
     };
 
     let max_bit = 0;
@@ -208,38 +208,130 @@
     prevScale  = scale;
   }
 
-function unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch, rb, rs, gb, gs, bb, bs, ab, ash, isGrayscale, isSigned, isFloat, isSharedExp) {
+
+
+  const floatBuffer = new ArrayBuffer(8);
+  const floatBufferU32 = new Uint32Array(floatBuffer);
+  const floatBufferU64 = new BigUint64Array(floatBuffer);
+  const floatBufferF32 = new Float32Array(floatBuffer);
+  const floatBufferF64 = new Float64Array(floatBuffer);
+
+  // Float16 decode helper
+  function decodeFloat16(binary) {
+      let sign = (binary & 0x8000) ? -1 : 1;
+      let exp = (binary & 0x7C00) >> 10;
+      let frac = binary & 0x03FF;
+      if (exp === 0) {
+          if (frac === 0) return 0;
+          return sign * Math.pow(2, -14) * (frac / 1024);
+      } else if (exp === 0x1F) {
+          return frac === 0 ? sign * Infinity : NaN;
+      }
+      return sign * Math.pow(2, exp - 15) * (1 + frac / 1024);
+  }
+  
+  // Shared Exponent decode helper (RGB9E5)
+  function decodeSharedExp(val, bits, shift, totalExp) {
+      let mantissa = Number((val >> BigInt(shift)) & ((1n << BigInt(bits)) - 1n));
+      let exp = totalExp - 15;
+      let norm = mantissa / Number((1n << BigInt(bits)) - 1n);
+      return norm * Math.pow(2, exp);
+  }
+
+  function unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch, rb, rs, gb, gs, bb, bs, ab, ash, isGrayscale, isSigned, isFloat, isSharedExp) {
     const mem = getMem();
+    const bppBytes = bpp >> 3;
     
-    // Float16 decode helper
-    function decodeFloat16(binary) {
-        let sign = (binary & 0x8000) ? -1 : 1;
-        let exp = (binary & 0x7C00) >> 10;
-        let frac = binary & 0x03FF;
-        if (exp === 0) {
-            if (frac === 0) return 0;
-            return sign * Math.pow(2, -14) * (frac / 1024);
-        } else if (exp === 0x1F) {
-            return frac === 0 ? sign * Infinity : NaN;
+    // FAST PATH: standard 32bpp (ABGR8888 or RGBA8888 depending on endianness)
+    if (bpp === 32 && !isFloat && !isSigned && !isSharedExp && rb === 8 && gb === 8 && bb === 8) {
+      const u32Mem = new Uint32Array(wasmMemory.buffer);
+      const vramU32 = vramPtr >>> 2;
+      for (let row = 0; row < ch; row++) {
+        let srcIdx = vramU32 + (cy + row) * w + cx;
+        let dstIdx = row * cw;
+        for (let col = 0; col < cw; col++) {
+           let p = u32Mem[srcIdx++];
+           if (ab === 0) p |= 0xFF000000;
+           u32[dstIdx++] = p;
         }
-        return sign * Math.pow(2, exp - 15) * (1 + frac / 1024);
+      }
+      return;
     }
     
-    // Shared Exponent decode helper (RGB9E5)
-    function decodeSharedExp(val, bits, shift, totalExp) {
-        let mantissa = Number((val >> BigInt(shift)) & ((1n << BigInt(bits)) - 1n));
-        let exp = totalExp - 15;
-        return mantissa * Math.pow(2, exp);
+    // FAST PATH: standard 16bpp (RGB565)
+    if (bpp === 16 && !isFloat && !isSigned && !isSharedExp && rb === 5 && rs === 11 && gb === 6 && gs === 5 && bb === 5 && bs === 0 && ab === 0) {
+      const u16Mem = new Uint16Array(wasmMemory.buffer);
+      const vramU16 = vramPtr >>> 1;
+      for (let row = 0; row < ch; row++) {
+        let srcIdx = vramU16 + (cy + row) * w + cx;
+        let dstIdx = row * cw;
+        for (let col = 0; col < cw; col++) {
+           let p = u16Mem[srcIdx++];
+           let r = ((p >> 11) & 0x1F) * 255 / 31;
+           let g = ((p >> 5) & 0x3F) * 255 / 63;
+           let b = (p & 0x1F) * 255 / 31;
+           u32[dstIdx++] = (255 << 24) | (b << 16) | (g << 8) | r;
+        }
+      }
+      return;
     }
     
+    function extractChannel(px, px2, px3, px4, bits, shift) {
+        if (bits === 0) return 0;
+        let val = 0n;
+        if (shift < 64) {
+            val = (px >> BigInt(shift)) & ((1n << BigInt(bits)) - 1n);
+        } else if (shift < 128) {
+            val = (px2 >> BigInt(shift - 64)) & ((1n << BigInt(bits)) - 1n);
+        } else if (shift < 192) {
+            val = (px3 >> BigInt(shift - 128)) & ((1n << BigInt(bits)) - 1n);
+        } else {
+            val = (px4 >> BigInt(shift - 192)) & ((1n << BigInt(bits)) - 1n);
+        }
+        
+        if (isSharedExp) {
+            let sharedExp = Number((px >> BigInt(ash)) & ((1n << BigInt(ab)) - 1n));
+            let floatVal = decodeSharedExp(px, bits, shift, sharedExp);
+            return Math.max(0, Math.min(255, floatVal * 255)) | 0;
+        }
+        
+        if (isFloat) {
+            let f = 0.0;
+            if (bits === 16) f = decodeFloat16(Number(val));
+            else if (bits === 32) {
+                floatBufferU32[0] = Number(val);
+                f = floatBufferF32[0];
+            }
+            else if (bits === 64) {
+                floatBufferU64[0] = val;
+                f = floatBufferF64[0];
+            }
+            return Math.max(0, Math.min(255, f * 255)) | 0;
+        }
+        
+        if (isSigned) {
+            let maxVal = (1n << BigInt(bits - 1)) - 1n;
+            let signBit = (val >> BigInt(bits - 1)) & 1n;
+            let sVal = val;
+            if (signBit) {
+                sVal = val - (1n << BigInt(bits));
+            }
+            let mapped = Number(sVal) * 255 / Number(maxVal);
+            if (mapped < 0) mapped = 0;
+            return mapped | 0;
+        }
+        
+        // Default Unsigned Normalized (UNORM)
+        let maxVal = (1n << BigInt(bits)) - 1n;
+        return Number(val) * 255 / Number(maxVal) | 0;
+    }
+
+    // FALLBACK PATH: generic bit extraction
     for (let row = 0; row < ch; row++) {
       const dstOff = row * cw;
       for (let col = 0; col < cw; col++) {
         const idx = (cy + row) * w + (cx + col);
-        let px = 0n;
-        let px2 = 0n, px3 = 0n, px4 = 0n; // For >64bpp
-
-        const bppBytes = bpp >> 3;
+        let px = 0n, px2 = 0n, px3 = 0n, px4 = 0n;
         const off = vramPtr + idx * bppBytes;
         
         if (bpp === 256) {
@@ -276,74 +368,21 @@ function unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch
 
         let r = 0, g = 0, b = 0, a = 255;
         
-        // Internal extraction helper
-        function extractChannel(bits, shift) {
-            if (bits === 0) return 0;
-            let val = 0n;
-            if (shift < 64) {
-                val = (px >> BigInt(shift)) & ((1n << BigInt(bits)) - 1n);
-            } else if (shift < 128) {
-                val = (px2 >> BigInt(shift - 64)) & ((1n << BigInt(bits)) - 1n);
-            } else if (shift < 192) {
-                val = (px3 >> BigInt(shift - 128)) & ((1n << BigInt(bits)) - 1n);
-            } else {
-                val = (px4 >> BigInt(shift - 192)) & ((1n << BigInt(bits)) - 1n);
-            }
-            
-            if (isSharedExp) {
-                let sharedExp = Number((px >> BigInt(ash)) & ((1n << BigInt(ab)) - 1n));
-                let floatVal = decodeSharedExp(px, bits, shift, sharedExp);
-                return Math.max(0, Math.min(255, floatVal * 255)) | 0;
-            }
-            
-            if (isFloat) {
-                let f = 0.0;
-                if (bits === 16) f = decodeFloat16(Number(val));
-                else if (bits === 32) {
-                    let buf = new ArrayBuffer(4);
-                    new Uint32Array(buf)[0] = Number(val);
-                    f = new Float32Array(buf)[0];
-                }
-                else if (bits === 64) {
-                    let buf = new ArrayBuffer(8);
-                    new BigUint64Array(buf)[0] = val;
-                    f = new Float64Array(buf)[0];
-                }
-                return Math.max(0, Math.min(255, f * 255)) | 0;
-            }
-            
-            if (isSigned) {
-                let maxVal = (1n << BigInt(bits - 1)) - 1n;
-                let signBit = (val >> BigInt(bits - 1)) & 1n;
-                let sVal = val;
-                if (signBit) {
-                    sVal = val - (1n << BigInt(bits));
-                }
-                let mapped = Number(sVal) * 255 / Number(maxVal);
-                if (mapped < 0) mapped = 0;
-                return mapped | 0;
-            }
-            
-            // Default Unsigned Normalized (UNORM)
-            let maxVal = (1n << BigInt(bits)) - 1n;
-            return Number(val) * 255 / Number(maxVal) | 0;
-        }
-
         if (isGrayscale) {
             let lum = 0;
             if (ab > 0) {
-                lum = extractChannel(ab, ash);
+                lum = extractChannel(px, px2, px3, px4, ab, ash);
             } else {
                 lum = px ? 255 : 0;
             }
             r = g = b = lum;
             a = 255;
         } else {
-            r = extractChannel(rb, rs);
-            g = extractChannel(gb, gs);
-            b = extractChannel(bb, bs);
+            r = extractChannel(px, px2, px3, px4, rb, rs);
+            g = extractChannel(px, px2, px3, px4, gb, gs);
+            b = extractChannel(px, px2, px3, px4, bb, bs);
             if (ab > 0 && !isSharedExp) {
-                a = extractChannel(ab, ash);
+                a = extractChannel(px, px2, px3, px4, ab, ash);
             }
         }
         
@@ -351,8 +390,7 @@ function unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch
       }
     }
   }
-
-  function renderFullFrame(state, w, h, bpp, vramPtr) {
+function renderFullFrame(state, w, h, bpp, vramPtr) {
     const isGrayscale = (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits > 0) || 
                         (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits === 0 && bpp < 8);
     let ab = state.aBits > 0 ? state.aBits : (bpp < 8 ? bpp : 0);

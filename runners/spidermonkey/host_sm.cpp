@@ -75,7 +75,6 @@ static uint8_t* tar_extract_file(const char* tar_path, const char* target_filena
 
 typedef struct { int x, y, w, h; } Rect;
 
-#pragma pack(push, 1)
 typedef struct {
     uint32_t width, height, scale;
     char title[128];
@@ -97,10 +96,9 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
-    uint8_t is_signed, is_float, is_shared_exponent, format_padding;
-    uint8_t reserved[512];
+    uint32_t is_signed, is_float, is_shared_exponent;
+    uint8_t reserved[504];
 } WagnosticState;
-#pragma pack(pop)
 
 static_assert(sizeof(WagnosticState) == 1024, "WagnosticState size mismatch — check struct layout");
 

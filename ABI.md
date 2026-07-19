@@ -27,7 +27,6 @@ The struct is **1024 bytes** total. All offsets are from the base address return
 ```c
 typedef struct { int x, y, w, h; } Rect;
 
-#pragma pack(push, 1)
 typedef struct {
     uint32_t width;           // +0
     uint32_t height;          // +4
@@ -68,7 +67,6 @@ typedef struct {
     uint8_t format_padding;   // +511
     uint8_t reserved[512];    // +512
 } WagnosticState;  // size = 1024
-#pragma pack(pop)
 ```
 
 ### Screen
@@ -224,7 +222,6 @@ depend on them for logic.
 typedef struct { int x, y, w, h; } Rect;
 
 typedef struct {
-#pragma pack(push, 1)
     uint32_t width, height, scale;
     char title[128];
     uint32_t dirty_rects;
@@ -245,10 +242,9 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
-    uint8_t is_signed, is_float, is_shared_exponent, format_padding;
-    uint8_t reserved[512];
+    uint32_t is_signed, is_float, is_shared_exponent;
+    uint8_t reserved[504];
 } State;
-#pragma pack(pop)
 
 static struct {
     State s;

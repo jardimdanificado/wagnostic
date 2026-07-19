@@ -24,7 +24,6 @@
 
 typedef struct { int x, y, w, h; } Rect;
 
-#pragma pack(push, 1)
 typedef struct {
     uint32_t width, height, scale;
     char title[128];
@@ -46,10 +45,9 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
-    uint8_t is_signed, is_float, is_shared_exponent, format_padding;
-    uint8_t reserved[512];
+    uint32_t is_signed, is_float, is_shared_exponent;
+    uint8_t reserved[504];
 } WagnosticState;
-#pragma pack(pop)
 
 // ============================================================
 // Format Decoders
@@ -291,6 +289,7 @@ static void render_rect_to_texture(SDL_Texture *texture, uint8_t *vram, Wagnosti
     uint32_t a_b = s ? s->a_bits : 0;
     uint32_t a_s = s ? s->a_shift : 0;
 
+    
     if (!r_b && !g_b && !b_b && !a_b) {
         if (BPP == 32) {
             a_b = 8; a_s = 24; b_b = 8; b_s = 16; g_b = 8; g_s = 8; r_b = 8; r_s = 0;
@@ -588,6 +587,7 @@ int main(int argc, char **argv) {
     }
 
     /* ---- Create window ---- */
+    // window logging removed
     SDL_Window *window = SDL_CreateWindow(
         title[0] ? title : "Untitled",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,

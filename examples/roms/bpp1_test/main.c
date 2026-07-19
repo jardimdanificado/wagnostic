@@ -3,12 +3,15 @@
 
 typedef struct { int x, y, w, h; } Rect;
 
-#pragma pack(push, 1)
+static struct {
+    uint32_t count;
+    Rect rects[32];
+} my_dirty_list;
+
 typedef struct {
     uint32_t width, height, scale;
     char title[128];
-    uint32_t dirty_count;
-    Rect dirty_rects[32];
+    uint32_t dirty_rects;
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
     int32_t mouse_wheel;
@@ -26,10 +29,30 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
-    uint8_t is_signed, is_float, is_shared_exponent, format_padding;
-    uint8_t reserved[512];
+    uint32_t is_signed, is_float, is_shared_exponent;
+    uint8_t reserved[504];
 } State;
-#pragma pack(pop)
+
+static void SET_BPP(State* s, int bpp) {
+    if (bpp == 32) {
+        s->a_bits = 8; s->a_shift = 24; s->b_bits = 8; s->b_shift = 16;
+        s->g_bits = 8; s->g_shift = 8;  s->r_bits = 8; s->r_shift = 0;
+    } else if (bpp == 24) {
+        s->a_bits = 0; s->a_shift = 0;  s->b_bits = 8; s->b_shift = 16;
+        s->g_bits = 8; s->g_shift = 8;  s->r_bits = 8; s->r_shift = 0;
+    } else if (bpp == 16) {
+        s->a_bits = 0; s->a_shift = 0;  s->r_bits = 5; s->r_shift = 11;
+        s->g_bits = 6; s->g_shift = 5;  s->b_bits = 5; s->b_shift = 0;
+    } else if (bpp == 8) {
+        s->a_bits = 0; s->a_shift = 0;  s->r_bits = 3; s->r_shift = 5;
+        s->g_bits = 3; s->g_shift = 2;  s->b_bits = 2; s->b_shift = 0;
+    } else if (bpp == 4 || bpp == 2 || bpp == 1) {
+        s->a_bits = bpp; s->a_shift = 0;
+        s->r_bits = 0; s->r_shift = 0;
+        s->g_bits = 0; s->g_shift = 0;
+        s->b_bits = 0; s->b_shift = 0;
+    }
+}
 
 static struct {
     State s;
@@ -52,6 +75,7 @@ int wupdate() {
         int i = 0; while (src[i] && i < 127) { t[i] = src[i]; i++; } t[i] = '\0';
         
         initialized = 1;
+        SET_BPP(&rom.s, 1);
     }
     
     // Redraw the 40-pixel wide vertical stripes every frame to clear the old cube
@@ -82,7 +106,8 @@ int wupdate() {
         }
     }
     
-    rom.s.dirty_count = 1;
-    rom.s.dirty_rects[0] = (Rect){0, 0, 320, 240};
+    my_dirty_list.count = 1;
+    my_dirty_list.rects[0] = (Rect){0, 0, 320, 240};
+    rom.s.dirty_rects = (uint32_t)&my_dirty_list;
     return (int)&rom.s;
 }

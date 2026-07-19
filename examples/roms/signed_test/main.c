@@ -1,6 +1,5 @@
 #include <stdint.h>
 
-#pragma pack(push, 1)
 typedef struct {
     uint32_t width, height, scale;
     char title[128];
@@ -22,10 +21,9 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
-    uint8_t is_signed, is_float, is_shared_exponent, format_padding;
-    uint8_t reserved[512];
+    uint32_t is_signed, is_float, is_shared_exponent;
+    uint8_t reserved[504];
 } State;
-#pragma pack(pop)
 
 static struct {
     State s;
@@ -70,7 +68,8 @@ rom.s.is_signed = 1;
         }
     }
     
-    rom.s.dirty_rects = 0;
     
+    
+    rom.s.dirty_rects = 0;
     return (int)&rom.s;
 }

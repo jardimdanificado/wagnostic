@@ -4,12 +4,15 @@
 
 typedef struct { int x, y, w, h; } Rect;
 
-#pragma pack(push, 1)
+static struct {
+    uint32_t count;
+    Rect rects[32];
+} my_dirty_list;
+
 typedef struct {
     uint32_t width, height, scale;
     char title[128];
-    uint32_t dirty_count;
-    Rect dirty_rects[32];
+    uint32_t dirty_rects;
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
     int32_t mouse_wheel;
@@ -27,10 +30,30 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
-    uint8_t is_signed, is_float, is_shared_exponent, format_padding;
-    uint8_t reserved[512];
+    uint32_t is_signed, is_float, is_shared_exponent;
+    uint8_t reserved[504];
 } State;
-#pragma pack(pop)
+
+static void SET_BPP(State* s, int bpp) {
+    if (bpp == 32) {
+        s->a_bits = 8; s->a_shift = 24; s->b_bits = 8; s->b_shift = 16;
+        s->g_bits = 8; s->g_shift = 8;  s->r_bits = 8; s->r_shift = 0;
+    } else if (bpp == 24) {
+        s->a_bits = 0; s->a_shift = 0;  s->b_bits = 8; s->b_shift = 16;
+        s->g_bits = 8; s->g_shift = 8;  s->r_bits = 8; s->r_shift = 0;
+    } else if (bpp == 16) {
+        s->a_bits = 0; s->a_shift = 0;  s->r_bits = 5; s->r_shift = 11;
+        s->g_bits = 6; s->g_shift = 5;  s->b_bits = 5; s->b_shift = 0;
+    } else if (bpp == 8) {
+        s->a_bits = 0; s->a_shift = 0;  s->r_bits = 3; s->r_shift = 5;
+        s->g_bits = 3; s->g_shift = 2;  s->b_bits = 2; s->b_shift = 0;
+    } else if (bpp == 4 || bpp == 2 || bpp == 1) {
+        s->a_bits = bpp; s->a_shift = 0;
+        s->r_bits = 0; s->r_shift = 0;
+        s->g_bits = 0; s->g_shift = 0;
+        s->b_bits = 0; s->b_shift = 0;
+    }
+}
 
 static State state;
 static uint8_t* vram = 0;
@@ -192,6 +215,7 @@ int wupdate() {
         allocate_vram(state.width, state.height);
         update_title();
         initialized = 1;
+        SET_BPP(&state, current_bpp);
     }
 
     frame_count++;
@@ -199,9 +223,9 @@ int wupdate() {
     static int sp_was = 0, r_was = 0, k1_was = 0, k2_was = 0, k3_was = 0;
 
     if (state.keys[44] && !sp_was) {
-        if (current_bpp == 8) current_bpp = 16;
-        else if (current_bpp == 16) current_bpp = 32;
-        else current_bpp = 8;
+        if (current_bpp == 8) { current_bpp = 16; SET_BPP(&state, current_bpp); }
+        else if (current_bpp == 16) { current_bpp = 32; SET_BPP(&state, current_bpp); }
+        else { current_bpp = 8; SET_BPP(&state, current_bpp); }
         
         update_title();
     }
@@ -216,9 +240,9 @@ int wupdate() {
     }
     r_was = state.keys[21];
 
-    if (state.keys[30] && !k1_was) { current_bpp = 8;  update_title(); }
-    if (state.keys[31] && !k2_was) { current_bpp = 16;  update_title(); }
-    if (state.keys[32] && !k3_was) { current_bpp = 32;  update_title(); }
+    if (state.keys[30] && !k1_was) { { current_bpp = 8; SET_BPP(&state, current_bpp); }  update_title(); }
+    if (state.keys[31] && !k2_was) { { current_bpp = 16; SET_BPP(&state, current_bpp); }  update_title(); }
+    if (state.keys[32] && !k3_was) { { current_bpp = 32; SET_BPP(&state, current_bpp); }  update_title(); }
     k1_was = state.keys[30]; k2_was = state.keys[31]; k3_was = state.keys[32];
 
     if (state.keys[41]) return 0;
@@ -233,10 +257,11 @@ int wupdate() {
     draw_dirty_anim(W/2 + 1, 0, W/2 - 1, H/2);
     draw_mouse(0, H/2 + 1, W/2, H/2 - 1);
 
-    state.dirty_count = 3;
-    state.dirty_rects[0] = (Rect){0, 0, W/2, H/2};
-    state.dirty_rects[1] = (Rect){W/2, 0, W - W/2, H/2};
-    state.dirty_rects[2] = (Rect){0, H/2, W/2, H - H/2};
+    my_dirty_list.count = 3;
+    my_dirty_list.rects[0] = (Rect){0, 0, W/2, H/2};
+    my_dirty_list.rects[1] = (Rect){W/2, 0, W - W/2, H/2};
+    my_dirty_list.rects[2] = (Rect){0, H/2, W/2, H - H/2};
 
+    state.dirty_rects = (uint32_t)&my_dirty_list;
     return (int)&state;
 }

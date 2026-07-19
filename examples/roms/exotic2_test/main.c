@@ -4,12 +4,15 @@
 
 typedef struct { int x, y, w, h; } Rect;
 
-#pragma pack(push, 1)
+static struct {
+    uint32_t count;
+    Rect rects[32];
+} my_dirty_list;
+
 typedef struct {
     uint32_t width, height, scale;
     char title[128];
-    uint32_t dirty_count;
-    Rect dirty_rects[32];
+    uint32_t dirty_rects;
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
     int32_t mouse_wheel;
@@ -22,8 +25,13 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint32_t r_bits, r_shift, g_bits, g_shift, b_bits, b_shift, a_bits, a_shift;
-    uint8_t reserved[8];
+    uint32_t r_bits, r_shift;
+    uint32_t g_bits, g_shift;
+    uint32_t b_bits, b_shift;
+    uint32_t a_bits, a_shift;
+    uint32_t x_bits, x_shift;
+    uint32_t is_signed, is_float, is_shared_exponent;
+    uint8_t reserved[504];
 } WagnosticState;
 
 static struct {
@@ -84,7 +92,8 @@ WASM_EXPORT int wupdate() {
         initialized = 1;
     }
 
-    rom.s.dirty_count = 1;
-    rom.s.dirty_rects[0] = (Rect){0, 0, 320, 240};
+    my_dirty_list.count = 1;
+    my_dirty_list.rects[0] = (Rect){0, 0, 320, 240};
+    rom.s.dirty_rects = (uint32_t)&my_dirty_list;
     return (int)&rom.s;
 }
