@@ -92,18 +92,45 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint32_t r_bits;
-    uint32_t r_shift;
-    uint32_t g_bits;
-    uint32_t g_shift;
-    uint32_t b_bits;
-    uint32_t b_shift;
-    uint32_t a_bits;
-    uint32_t a_shift;
-    uint8_t reserved[8];
+    uint8_t r_bits;
+    uint8_t r_shift;
+    uint8_t g_bits;
+    uint8_t g_shift;
+    uint8_t b_bits;
+    uint8_t b_shift;
+    uint8_t a_bits;
+    uint8_t a_shift;
+    uint8_t is_signed;
+    uint8_t is_float;
+    uint8_t is_shared_exponent;
+    uint8_t reserved[29];
 } WagnosticState;
 
 static_assert(sizeof(WagnosticState) == 1024, "WagnosticState size mismatch — check struct layout");
+
+// ============================================================
+// Format Decoders
+// ============================================================
+
+static inline double decodeFloat16(uint16_t binary) {
+    int sign = (binary & 0x8000) ? -1 : 1;
+    int exp = (binary & 0x7C00) >> 10;
+    int frac = binary & 0x03FF;
+    if (exp == 0) {
+        if (frac == 0) return 0.0;
+        return sign * pow(2.0, -14.0) * (frac / 1024.0);
+    } else if (exp == 0x1F) {
+        return frac == 0 ? sign * INFINITY : NAN;
+    }
+    return sign * pow(2.0, exp - 15.0) * (1.0 + frac / 1024.0);
+}
+
+static inline double decodeSharedExp(uint64_t val, uint8_t bits, uint8_t shift, uint8_t totalExp) {
+    uint64_t mantissa = (val >> shift) & ((1ULL << bits) - 1ULL);
+    double norm = (double)mantissa / (double)((1ULL << bits) - 1ULL);
+    int exp = (int)totalExp - 15;
+    return norm * pow(2.0, exp);
+}
 
 // ============================================================
 // Global state
@@ -271,6 +298,51 @@ static void render_quad(GLuint tex_id) {
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glBindVertexArray(0);
     glUseProgram(0);
+}
+
+
+static inline uint64_t get_mask(uint8_t bits) {
+    return (bits >= 64) ? 0xFFFFFFFFFFFFFFFFULL : ((1ULL << bits) - 1ULL);
+}
+
+static inline uint8_t extractChannel(uint64_t px, uint64_t px2, uint64_t px3, uint64_t px4, uint8_t bits, uint8_t shift, bool is_shared_exp, bool is_float, bool is_signed, uint8_t ab, uint8_t a_shift) {
+    if (!bits) return 0;
+    uint64_t val = 0;
+    if (shift < 64) val = (px >> shift) & get_mask(bits);
+    else if (shift < 128) val = (px2 >> (shift - 64)) & get_mask(bits);
+    else if (shift < 192) val = (px3 >> (shift - 128)) & get_mask(bits);
+    else val = (px4 >> (shift - 192)) & get_mask(bits);
+
+    if (is_shared_exp) {
+        uint64_t sharedExp = (px >> a_shift) & get_mask(ab);
+        double floatVal = decodeSharedExp(px, bits, shift, (uint8_t)sharedExp);
+        int mapped = (int)(floatVal * 255.0);
+        return mapped < 0 ? 0 : (mapped > 255 ? 255 : mapped);
+    }
+
+    if (is_float) {
+        double f = 0.0;
+        if (bits == 16) f = decodeFloat16((uint16_t)val);
+        else if (bits == 32) {
+            float f32; memcpy(&f32, &val, 4); f = f32;
+        } else if (bits == 64) {
+            double f64; memcpy(&f64, &val, 8); f = f64;
+        }
+        int mapped = (int)(f * 255.0);
+        return mapped < 0 ? 0 : (mapped > 255 ? 255 : mapped);
+    }
+
+    if (is_signed) {
+        uint64_t maxVal = get_mask(bits - 1);
+        uint64_t signBit = (val >> (bits - 1)) & 1ULL;
+        int64_t sVal = val;
+        if (signBit) sVal -= (1ULL << bits);
+        int mapped = (int)(sVal * 255 / (int64_t)maxVal);
+        return mapped < 0 ? 0 : (mapped > 255 ? 255 : mapped);
+    }
+
+    uint64_t maxVal = get_mask(bits);
+    return (uint8_t)(val * 255 / maxVal);
 }
 
 static void unpack_rect_cpu(WagnosticState *s, uint8_t* vram, uint32_t* dst, int rx, int ry, int rw, int rh) {

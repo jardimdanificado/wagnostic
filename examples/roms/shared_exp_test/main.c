@@ -1,13 +1,10 @@
-// bpp1_test - 1bpp (Monochrome) example
 #include <stdint.h>
-
-typedef struct { int x, y, w, h; } Rect;
 
 typedef struct {
     uint32_t width, height, bpp, scale;
     char title[128];
     uint32_t dirty_count;
-    Rect dirty_rects[32];
+    struct { int x, y, w, h; } dirty_rects[32];
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
     int32_t mouse_wheel;
@@ -36,7 +33,7 @@ typedef struct {
 
 static struct {
     State s;
-    uint8_t vram[(320 * 240) / 8];
+    uint8_t vram[320 * 240 * (32 / 8)];
 } rom;
 
 static int initialized = 0;
@@ -45,48 +42,49 @@ int wupdate() {
     if (!initialized) {
         rom.s.width = 320;
         rom.s.height = 240;
-        rom.s.bpp = 1;
-        rom.s.a_bits = 1; rom.s.a_shift = 0;
-
+        rom.s.bpp = 32;
         rom.s.scale = 2;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
         
-        char* t = rom.s.title;
-        const char* src = "1bpp Test (Monochrome)";
-        int i = 0; while (src[i] && i < 127) { t[i] = src[i]; i++; } t[i] = '\0';
+        
+rom.s.r_bits = 9; rom.s.r_shift = 0;
+rom.s.g_bits = 9; rom.s.g_shift = 9;
+rom.s.b_bits = 9; rom.s.b_shift = 18;
+rom.s.a_bits = 5; rom.s.a_shift = 27; // The shared exponent
+rom.s.is_shared_exponent = 1;
+
+        
+        const char* title = "RGB9E5 Example";
+        for (int i = 0; i < 127 && title[i]; i++) rom.s.title[i] = title[i];
         
         initialized = 1;
     }
     
-    // Redraw the 40-pixel wide vertical stripes every frame to clear the old cube
+    // Draws a gradient using a shared 5-bit exponent to control brightness
+    uint32_t* fb = (uint32_t*)rom.vram;
     for (int y = 0; y < 240; y++) {
         for (int x = 0; x < 320; x++) {
-            int stripe = (x / 40) % 2;
-            int byte_idx = (y * 320 + x) / 8;
-            int bit_idx = 7 - (x % 8);
-            if (stripe) {
-                rom.vram[byte_idx] |= (1 << bit_idx);
-            } else {
-                rom.vram[byte_idx] &= ~(1 << bit_idx);
-            }
-        }
-    }
-    
-    // Draw a moving 20x20 square
-    int px = (rom.s.ticks / 10) % 320;
-    int py = 110; 
-    
-    for (int sy = 0; sy < 20; sy++) {
-        for (int sx = 0; sx < 20; sx++) {
-            int cx = (px + sx) % 320;
-            int cy = py + sy;
-            int byte_idx = (cy * 320 + cx) / 8;
-            int bit_idx = 7 - (cx % 8);
-            rom.vram[byte_idx] ^= (1 << bit_idx); // Invert
+            int idx = (y * 320 + x) * (32 / 8 / sizeof(uint32_t));
+            
+            // Beautiful smooth gradient using RGB9E5
+            // 9-bit mantissas give us 512 levels of precision per color.
+            uint32_t r = (x * 511) / 320; // 0 to 511
+            uint32_t g = (y * 511) / 240; // 0 to 511
+            uint32_t b = 511;
+            
+            // Constant exponent of 15 (bias) means multiplier is 2^(15-15) = 1.0
+            uint32_t exp = 15;
+            
+            fb[idx] = r | (g << 9) | (b << 18) | (exp << 27);
+
         }
     }
     
     rom.s.dirty_count = 1;
-    rom.s.dirty_rects[0] = (Rect){0, 0, 320, 240};
+    rom.s.dirty_rects[0].x = 0;
+    rom.s.dirty_rects[0].y = 0;
+    rom.s.dirty_rects[0].w = 320;
+    rom.s.dirty_rects[0].h = 240;
+    
     return (int)&rom.s;
 }

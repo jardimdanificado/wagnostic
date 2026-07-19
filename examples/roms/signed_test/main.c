@@ -1,13 +1,10 @@
-// bpp4_test - 4bpp (16 colors) example
 #include <stdint.h>
-
-typedef struct { int x, y, w, h; } Rect;
 
 typedef struct {
     uint32_t width, height, bpp, scale;
     char title[128];
     uint32_t dirty_count;
-    Rect dirty_rects[32];
+    struct { int x, y, w, h; } dirty_rects[32];
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
     int32_t mouse_wheel;
@@ -36,7 +33,7 @@ typedef struct {
 
 static struct {
     State s;
-    uint8_t vram[(320 * 240) / 2];
+    uint8_t vram[320 * 240 * (32 / 8)];
 } rom;
 
 static int initialized = 0;
@@ -45,30 +42,44 @@ int wupdate() {
     if (!initialized) {
         rom.s.width = 320;
         rom.s.height = 240;
-        rom.s.bpp = 4;
-        rom.s.a_bits = 4; rom.s.a_shift = 0;
-
+        rom.s.bpp = 32;
         rom.s.scale = 2;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
         
-        char* t = rom.s.title;
-        const char* src = "4bpp Test (16 Colors EGA)";
-        int i = 0; while (src[i] && i < 127) { t[i] = src[i]; i++; } t[i] = '\0';
         
+rom.s.r_bits = 8; rom.s.r_shift = 0;
+rom.s.g_bits = 8; rom.s.g_shift = 8;
+rom.s.b_bits = 8; rom.s.b_shift = 16;
+rom.s.a_bits = 8; rom.s.a_shift = 24;
+rom.s.is_signed = 1;
 
         
-        // Fill VRAM with color bars
-        for (int y = 0; y < 240; y++) {
-            for (int x = 0; x < 320; x += 2) {
-                uint8_t color1 = (x / 20) % 16;
-                uint8_t color2 = ((x + 1) / 20) % 16;
-                rom.vram[(y * 320 + x) / 2] = (color1 << 4) | color2;
-            }
-        }
+        const char* title = "RGBA8SNORM Example";
+        for (int i = 0; i < 127 && title[i]; i++) rom.s.title[i] = title[i];
+        
         initialized = 1;
     }
     
+    int8_t* fb = (int8_t*)rom.vram;
+    for (int y = 0; y < 240; y++) {
+        for (int x = 0; x < 320; x++) {
+            int idx = (y * 320 + x) * (32 / 8 / sizeof(int8_t));
+            
+            // Let's make R vary from 0 to 127 (0 to 255 mapped)
+            // Let's make B vary from -128 to 127 (mapped to 0 up to 255)
+            fb[idx + 0] = (int8_t)((x * 127) / 320); // R: 0 to 127
+            fb[idx + 1] = 0;                         // G: 0
+            fb[idx + 2] = (int8_t)(((y * 255) / 240) - 128); // B: -128 to 127
+            fb[idx + 3] = 127;                       // A: max
+
+        }
+    }
+    
     rom.s.dirty_count = 1;
-    rom.s.dirty_rects[0] = (Rect){0, 0, 320, 240};
+    rom.s.dirty_rects[0].x = 0;
+    rom.s.dirty_rects[0].y = 0;
+    rom.s.dirty_rects[0].w = 320;
+    rom.s.dirty_rects[0].h = 240;
+    
     return (int)&rom.s;
 }

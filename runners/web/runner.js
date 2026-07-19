@@ -142,14 +142,17 @@
       audioOverrun:    mem.getUint32(ptr + 972, true),
       vramOffset:      mem.getUint32(ptr + 976, true),
       audioBuffer:     mem.getUint32(ptr + 980, true),
-      rBits:           mem.getUint32(ptr + 984, true),
-      rShift:          mem.getUint32(ptr + 988, true),
-      gBits:           mem.getUint32(ptr + 992, true),
-      gShift:          mem.getUint32(ptr + 996, true),
-      bBits:           mem.getUint32(ptr + 1000, true),
-      bShift:          mem.getUint32(ptr + 1004, true),
-      aBits:           mem.getUint32(ptr + 1008, true),
-      aShift:          mem.getUint32(ptr + 1012, true),
+      rBits:           mem.getUint8(ptr + 984),
+      rShift:          mem.getUint8(ptr + 985),
+      gBits:           mem.getUint8(ptr + 986),
+      gShift:          mem.getUint8(ptr + 987),
+      bBits:           mem.getUint8(ptr + 988),
+      bShift:          mem.getUint8(ptr + 989),
+      aBits:           mem.getUint8(ptr + 990),
+      aShift:          mem.getUint8(ptr + 991),
+      isSigned:        mem.getUint8(ptr + 992),
+      isFloat:         mem.getUint8(ptr + 993),
+      isSharedExp:     mem.getUint8(ptr + 994),
     };
     if (!s.bpp) s.bpp = 32;
     if (!s.rBits && !s.gBits && !s.bBits && !s.aBits) {
@@ -198,60 +201,145 @@
     prevScale  = scale;
   }
 
-  function unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch, rb, rs, gb, gs, bb, bs, ab, ash, isGrayscale) {
+function unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch, rb, rs, gb, gs, bb, bs, ab, ash, isGrayscale, isSigned, isFloat, isSharedExp) {
     const mem = getMem();
+    
+    // Float16 decode helper
+    function decodeFloat16(binary) {
+        let sign = (binary & 0x8000) ? -1 : 1;
+        let exp = (binary & 0x7C00) >> 10;
+        let frac = binary & 0x03FF;
+        if (exp === 0) {
+            if (frac === 0) return 0;
+            return sign * Math.pow(2, -14) * (frac / 1024);
+        } else if (exp === 0x1F) {
+            return frac === 0 ? sign * Infinity : NaN;
+        }
+        return sign * Math.pow(2, exp - 15) * (1 + frac / 1024);
+    }
+    
+    // Shared Exponent decode helper (RGB9E5)
+    function decodeSharedExp(val, bits, shift, totalExp) {
+        let mantissa = Number((val >> BigInt(shift)) & ((1n << BigInt(bits)) - 1n));
+        let exp = totalExp - 15;
+        return mantissa * Math.pow(2, exp);
+    }
+    
     for (let row = 0; row < ch; row++) {
       const dstOff = row * cw;
       for (let col = 0; col < cw; col++) {
         const idx = (cy + row) * w + (cx + col);
-        let px = 0;
-        if (bpp === 64) px = mem.getBigUint64(vramPtr + idx * 8, true);
-        else if (bpp === 32) px = mem.getUint32(vramPtr + idx * 4, true);
-        else if (bpp === 24) {
-          px = mem.getUint8(vramPtr + idx * 3) | (mem.getUint8(vramPtr + idx * 3 + 1) << 8) | (mem.getUint8(vramPtr + idx * 3 + 2) << 16);
-        }
-        else if (bpp === 16) px = mem.getUint16(vramPtr + idx * 2, true);
-        else if (bpp === 8) px = mem.getUint8(vramPtr + idx);
-        else if (bpp === 4) {
-          const byte = mem.getUint8(vramPtr + Math.floor(idx / 2));
-          px = (idx % 2 === 0) ? (byte >> 4) : (byte & 0x0F);
-        }
-        else if (bpp === 2) {
-          const byte = mem.getUint8(vramPtr + Math.floor(idx / 4));
-          px = (byte >> (6 - (idx % 4) * 2)) & 0x03;
-        }
-        else if (bpp === 1) {
-          const byte = mem.getUint8(vramPtr + Math.floor(idx / 8));
-          px = (byte >> (7 - (idx % 8))) & 1;
-        }
+        let px = 0n;
+        let px2 = 0n, px3 = 0n, px4 = 0n; // For >64bpp
+
+        const bppBytes = bpp >> 3;
+        const off = vramPtr + idx * bppBytes;
         
-        let val = (bpp === 64) ? BigInt(px) : Number(px);
+        if (bpp === 256) {
+          px = mem.getBigUint64(off, true);
+          px2 = mem.getBigUint64(off + 8, true);
+          px3 = mem.getBigUint64(off + 16, true);
+          px4 = mem.getBigUint64(off + 24, true);
+        } else if (bpp === 128) {
+          px = mem.getBigUint64(off, true);
+          px2 = mem.getBigUint64(off + 8, true);
+        } else if (bpp === 96) {
+          px = mem.getBigUint64(off, true);
+          px2 = BigInt(mem.getUint32(off + 8, true));
+        } else if (bpp === 64) {
+          px = mem.getBigUint64(off, true);
+        } else if (bpp === 32) {
+          px = BigInt(mem.getUint32(off, true));
+        } else if (bpp === 24) {
+          px = BigInt(mem.getUint8(off) | (mem.getUint8(off + 1) << 8) | (mem.getUint8(off + 2) << 16));
+        } else if (bpp === 16) {
+          px = BigInt(mem.getUint16(off, true));
+        } else if (bpp === 8) {
+          px = BigInt(mem.getUint8(off));
+        } else if (bpp === 4) {
+          const byte = mem.getUint8(vramPtr + Math.floor(idx / 2));
+          px = BigInt((idx % 2 === 0) ? (byte >> 4) : (byte & 0x0F));
+        } else if (bpp === 2) {
+          const byte = mem.getUint8(vramPtr + Math.floor(idx / 4));
+          px = BigInt((byte >> (6 - (idx % 4) * 2)) & 0x03);
+        } else if (bpp === 1) {
+          const byte = mem.getUint8(vramPtr + Math.floor(idx / 8));
+          px = BigInt((byte >> (7 - (idx % 8))) & 1);
+        }
 
         let r = 0, g = 0, b = 0, a = 255;
+        
+        // Internal extraction helper
+        function extractChannel(bits, shift) {
+            if (bits === 0) return 0;
+            let val = 0n;
+            if (shift < 64) {
+                val = (px >> BigInt(shift)) & ((1n << BigInt(bits)) - 1n);
+            } else if (shift < 128) {
+                val = (px2 >> BigInt(shift - 64)) & ((1n << BigInt(bits)) - 1n);
+            } else if (shift < 192) {
+                val = (px3 >> BigInt(shift - 128)) & ((1n << BigInt(bits)) - 1n);
+            } else {
+                val = (px4 >> BigInt(shift - 192)) & ((1n << BigInt(bits)) - 1n);
+            }
+            
+            if (isSharedExp) {
+                let sharedExp = Number((px >> BigInt(ash)) & ((1n << BigInt(ab)) - 1n));
+                let floatVal = decodeSharedExp(px, bits, shift, sharedExp);
+                return Math.max(0, Math.min(255, floatVal * 255)) | 0;
+            }
+            
+            if (isFloat) {
+                let f = 0.0;
+                if (bits === 16) f = decodeFloat16(Number(val));
+                else if (bits === 32) {
+                    let buf = new ArrayBuffer(4);
+                    new Uint32Array(buf)[0] = Number(val);
+                    f = new Float32Array(buf)[0];
+                }
+                else if (bits === 64) {
+                    let buf = new ArrayBuffer(8);
+                    new BigUint64Array(buf)[0] = val;
+                    f = new Float64Array(buf)[0];
+                }
+                return Math.max(0, Math.min(255, f * 255)) | 0;
+            }
+            
+            if (isSigned) {
+                let maxVal = (1n << BigInt(bits - 1)) - 1n;
+                let signBit = (val >> BigInt(bits - 1)) & 1n;
+                let sVal = val;
+                if (signBit) {
+                    sVal = val - (1n << BigInt(bits));
+                }
+                let mapped = Number(sVal) * 255 / Number(maxVal);
+                if (mapped < 0) mapped = 0;
+                return mapped | 0;
+            }
+            
+            // Default Unsigned Normalized (UNORM)
+            let maxVal = (1n << BigInt(bits)) - 1n;
+            return Number(val) * 255 / Number(maxVal) | 0;
+        }
+
         if (isGrayscale) {
             let lum = 0;
             if (ab > 0) {
-                if (bpp === 64) lum = Number((val >> BigInt(ash)) & ((1n << BigInt(ab)) - 1n));
-                else lum = (val >> ash) & ((1 << ab) - 1);
-                lum = (lum * 255 / ((1 << ab) - 1)) | 0;
+                lum = extractChannel(ab, ash);
             } else {
-                lum = val ? 255 : 0;
+                lum = px ? 255 : 0;
             }
             r = g = b = lum;
             a = 255;
         } else {
-            if (bpp === 64) {
-                if (rb) r = Number((val >> BigInt(rs)) & ((1n << BigInt(rb)) - 1n)) * 255 / ((1 << rb) - 1) | 0;
-                if (gb) g = Number((val >> BigInt(gs)) & ((1n << BigInt(gb)) - 1n)) * 255 / ((1 << gb) - 1) | 0;
-                if (bb) b = Number((val >> BigInt(bs)) & ((1n << BigInt(bb)) - 1n)) * 255 / ((1 << bb) - 1) | 0;
-                if (ab) a = Number((val >> BigInt(ash)) & ((1n << BigInt(ab)) - 1n)) * 255 / ((1 << ab) - 1) | 0;
-            } else {
-                if (rb) r = ((val >> rs) & ((1 << rb) - 1)) * 255 / ((1 << rb) - 1) | 0;
-                if (gb) g = ((val >> gs) & ((1 << gb) - 1)) * 255 / ((1 << gb) - 1) | 0;
-                if (bb) b = ((val >> bs) & ((1 << bb) - 1)) * 255 / ((1 << bb) - 1) | 0;
-                if (ab) a = ((val >> ash) & ((1 << ab) - 1)) * 255 / ((1 << ab) - 1) | 0;
+            r = extractChannel(rb, rs);
+            g = extractChannel(gb, gs);
+            b = extractChannel(bb, bs);
+            if (ab > 0 && !isSharedExp) {
+                a = extractChannel(ab, ash);
             }
         }
+        
         u32[dstOff + col] = (a << 24) | (b << 16) | (g << 8) | r;
       }
     }
@@ -262,7 +350,7 @@
                         (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits === 0 && bpp < 8);
     let ab = state.aBits > 0 ? state.aBits : (bpp < 8 ? bpp : 0);
     const u32 = new Uint32Array(imageData.data.buffer);
-    unpackPixelsToImageData(w, h, bpp, vramPtr, imageData.data, u32, 0, 0, w, h, state.rBits, state.rShift, state.gBits, state.gShift, state.bBits, state.bShift, ab, state.aShift, isGrayscale);
+    unpackPixelsToImageData(w, h, bpp, vramPtr, imageData.data, u32, 0, 0, w, h, state.rBits, state.rShift, state.gBits, state.gShift, state.bBits, state.bShift, ab, state.aShift, isGrayscale, state.isSigned, state.isFloat, state.isSharedExp);
     ctx.putImageData(imageData, 0, 0);
   }
 
@@ -301,7 +389,7 @@
       const pixels = rectData.data;
       const u32 = new Uint32Array(pixels.buffer);
 
-      unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch, state.rBits, state.rShift, state.gBits, state.gShift, state.bBits, state.bShift, ab, state.aShift, isGrayscale);
+      unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch, state.rBits, state.rShift, state.gBits, state.gShift, state.bBits, state.bShift, ab, state.aShift, isGrayscale, state.isSigned, state.isFloat, state.isSharedExp);
       ctx.putImageData(rectData, cx, cy);
     }
   }

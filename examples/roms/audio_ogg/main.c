@@ -23,15 +23,18 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint32_t r_bits;
-    uint32_t r_shift;
-    uint32_t g_bits;
-    uint32_t g_shift;
-    uint32_t b_bits;
-    uint32_t b_shift;
-    uint32_t a_bits;
-    uint32_t a_shift;
-    uint8_t reserved[8];
+    uint8_t r_bits;
+    uint8_t r_shift;
+    uint8_t g_bits;
+    uint8_t g_shift;
+    uint8_t b_bits;
+    uint8_t b_shift;
+    uint8_t a_bits;
+    uint8_t a_shift;
+    uint8_t is_signed;
+    uint8_t is_float;
+    uint8_t is_shared_exponent;
+    uint8_t reserved[29];
 } State;
 
 static struct {

@@ -1,13 +1,10 @@
-// bpp2_test - 2bpp (4 colors) example
 #include <stdint.h>
-
-typedef struct { int x, y, w, h; } Rect;
 
 typedef struct {
     uint32_t width, height, bpp, scale;
     char title[128];
     uint32_t dirty_count;
-    Rect dirty_rects[32];
+    struct { int x, y, w, h; } dirty_rects[32];
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
     int32_t mouse_wheel;
@@ -36,7 +33,7 @@ typedef struct {
 
 static struct {
     State s;
-    uint8_t vram[(320 * 240) / 4];
+    uint8_t vram[320 * 240 * (256 / 8)];
 } rom;
 
 static int initialized = 0;
@@ -45,39 +42,45 @@ int wupdate() {
     if (!initialized) {
         rom.s.width = 320;
         rom.s.height = 240;
-        rom.s.bpp = 2;
-        rom.s.a_bits = 2; rom.s.a_shift = 0;
-
+        rom.s.bpp = 256;
         rom.s.scale = 2;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
         
-        char* t = rom.s.title;
-        const char* src = "2bpp Test (GameBoy Style)";
-        int i = 0; while (src[i] && i < 127) { t[i] = src[i]; i++; } t[i] = '\0';
         
-        // GameBoy Palette
+rom.s.r_bits = 64; rom.s.r_shift = 0;
+rom.s.g_bits = 64; rom.s.g_shift = 64;
+rom.s.b_bits = 64; rom.s.b_shift = 128;
+rom.s.a_bits = 64; rom.s.a_shift = 192;
+rom.s.is_float = 1;
+
         
-        // Fill VRAM with 4 large colored blocks
-        for (int y = 0; y < 240; y++) {
-            for (int x = 0; x < 320; x++) {
-                int color_idx = 0;
-                if (x >= 160 && y < 120) color_idx = 1;
-                else if (x < 160 && y >= 120) color_idx = 2;
-                else if (x >= 160 && y >= 120) color_idx = 3;
-                
-                int byte_idx = (y * 320 + x) / 4;
-                int shift = 6 - ((x % 4) * 2);
-                
-                // Clear bits
-                rom.vram[byte_idx] &= ~(3 << shift);
-                // Set bits
-                rom.vram[byte_idx] |= (color_idx << shift);
-            }
-        }
+        const char* title = "RGBA64646464F Example";
+        for (int i = 0; i < 127 && title[i]; i++) rom.s.title[i] = title[i];
+        
         initialized = 1;
     }
     
+    // Draws a 64-bit float precision gradient (Purple to Cyan)
+    double* fb = (double*)rom.vram;
+    for (int y = 0; y < 240; y++) {
+        for (int x = 0; x < 320; x++) {
+            int idx = (y * 320 + x) * (256 / 8 / sizeof(double));
+            
+            double nx = x / 320.0;
+            double ny = y / 240.0;
+            fb[idx + 0] = nx;        // R
+            fb[idx + 1] = 1.0 - nx;  // G
+            fb[idx + 2] = ny;        // B
+            fb[idx + 3] = 1.0;       // A
+
+        }
+    }
+    
     rom.s.dirty_count = 1;
-    rom.s.dirty_rects[0] = (Rect){0, 0, 320, 240};
+    rom.s.dirty_rects[0].x = 0;
+    rom.s.dirty_rects[0].y = 0;
+    rom.s.dirty_rects[0].w = 320;
+    rom.s.dirty_rects[0].h = 240;
+    
     return (int)&rom.s;
 }

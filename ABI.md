@@ -53,15 +53,18 @@ typedef struct {
     uint32_t audio_overrun;   // +972
     uint32_t vram_offset;     // +976
     uint32_t audio_buffer_offset; // +980
-    uint32_t r_bits;          // +984
-    uint32_t r_shift;         // +988
-    uint32_t g_bits;          // +992
-    uint32_t g_shift;         // +996
-    uint32_t b_bits;          // +1000
-    uint32_t b_shift;         // +1004
-    uint32_t a_bits;          // +1008
-    uint32_t a_shift;         // +1012
-    uint8_t reserved[8];      // +1016
+    uint8_t r_bits;           // +984
+    uint8_t r_shift;          // +985
+    uint8_t g_bits;           // +986
+    uint8_t g_shift;          // +987
+    uint8_t b_bits;           // +988
+    uint8_t b_shift;          // +989
+    uint8_t a_bits;           // +990
+    uint8_t a_shift;          // +991
+    uint8_t is_signed;        // +992
+    uint8_t is_float;         // +993
+    uint8_t is_shared_exponent; // +994
+    uint8_t reserved[29];     // +995
 } WagnosticState;  // size = 1024
 ```
 
@@ -89,6 +92,11 @@ Wagnostic uses **Dynamic Bitfield Pixel Formats**.
 The bit depths can be any valid power of 2: **1, 2, 4, 8, 16, 24, 32, 64**.
 Instead of predefined formats (like RGB565) or indexed color palettes, the Host decodes pixels using the `r_bits`/`r_shift`, `g_bits`/`g_shift`, `b_bits`/`b_shift`, and `a_bits`/`a_shift` fields.
 The fields indicate how many bits each channel occupies and how far left they are shifted in the pixel integer.
+
+Additionally, three flags control the data type interpretation of these bits:
+- `is_signed` (uint8): If `1`, the bits are interpreted as two's complement signed normalized integers (e.g., SNORM).
+- `is_float` (uint8): If `1`, the bits are decoded as IEEE 754 floating point numbers (16-bit half, 32-bit single, or 64-bit double).
+- `is_shared_exponent` (uint8): If `1`, the alpha channel bits (`a_bits`/`a_shift`) are treated as a shared exponent applied to the RGB mantissas (e.g., RGB9E5).
 If `r_bits`, `g_bits`, and `b_bits` are all `0`, but `a_bits > 0`, the format is treated as **Grayscale / Luminance**, where the Alpha channel is replicated into R, G, and B.
 
 ### Dirty Rectangles
@@ -229,15 +237,18 @@ typedef struct {
     uint32_t audio_write, audio_read;
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
-    uint32_t r_bits;
-    uint32_t r_shift;
-    uint32_t g_bits;
-    uint32_t g_shift;
-    uint32_t b_bits;
-    uint32_t b_shift;
-    uint32_t a_bits;
-    uint32_t a_shift;
-    uint8_t reserved[8];
+    uint8_t r_bits;
+    uint8_t r_shift;
+    uint8_t g_bits;
+    uint8_t g_shift;
+    uint8_t b_bits;
+    uint8_t b_shift;
+    uint8_t a_bits;
+    uint8_t a_shift;
+    uint8_t is_signed;
+    uint8_t is_float;
+    uint8_t is_shared_exponent;
+    uint8_t reserved[29];
 } State;
 
 static struct {

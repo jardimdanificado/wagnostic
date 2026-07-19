@@ -41,16 +41,87 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint32_t r_bits;
-    uint32_t r_shift;
-    uint32_t g_bits;
-    uint32_t g_shift;
-    uint32_t b_bits;
-    uint32_t b_shift;
-    uint32_t a_bits;
-    uint32_t a_shift;
-    uint8_t reserved[8];
+    uint8_t r_bits;
+    uint8_t r_shift;
+    uint8_t g_bits;
+    uint8_t g_shift;
+    uint8_t b_bits;
+    uint8_t b_shift;
+    uint8_t a_bits;
+    uint8_t a_shift;
+    uint8_t is_signed;
+    uint8_t is_float;
+    uint8_t is_shared_exponent;
+    uint8_t reserved[29];
 } WagnosticState;
+
+// ============================================================
+// Format Decoders
+// ============================================================
+
+static inline double decodeFloat16(uint16_t binary) {
+    int sign = (binary & 0x8000) ? -1 : 1;
+    int exp = (binary & 0x7C00) >> 10;
+    int frac = binary & 0x03FF;
+    if (exp == 0) {
+        if (frac == 0) return 0.0;
+        return sign * pow(2.0, -14.0) * (frac / 1024.0);
+    } else if (exp == 0x1F) {
+        return frac == 0 ? sign * INFINITY : NAN;
+    }
+    return sign * pow(2.0, exp - 15.0) * (1.0 + frac / 1024.0);
+}
+
+static inline double decodeSharedExp(uint64_t val, uint8_t bits, uint8_t shift, uint8_t totalExp) {
+    uint64_t mantissa = (val >> shift) & ((1ULL << bits) - 1ULL);
+    double norm = (double)mantissa / (double)((1ULL << bits) - 1ULL);
+    int exp = (int)totalExp - 15;
+    return norm * pow(2.0, exp);
+}
+
+static inline uint64_t get_mask(uint8_t bits) {
+    return (bits >= 64) ? 0xFFFFFFFFFFFFFFFFULL : ((1ULL << bits) - 1ULL);
+}
+
+static inline uint8_t extractChannel(uint64_t px, uint64_t px2, uint64_t px3, uint64_t px4, uint8_t bits, uint8_t shift, bool is_shared_exp, bool is_float, bool is_signed, uint8_t ab, uint8_t a_shift) {
+    if (!bits) return 0;
+    uint64_t val = 0;
+    if (shift < 64) val = (px >> shift) & get_mask(bits);
+    else if (shift < 128) val = (px2 >> (shift - 64)) & get_mask(bits);
+    else if (shift < 192) val = (px3 >> (shift - 128)) & get_mask(bits);
+    else val = (px4 >> (shift - 192)) & get_mask(bits);
+
+    if (is_shared_exp) {
+        uint64_t sharedExp = (px >> a_shift) & get_mask(ab);
+        double floatVal = decodeSharedExp(px, bits, shift, (uint8_t)sharedExp);
+        int mapped = (int)(floatVal * 255.0);
+        return mapped < 0 ? 0 : (mapped > 255 ? 255 : mapped);
+    }
+
+    if (is_float) {
+        double f = 0.0;
+        if (bits == 16) f = decodeFloat16((uint16_t)val);
+        else if (bits == 32) {
+            float f32; memcpy(&f32, &val, 4); f = f32;
+        } else if (bits == 64) {
+            double f64; memcpy(&f64, &val, 8); f = f64;
+        }
+        int mapped = (int)(f * 255.0);
+        return mapped < 0 ? 0 : (mapped > 255 ? 255 : mapped);
+    }
+
+    if (is_signed) {
+        uint64_t maxVal = get_mask(bits - 1);
+        uint64_t signBit = (val >> (bits - 1)) & 1ULL;
+        int64_t sVal = val;
+        if (signBit) sVal -= (1ULL << bits);
+        int mapped = (int)(sVal * 255 / (int64_t)maxVal);
+        return mapped < 0 ? 0 : (mapped > 255 ? 255 : mapped);
+    }
+
+    uint64_t maxVal = get_mask(bits);
+    return (uint8_t)(val * 255 / maxVal);
+}
 
 static int g_is_tar = 0;
 static char g_rom_path[1024] = {0};
@@ -221,9 +292,15 @@ static void render_rect_to_texture(SDL_Texture *texture, uint8_t *vram, Wagnosti
     for (int y = ry; y < ry + rh; y++) {
         uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (y - ry) * pitch);
         for (int x = rx; x < rx + rw; x++) {
-            uint64_t px = 0;
+            uint64_t px = 0, px2 = 0, px3 = 0, px4 = 0;
             size_t idx = y * W + x;
-            if (BPP == 64) px = ((uint64_t*)vram)[idx];
+            if (BPP == 256) {
+                uint64_t* p = (uint64_t*)(vram + idx * 32);
+                px = p[0]; px2 = p[1]; px3 = p[2]; px4 = p[3];
+            } else if (BPP == 128) {
+                uint64_t* p = (uint64_t*)(vram + idx * 16);
+                px = p[0]; px2 = p[1];
+            } else if (BPP == 64) px = ((uint64_t*)vram)[idx];
             else if (BPP == 32) px = ((uint32_t*)vram)[idx];
             else if (BPP == 24) {
                 uint8_t *p = vram + idx * 3;
@@ -245,15 +322,21 @@ static void render_rect_to_texture(SDL_Texture *texture, uint8_t *vram, Wagnosti
             }
 
             uint32_t r = 0, g = 0, b = 0, a = 255;
+            bool is_float = s ? s->is_float : 0;
+            bool is_signed = s ? s->is_signed : 0;
+            bool is_shared_exp = s ? s->is_shared_exponent : 0;
+            
             if (is_grayscale) {
-                uint32_t lum = (uint32_t)(((px >> a_s) & ((1ULL << a_b) - 1)) * 255 / ((1ULL << a_b) - 1));
+                uint32_t lum = extractChannel(px, px2, px3, px4, a_b, a_s, is_shared_exp, is_float, is_signed, a_b, a_s);
                 r = g = b = lum;
                 a = 255;
             } else {
-                if (r_b) r = (uint32_t)(((px >> r_s) & ((1ULL << r_b) - 1)) * 255 / ((1ULL << r_b) - 1));
-                if (g_b) g = (uint32_t)(((px >> g_s) & ((1ULL << g_b) - 1)) * 255 / ((1ULL << g_b) - 1));
-                if (b_b) b = (uint32_t)(((px >> b_s) & ((1ULL << b_b) - 1)) * 255 / ((1ULL << b_b) - 1));
-                if (a_b) a = (uint32_t)(((px >> a_s) & ((1ULL << a_b) - 1)) * 255 / ((1ULL << a_b) - 1));
+                r = extractChannel(px, px2, px3, px4, r_b, r_s, is_shared_exp, is_float, is_signed, a_b, a_s);
+                g = extractChannel(px, px2, px3, px4, g_b, g_s, is_shared_exp, is_float, is_signed, a_b, a_s);
+                b = extractChannel(px, px2, px3, px4, b_b, b_s, is_shared_exp, is_float, is_signed, a_b, a_s);
+                if (a_b && !is_shared_exp) {
+                    a = extractChannel(px, px2, px3, px4, a_b, a_s, 0, is_float, is_signed, a_b, a_s);
+                }
             }
             dst[x - rx] = (a << 24) | (b << 16) | (g << 8) | r;
         }

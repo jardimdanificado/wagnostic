@@ -22,7 +22,11 @@ ROM_DIRS = \
 	roms/bpp2_test \
 	roms/bpp4_test \
 	roms/exotic1_test \
-	roms/exotic2_test
+	roms/exotic2_test \
+	roms/float_test \
+	roms/float64_test \
+	roms/shared_exp_test \
+	roms/signed_test
 
 
 

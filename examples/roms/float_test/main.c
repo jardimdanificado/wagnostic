@@ -1,12 +1,10 @@
 #include <stdint.h>
 
-typedef struct { int x, y, w, h; } Rect;
-
 typedef struct {
     uint32_t width, height, bpp, scale;
     char title[128];
     uint32_t dirty_count;
-    Rect dirty_rects[32];
+    struct { int x, y, w, h; } dirty_rects[32];
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
     int32_t mouse_wheel;
@@ -35,13 +33,8 @@ typedef struct {
 
 static struct {
     State s;
-    uint8_t vram[320 * 240 * 1];
+    uint8_t vram[320 * 240 * (128 / 8)];
 } rom;
-
-static void redraw() {
-    rom.s.dirty_count = 1;
-    rom.s.dirty_rects[0] = (Rect){0, 0, (int)rom.s.width, (int)rom.s.height};
-}
 
 static int initialized = 0;
 
@@ -49,30 +42,42 @@ int wupdate() {
     if (!initialized) {
         rom.s.width = 320;
         rom.s.height = 240;
-        rom.s.bpp = 8;
-        rom.s.scale = 1;
+        rom.s.bpp = 128;
+        rom.s.scale = 2;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
-        char* t = rom.s.title;
-        const char* src = "Fallback Test";
-        int i = 0;
-        while (src[i] && i < 127) { t[i] = src[i]; i++; }
-        t[i] = '\0';
+        
+        
+rom.s.r_bits = 32; rom.s.r_shift = 0;
+rom.s.g_bits = 32; rom.s.g_shift = 32;
+rom.s.b_bits = 32; rom.s.b_shift = 64;
+rom.s.a_bits = 32; rom.s.a_shift = 96;
+rom.s.is_float = 1;
+
+        
+        const char* title = "RGBA32323232F Example";
+        for (int i = 0; i < 127 && title[i]; i++) rom.s.title[i] = title[i];
+        
         initialized = 1;
     }
+    
+    float* fb = (float*)rom.vram;
+    for (int y = 0; y < 240; y++) {
+        for (int x = 0; x < 320; x++) {
+            int idx = (y * 320 + x) * (128 / 8 / sizeof(float));
+            
+            fb[idx + 0] = (float)x / 320.0f;
+            fb[idx + 1] = (float)y / 240.0f;
+            fb[idx + 2] = 0.5f;
+            fb[idx + 3] = 1.0f;
 
-    uint8_t* fb = (uint8_t*)rom.vram;
-    static uint32_t last_tick = 0;
-    static uint8_t color = 0;
-
-    uint32_t now = rom.s.ticks;
-    if (now - last_tick > 1000) {
-        color += 32;
-        last_tick = now;
+        }
     }
-
-    for (int i = 0; i < 320 * 240; i++)
-        fb[i] = color;
-
-    redraw();
+    
+    rom.s.dirty_count = 1;
+    rom.s.dirty_rects[0].x = 0;
+    rom.s.dirty_rects[0].y = 0;
+    rom.s.dirty_rects[0].w = 320;
+    rom.s.dirty_rects[0].h = 240;
+    
     return (int)&rom.s;
 }
