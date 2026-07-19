@@ -4,8 +4,9 @@
 
 typedef struct { int x, y, w, h; } Rect;
 
+#pragma pack(push, 1)
 typedef struct {
-    uint32_t width, height, bpp, scale;
+    uint32_t width, height, scale;
     char title[128];
     uint32_t dirty_count;
     Rect dirty_rects[32];
@@ -21,19 +22,15 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint8_t r_bits;
-    uint8_t r_shift;
-    uint8_t g_bits;
-    uint8_t g_shift;
-    uint8_t b_bits;
-    uint8_t b_shift;
-    uint8_t a_bits;
-    uint8_t a_shift;
-    uint8_t is_signed;
-    uint8_t is_float;
-    uint8_t is_shared_exponent;
-    uint8_t reserved[29];
+    uint32_t r_bits, r_shift;
+    uint32_t g_bits, g_shift;
+    uint32_t b_bits, b_shift;
+    uint32_t a_bits, a_shift;
+    uint32_t x_bits, x_shift;
+    uint8_t is_signed, is_float, is_shared_exponent, format_padding;
+    uint8_t reserved[512];
 } State;
+#pragma pack(pop)
 
 static struct {
     State s;
@@ -136,8 +133,7 @@ int wupdate() {
     if (!initialized) {
         rom.s.width = 320;
         rom.s.height = 240;
-        rom.s.bpp = 16;
-        rom.s.scale = 2;
+                rom.s.scale = 2;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
         char* t = rom.s.title;
         const char* src = "Display Test - 16bpp";
@@ -200,7 +196,7 @@ int wupdate() {
     if (k3 && !key3_was_down) current_bpp = 32;
     key3_was_down = k3;
 
-    rom.s.bpp = current_bpp;
+    // 
 
     clear_screen(32, 32, 32);
     draw_color_bars();

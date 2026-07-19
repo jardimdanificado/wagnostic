@@ -4,8 +4,9 @@
 
 typedef struct { int x, y, w, h; } Rect;
 
+#pragma pack(push, 1)
 typedef struct {
-    uint32_t width, height, bpp, scale;
+    uint32_t width, height, scale;
     char title[128];
     uint32_t dirty_count;
     Rect dirty_rects[32];
@@ -21,19 +22,15 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint8_t r_bits;
-    uint8_t r_shift;
-    uint8_t g_bits;
-    uint8_t g_shift;
-    uint8_t b_bits;
-    uint8_t b_shift;
-    uint8_t a_bits;
-    uint8_t a_shift;
-    uint8_t is_signed;
-    uint8_t is_float;
-    uint8_t is_shared_exponent;
-    uint8_t reserved[29];
+    uint32_t r_bits, r_shift;
+    uint32_t g_bits, g_shift;
+    uint32_t b_bits, b_shift;
+    uint32_t a_bits, a_shift;
+    uint32_t x_bits, x_shift;
+    uint8_t is_signed, is_float, is_shared_exponent, format_padding;
+    uint8_t reserved[512];
 } State;
+#pragma pack(pop)
 
 static struct {
     State s;
@@ -164,8 +161,7 @@ int wupdate() {
     if (!initialized) {
         rom.s.width = 320;
         rom.s.height = 240;
-        rom.s.bpp = 16;
-        rom.s.scale = 2;
+                rom.s.scale = 2;
         rom.s.audio_size = 8192;
         rom.s.audio_sample_rate = 22050;
         rom.s.audio_bpp = 2;
@@ -183,7 +179,7 @@ int wupdate() {
         if (current_bpp == 8) current_bpp = 16;
         else if (current_bpp == 16) current_bpp = 32;
         else current_bpp = 8;
-        rom.s.bpp = current_bpp;
+        // 
         update_title();
     }
     sp_was = rom.s.keys[44];
@@ -196,9 +192,9 @@ int wupdate() {
     }
     r_was = rom.s.keys[21];
 
-    if (rom.s.keys[30] && !k1_was) { current_bpp = 8; rom.s.bpp = 8; update_title(); }
-    if (rom.s.keys[31] && !k2_was) { current_bpp = 16; rom.s.bpp = 16; update_title(); }
-    if (rom.s.keys[32] && !k3_was) { current_bpp = 32; rom.s.bpp = 32; update_title(); }
+    if (rom.s.keys[30] && !k1_was) { current_bpp = 8; /* state.bpp was 8 */ update_title(); }
+    if (rom.s.keys[31] && !k2_was) { current_bpp = 16; /* state.bpp was 16 */ update_title(); }
+    if (rom.s.keys[32] && !k3_was) { current_bpp = 32; /* state.bpp was 32 */ update_title(); }
     k1_was = rom.s.keys[30]; k2_was = rom.s.keys[31]; k3_was = rom.s.keys[32];
 
     if (rom.s.keys[41]) return 0;

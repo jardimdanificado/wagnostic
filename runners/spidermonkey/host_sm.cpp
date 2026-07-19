@@ -75,11 +75,11 @@ static uint8_t* tar_extract_file(const char* tar_path, const char* target_filena
 
 typedef struct { int x, y, w, h; } Rect;
 
+#pragma pack(push, 1)
 typedef struct {
-    uint32_t width, height, bpp, scale;
+    uint32_t width, height, scale;
     char title[128];
-    uint32_t dirty_count;
-    Rect dirty_rects[32];
+    uint32_t dirty_rects;
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
     int32_t mouse_wheel;
@@ -92,19 +92,15 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint8_t r_bits;
-    uint8_t r_shift;
-    uint8_t g_bits;
-    uint8_t g_shift;
-    uint8_t b_bits;
-    uint8_t b_shift;
-    uint8_t a_bits;
-    uint8_t a_shift;
-    uint8_t is_signed;
-    uint8_t is_float;
-    uint8_t is_shared_exponent;
-    uint8_t reserved[29];
+    uint32_t r_bits, r_shift;
+    uint32_t g_bits, g_shift;
+    uint32_t b_bits, b_shift;
+    uint32_t a_bits, a_shift;
+    uint32_t x_bits, x_shift;
+    uint8_t is_signed, is_float, is_shared_exponent, format_padding;
+    uint8_t reserved[512];
 } WagnosticState;
+#pragma pack(pop)
 
 static_assert(sizeof(WagnosticState) == 1024, "WagnosticState size mismatch — check struct layout");
 
@@ -301,6 +297,28 @@ static void render_quad(GLuint tex_id) {
 }
 
 
+static inline uint32_t compute_bpp(WagnosticState* s) {
+    if (!s) return 32;
+    uint32_t max_bit = 0;
+    if (s->r_bits && s->r_shift + s->r_bits > max_bit) max_bit = s->r_shift + s->r_bits;
+    if (s->g_bits && s->g_shift + s->g_bits > max_bit) max_bit = s->g_shift + s->g_bits;
+    if (s->b_bits && s->b_shift + s->b_bits > max_bit) max_bit = s->b_shift + s->b_bits;
+    if (s->a_bits && s->a_shift + s->a_bits > max_bit) max_bit = s->a_shift + s->a_bits;
+    if (s->x_bits && s->x_shift + s->x_bits > max_bit) max_bit = s->x_shift + s->x_bits;
+    
+    // Round up to nearest standard size
+    if (max_bit <= 1) return 1;
+    if (max_bit <= 2) return 2;
+    if (max_bit <= 4) return 4;
+    if (max_bit <= 8) return 8;
+    if (max_bit <= 16) return 16;
+    if (max_bit <= 24) return 24;
+    if (max_bit <= 32) return 32;
+    if (max_bit <= 64) return 64;
+    if (max_bit <= 128) return 128;
+    return 256;
+}
+
 static inline uint64_t get_mask(uint8_t bits) {
     return (bits >= 64) ? 0xFFFFFFFFFFFFFFFFULL : ((1ULL << bits) - 1ULL);
 }
@@ -355,7 +373,7 @@ static void unpack_rect_cpu(WagnosticState *s, uint8_t* vram, uint32_t* dst, int
     uint32_t a_b = s ? s->a_bits : 0;
     uint32_t a_s = s ? s->a_shift : 0;
     
-    uint32_t bpp = s ? s->bpp : 32;
+    uint32_t bpp = compute_bpp(s);
     if (!r_b && !g_b && !b_b && !a_b) {
         if (bpp == 32) {
             a_b = 8; a_s = 24; b_b = 8; b_s = 16; g_b = 8; g_s = 8; r_b = 8; r_s = 0;
@@ -376,7 +394,6 @@ static void unpack_rect_cpu(WagnosticState *s, uint8_t* vram, uint32_t* dst, int
         for (int x = rx; x < rx + rw; x++) {
             uint32_t idx = y * W + x;
             uint64_t px = 0;
-            uint32_t bpp = s ? s->bpp : 32;
             if (bpp == 64) px = ((uint64_t*)vram)[idx];
             else if (bpp == 32) px = ((uint32_t*)vram)[idx];
             else if (bpp == 24) {
@@ -611,7 +628,7 @@ static void init_from_state() {
 
     W = s->width;   if (W == 0)   W = 320;
     H = s->height;  if (H == 0)   H = 240;
-    BPP = s->bpp;   if (BPP == 0) BPP = 32;
+    BPP = compute_bpp(s);
     SCALE = s->scale; if (SCALE == 0) SCALE = 1;
 
     char title[128];
@@ -940,7 +957,7 @@ int main(int argc, char** argv) {
             WagnosticState *s = get_state();
             uint32_t cur_W     = s ? s->width  : 320;
             uint32_t cur_H     = s ? s->height : 240;
-            uint32_t cur_BPP   = s ? s->bpp    : 32;
+            uint32_t cur_BPP   = compute_bpp(s);
             uint32_t cur_SCALE = s ? s->scale  : 1;
             if (cur_W == 0)     cur_W = 320;
             if (cur_H == 0)     cur_H = 240;
@@ -963,12 +980,17 @@ int main(int argc, char** argv) {
         {
             WagnosticState *s = get_state();
             if (!s) continue;
-            uint32_t dirty_count = s->dirty_count;
-            if (dirty_count > 0) {
+            if (s->dirty_rects == 0) {
                 set_viewport_with_letterbox();
-
-                if (dirty_count == 1) {
-                    Rect r = s->dirty_rects[0];
+                upload_and_render();
+            } else {
+                set_viewport_with_letterbox();
+                uint32_t* rect_data = (uint32_t*)(wasm_memory + s->dirty_rects);
+                uint32_t count = rect_data[0];
+                Rect* rects = (Rect*)(rect_data + 1);
+                
+                if (count == 1) {
+                    Rect r = rects[0];
                     if (r.x == 0 && r.y == 0 &&
                         (uint32_t)r.w == W && (uint32_t)r.h == H) {
                         upload_and_render();
@@ -978,17 +1000,14 @@ int main(int argc, char** argv) {
                         render_quad(vram_textures[tex_idx]);
                         SDL_GL_SwapWindow(window);
                     }
-                } else {
-                    uint32_t count = dirty_count;
-                    if (count > 32) count = 32;
+                } else if (count > 1) {
                     for (uint32_t i = 0; i < count; i++) {
-                        upload_dirty_rect(s->dirty_rects[i]);
+                        upload_dirty_rect(rects[i]);
                     }
                     glClear(GL_COLOR_BUFFER_BIT);
                     render_quad(vram_textures[tex_idx]);
                     SDL_GL_SwapWindow(window);
                 }
-                s->dirty_count = 0;
             }
         }
 

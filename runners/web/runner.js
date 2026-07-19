@@ -121,53 +121,60 @@
     let s = {
       w:               mem.getUint32(ptr + 0, true),
       h:               mem.getUint32(ptr + 4, true),
-      bpp:             mem.getUint32(ptr + 8, true),
-      scale:           mem.getUint32(ptr + 12, true),
-      dirtyCount:      mem.getUint32(ptr + 144, true),
-      dirtyRects:      ptr + 148,
-      mouseX:          mem.getInt32(ptr + 660, true),
-      mouseY:          mem.getInt32(ptr + 664, true),
-      mouseButtons:    mem.getUint32(ptr + 668, true),
-      mouseWheel:      mem.getInt32(ptr + 672, true),
-      gamepadButtons:  mem.getUint32(ptr + 932, true),
-      ticks:           mem.getUint32(ptr + 936, true),
-      targetFps:       mem.getUint32(ptr + 940, true),
-      audioSize:       mem.getUint32(ptr + 944, true),
-      audioSampleRate: mem.getUint32(ptr + 948, true),
-      audioBpp:        mem.getUint32(ptr + 952, true),
-      audioChannels:   mem.getUint32(ptr + 956, true),
-      audioWrite:      mem.getUint32(ptr + 960, true),
-      audioRead:       mem.getUint32(ptr + 964, true),
-      audioUnderrun:   mem.getUint32(ptr + 968, true),
-      audioOverrun:    mem.getUint32(ptr + 972, true),
-      vramOffset:      mem.getUint32(ptr + 976, true),
-      audioBuffer:     mem.getUint32(ptr + 980, true),
-      rBits:           mem.getUint8(ptr + 984),
-      rShift:          mem.getUint8(ptr + 985),
-      gBits:           mem.getUint8(ptr + 986),
-      gShift:          mem.getUint8(ptr + 987),
-      bBits:           mem.getUint8(ptr + 988),
-      bShift:          mem.getUint8(ptr + 989),
-      aBits:           mem.getUint8(ptr + 990),
-      aShift:          mem.getUint8(ptr + 991),
-      isSigned:        mem.getUint8(ptr + 992),
-      isFloat:         mem.getUint8(ptr + 993),
-      isSharedExp:     mem.getUint8(ptr + 994),
+      scale:           mem.getUint32(ptr + 8, true),
+      dirtyRects:      mem.getUint32(ptr + 140, true),
+      mouseX:          mem.getInt32(ptr + 144, true),
+      mouseY:          mem.getInt32(ptr + 148, true),
+      mouseButtons:    mem.getUint32(ptr + 152, true),
+      mouseWheel:      mem.getInt32(ptr + 156, true),
+      gamepadButtons:  mem.getUint32(ptr + 416, true),
+      ticks:           mem.getUint32(ptr + 420, true),
+      targetFps:       mem.getUint32(ptr + 424, true),
+      audioSize:       mem.getUint32(ptr + 428, true),
+      audioSampleRate: mem.getUint32(ptr + 432, true),
+      audioBpp:        mem.getUint32(ptr + 436, true),
+      audioChannels:   mem.getUint32(ptr + 440, true),
+      audioWrite:      mem.getUint32(ptr + 444, true),
+      audioRead:       mem.getUint32(ptr + 448, true),
+      audioUnderrun:   mem.getUint32(ptr + 452, true),
+      audioOverrun:    mem.getUint32(ptr + 456, true),
+      vramOffset:      mem.getUint32(ptr + 460, true),
+      audioBuffer:     mem.getUint32(ptr + 464, true),
+      rBits:           mem.getUint32(ptr + 468, true),
+      rShift:          mem.getUint32(ptr + 472, true),
+      gBits:           mem.getUint32(ptr + 476, true),
+      gShift:          mem.getUint32(ptr + 480, true),
+      bBits:           mem.getUint32(ptr + 484, true),
+      bShift:          mem.getUint32(ptr + 488, true),
+      aBits:           mem.getUint32(ptr + 492, true),
+      aShift:          mem.getUint32(ptr + 496, true),
+      xBits:           mem.getUint32(ptr + 500, true),
+      xShift:          mem.getUint32(ptr + 504, true),
+      isSigned:        mem.getUint8(ptr + 508),
+      isFloat:         mem.getUint8(ptr + 509),
+      isSharedExp:     mem.getUint8(ptr + 510)
     };
-    if (!s.bpp) s.bpp = 32;
-    if (!s.rBits && !s.gBits && !s.bBits && !s.aBits) {
-        if (s.bpp === 32) {
-            s.aBits = 8; s.aShift = 24; s.bBits = 8; s.bShift = 16; s.gBits = 8; s.gShift = 8; s.rBits = 8; s.rShift = 0;
-        } else if (s.bpp === 24) {
-            s.bBits = 8; s.bShift = 16; s.gBits = 8; s.gShift = 8; s.rBits = 8; s.rShift = 0;
-        } else if (s.bpp === 16) {
-            s.rBits = 5; s.rShift = 11; s.gBits = 6; s.gShift = 5; s.bBits = 5; s.bShift = 0;
-        } else if (s.bpp === 8) {
-            s.rBits = 3; s.rShift = 5; s.gBits = 3; s.gShift = 2; s.bBits = 2; s.bShift = 0;
-        } else if (s.bpp === 4 || s.bpp === 2 || s.bpp === 1) {
-            s.aBits = s.bpp; s.aShift = 0;
-        }
-    }
+
+    let max_bit = 0;
+    if (s.rBits && s.rShift + s.rBits > max_bit) max_bit = s.rShift + s.rBits;
+    if (s.gBits && s.gShift + s.gBits > max_bit) max_bit = s.gShift + s.gBits;
+    if (s.bBits && s.bShift + s.bBits > max_bit) max_bit = s.bShift + s.bBits;
+    if (s.aBits && s.aShift + s.aBits > max_bit) max_bit = s.aShift + s.aBits;
+    if (s.xBits && s.xShift + s.xBits > max_bit) max_bit = s.xShift + s.xBits;
+    
+    let bpp = 256;
+    if (max_bit <= 1) bpp = 1;
+    else if (max_bit <= 2) bpp = 2;
+    else if (max_bit <= 4) bpp = 4;
+    else if (max_bit <= 8) bpp = 8;
+    else if (max_bit <= 16) bpp = 16;
+    else if (max_bit <= 24) bpp = 24;
+    else if (max_bit <= 32) bpp = 32;
+    else if (max_bit <= 64) bpp = 64;
+    else if (max_bit <= 128) bpp = 128;
+    else bpp = 256;
+    s.bpp = bpp;
+
     return s;
   }
 
@@ -354,29 +361,38 @@ function unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch
     ctx.putImageData(imageData, 0, 0);
   }
 
-  function renderDirtyRects(state, w, h, bpp, vramPtr, dirtyCount, dirtyRectsPtr) {
+  function renderDirtyRects(state, w, h, bpp, vramPtr, dirtyRectsOffset) {
     const isGrayscale = (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits > 0) || 
                         (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits === 0 && bpp < 8);
     let ab = state.aBits > 0 ? state.aBits : (bpp < 8 ? bpp : 0);
     const bppBytes = bpp >> 3;
-    const dataView = new DataView(wasmMemory.buffer, dirtyRectsPtr, MAX_DIRTY_RECTS * RECT_STRIDE);
-    const isFullScreen = dirtyCount === 1 &&
-      dataView.getInt32(0, true) === 0 &&
-      dataView.getInt32(4, true) === 0 &&
-      dataView.getInt32(8, true) === w &&
-      dataView.getInt32(12, true) === h;
+    
+    if (dirtyRectsOffset === 0) {
+        renderFullFrame(state, w, h, bpp, vramPtr);
+        return;
+    }
+    
+    const memView = new DataView(wasmMemory.buffer);
+    const count = memView.getUint32(dirtyRectsOffset, true);
+    const rectsPtr = dirtyRectsOffset + 4;
+    
+    const isFullScreen = count === 1 &&
+      memView.getInt32(rectsPtr + 0, true) === 0 &&
+      memView.getInt32(rectsPtr + 4, true) === 0 &&
+      memView.getInt32(rectsPtr + 8, true) === w &&
+      memView.getInt32(rectsPtr + 12, true) === h;
 
     if (isFullScreen) {
       renderFullFrame(state, w, h, bpp, vramPtr);
       return;
     }
 
-    for (let r = 0; r < dirtyCount && r < MAX_DIRTY_RECTS; r++) {
-      const off = r * RECT_STRIDE;
-      const rx = dataView.getInt32(off, true);
-      const ry = dataView.getInt32(off + 4, true);
-      const rw = dataView.getInt32(off + 8, true);
-      const rh = dataView.getInt32(off + 12, true);
+    for (let r = 0; r < count; r++) {
+      const off = rectsPtr + r * RECT_STRIDE;
+      const rx = memView.getInt32(off, true);
+      const ry = memView.getInt32(off + 4, true);
+      const rw = memView.getInt32(off + 8, true);
+      const rh = memView.getInt32(off + 12, true);
 
       let cx = rx, cy = ry, cw = rw, ch = rh;
       if (cx < 0) { cw += cx; cx = 0; }
@@ -401,22 +417,22 @@ function unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch
     if (!statePtr) return;
     const mem = getMem();
     const ptr = statePtr;
-    mem.setInt32(ptr + 660, mouseX, true);
-    mem.setInt32(ptr + 664, mouseY, true);
-    mem.setUint32(ptr + 668, mouseButtons, true);
-    mem.setInt32(ptr + 672, mouseWheel, true);
+    mem.setInt32(ptr + 144, mouseX, true);
+    mem.setInt32(ptr + 148, mouseY, true);
+    mem.setUint32(ptr + 152, mouseButtons, true);
+    mem.setInt32(ptr + 156, mouseWheel, true);
     
-    const keysMem = new Uint8Array(wasmMemory.buffer, ptr + 676, KEYS_COUNT);
+    const keysMem = new Uint8Array(wasmMemory.buffer, ptr + 160, KEYS_COUNT);
     keysMem.set(keysDown);
 
-    mem.setUint32(ptr + 932, gamepadBtns, true);
-    mem.setUint32(ptr + 936, (performance.now() - startTime) | 0, true);
+    mem.setUint32(ptr + 416, gamepadBtns, true);
+    mem.setUint32(ptr + 420, (performance.now() - startTime) | 0, true);
   }
 
   function resetInput() {
     if (!statePtr) return;
     mouseWheel = 0;
-    getMem().setInt32(statePtr + 672, 0, true);
+    getMem().setInt32(statePtr + 156, 0, true);
   }
 
   // ── Keyboard ───────────────────────────────────────────────────────────
@@ -631,9 +647,9 @@ function unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch
       }
 
       if (statePtr) {
-        memView.setUint32(statePtr + 964, readPtr, true);
+        memView.setUint32(statePtr + 448, readPtr, true);
         if (underrun) {
-          const uOff = statePtr + 968;
+          const uOff = statePtr + 452;
           memView.setUint32(uOff, memView.getUint32(uOff, true) + 1, true);
         }
       }
@@ -692,10 +708,8 @@ function unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch
     }
 
     // 4. Render dirty rects
-    if (g.dirtyCount > 0) {
-      renderDirtyRects(g, w, h, bpp, statePtr + g.vramOffset, g.dirtyCount, g.dirtyRects);
-      // Reset dirty count
-      getMem().setUint32(statePtr + 144, 0, true);
+    if (g.dirtyRects !== 0) {
+      renderDirtyRects(g, w, h, bpp, statePtr + g.vramOffset, g.dirtyRects);
     }
     
 

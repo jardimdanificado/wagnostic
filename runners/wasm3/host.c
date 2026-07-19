@@ -24,11 +24,11 @@
 
 typedef struct { int x, y, w, h; } Rect;
 
+#pragma pack(push, 1)
 typedef struct {
-    uint32_t width, height, bpp, scale;
+    uint32_t width, height, scale;
     char title[128];
-    uint32_t dirty_count;
-    Rect dirty_rects[32];
+    uint32_t dirty_rects;
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
     int32_t mouse_wheel;
@@ -41,19 +41,15 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint8_t r_bits;
-    uint8_t r_shift;
-    uint8_t g_bits;
-    uint8_t g_shift;
-    uint8_t b_bits;
-    uint8_t b_shift;
-    uint8_t a_bits;
-    uint8_t a_shift;
-    uint8_t is_signed;
-    uint8_t is_float;
-    uint8_t is_shared_exponent;
-    uint8_t reserved[29];
+    uint32_t r_bits, r_shift;
+    uint32_t g_bits, g_shift;
+    uint32_t b_bits, b_shift;
+    uint32_t a_bits, a_shift;
+    uint32_t x_bits, x_shift;
+    uint8_t is_signed, is_float, is_shared_exponent, format_padding;
+    uint8_t reserved[512];
 } WagnosticState;
+#pragma pack(pop)
 
 // ============================================================
 // Format Decoders
@@ -77,6 +73,28 @@ static inline double decodeSharedExp(uint64_t val, uint8_t bits, uint8_t shift, 
     double norm = (double)mantissa / (double)((1ULL << bits) - 1ULL);
     int exp = (int)totalExp - 15;
     return norm * pow(2.0, exp);
+}
+
+static inline uint32_t compute_bpp(WagnosticState* s) {
+    if (!s) return 32;
+    uint32_t max_bit = 0;
+    if (s->r_bits && s->r_shift + s->r_bits > max_bit) max_bit = s->r_shift + s->r_bits;
+    if (s->g_bits && s->g_shift + s->g_bits > max_bit) max_bit = s->g_shift + s->g_bits;
+    if (s->b_bits && s->b_shift + s->b_bits > max_bit) max_bit = s->b_shift + s->b_bits;
+    if (s->a_bits && s->a_shift + s->a_bits > max_bit) max_bit = s->a_shift + s->a_bits;
+    if (s->x_bits && s->x_shift + s->x_bits > max_bit) max_bit = s->x_shift + s->x_bits;
+    
+    // Round up to nearest standard size
+    if (max_bit <= 1) return 1;
+    if (max_bit <= 2) return 2;
+    if (max_bit <= 4) return 4;
+    if (max_bit <= 8) return 8;
+    if (max_bit <= 16) return 16;
+    if (max_bit <= 24) return 24;
+    if (max_bit <= 32) return 32;
+    if (max_bit <= 64) return 64;
+    if (max_bit <= 128) return 128;
+    return 256;
 }
 
 static inline uint64_t get_mask(uint8_t bits) {
@@ -218,7 +236,7 @@ static void read_screen_config(WagnosticState *s,
                                uint32_t *BPP, uint32_t *SCALE) {
     *W     = s ? s->width  : 0;
     *H     = s ? s->height : 0;
-    *BPP   = s ? s->bpp    : 0;
+    *BPP   = compute_bpp(s);
     *SCALE = s ? s->scale  : 0;
     if (*W == 0)     *W = 320;
     if (*H == 0)     *H = 240;
@@ -809,29 +827,19 @@ int main(int argc, char **argv) {
         if (state) {
             uint8_t *vram = get_vram(state);
 
-            uint32_t dirty_count = state->dirty_count;
-
-            if (vram && dirty_count > 0) {
-                if (dirty_count == 1) {
-                    int rx = state->dirty_rects[0].x;
-                    int ry = state->dirty_rects[0].y;
-                    int rw = state->dirty_rects[0].w;
-                    int rh = state->dirty_rects[0].h;
-                    if (rx == 0 && ry == 0 &&
-                        (uint32_t)rw == W && (uint32_t)rh == H) {
-                        render_fullscreen(texture, vram, state, W, H, BPP);
-                    } else {
-                        render_rect_to_texture(texture, vram, state,
-                            rx, ry, rw, rh, W, H, BPP);
-                    }
+            if (vram) {
+                if (state->dirty_rects == 0) {
+                    render_fullscreen(texture, vram, state, W, H, BPP);
                 } else {
-                    uint32_t count = dirty_count;
-                    if (count > 32) count = 32;
+                    uint32_t* rect_data = (uint32_t*)(g_mem + state->dirty_rects);
+                    uint32_t count = rect_data[0];
+                    Rect* rects = (Rect*)(rect_data + 1);
+                    
                     for (uint32_t i = 0; i < count; i++) {
-                        int rx = state->dirty_rects[i].x;
-                        int ry = state->dirty_rects[i].y;
-                        int rw = state->dirty_rects[i].w;
-                        int rh = state->dirty_rects[i].h;
+                        int rx = rects[i].x;
+                        int ry = rects[i].y;
+                        int rw = rects[i].w;
+                        int rh = rects[i].h;
                         render_rect_to_texture(texture, vram, state,
                             rx, ry, rw, rh, W, H, BPP);
                     }
@@ -845,8 +853,6 @@ int main(int argc, char **argv) {
                 SDL_RenderClear(renderer);
                 SDL_RenderCopy(renderer, texture, NULL, &dst);
                 SDL_RenderPresent(renderer);
-
-                state->dirty_count = 0;
             }
         }
 

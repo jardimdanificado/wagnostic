@@ -4,8 +4,9 @@
 
 typedef struct { int x, y, w, h; } Rect;
 
+#pragma pack(push, 1)
 typedef struct {
-    uint32_t width, height, bpp, scale;
+    uint32_t width, height, scale;
     char title[128];
     uint32_t dirty_count;
     Rect dirty_rects[32];
@@ -52,8 +53,7 @@ WASM_EXPORT int wupdate() {
     if (!initialized) {
         rom.s.width = 320;
         rom.s.height = 240;
-        rom.s.bpp = 8;
-        rom.s.scale = 2;
+                rom.s.scale = 2;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
         
         rom.s.r_bits = 4; rom.s.r_shift = 4;
