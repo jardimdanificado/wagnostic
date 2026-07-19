@@ -528,6 +528,7 @@ int main(int argc, char **argv) {
         SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
         (int)W, (int)H);
     SDL_SetTextureScaleMode(texture, SDL_ScaleModeNearest);
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
 
     /* ---- Audio device ---- */
     SDL_AudioDeviceID audio_dev = 0;
@@ -696,6 +697,7 @@ int main(int argc, char **argv) {
                 SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
                 (int)W, (int)H);
             SDL_SetTextureScaleMode(texture, SDL_ScaleModeNearest);
+            SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
             prev_W = W; prev_H = H; prev_BPP = BPP; prev_SCALE = SCALE;
 
             int win_w, win_h;

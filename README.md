@@ -17,10 +17,9 @@ A ROM allocates a state struct in its linear memory and returns its address from
 typedef struct { int x, y, w, h; } Rect;
 
 typedef struct {
-    uint32_t width, height, bpp, scale;
+    uint32_t width, height, scale;
     char title[128];
-    uint32_t dirty_count;
-    Rect dirty_rects[32];
+    uint32_t dirty_rects;
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
     int32_t mouse_wheel;
@@ -33,15 +32,12 @@ typedef struct {
     uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
-    uint32_t r_bits;
-    uint32_t r_shift;
-    uint32_t g_bits;
-    uint32_t g_shift;
-    uint32_t b_bits;
-    uint32_t b_shift;
-    uint32_t a_bits;
-    uint32_t a_shift;
-    uint8_t reserved[8];
+    uint32_t r_bits, r_shift;
+    uint32_t g_bits, g_shift;
+    uint32_t b_bits, b_shift;
+    uint32_t a_bits, a_shift;
+    uint32_t x_bits, x_shift;
+    uint8_t reserved[516];
 } State;
 
 static struct {
@@ -52,14 +48,18 @@ static struct {
 int wupdate() {
     rom.s.width = 320;
     rom.s.height = 240;
-    rom.s.bpp = 16;
+    rom.s.r_bits = 5; rom.s.r_shift = 11;
+    rom.s.g_bits = 6; rom.s.g_shift = 5;
+    rom.s.b_bits = 5; rom.s.b_shift = 0;
     rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
 
     uint16_t* vram = (uint16_t*)((uint8_t*)&rom.s + rom.s.vram_offset);
     vram[rom.s.mouse_y * rom.s.width + rom.s.mouse_x] = 0xF800;
 
-    rom.s.dirty_count = 1;
-    rom.s.dirty_rects[0] = (Rect){0, 0, 320, 240};
+    static struct { uint32_t count; Rect rects[32]; } my_dirty;
+    my_dirty.count = 1;
+    my_dirty.rects[0] = (Rect){0, 0, 320, 240};
+    rom.s.dirty_rects = (uint32_t)&my_dirty;
     return (int)&rom.s;  // return state pointer; 0 to quit
 }
 ```
@@ -84,37 +84,37 @@ All other fields are optional. The host applies sensible defaults so a ROM with 
 |-------|--------|---------|-------|
 | `width` | 0 | 320 | window width in pixels |
 | `height` | 4 | 240 | window height in pixels |
-| `bpp` | 8 | 32 | bits per pixel (1, 2, 4, 8, 16, 24, 32, 64) |
-| `scale` | 12 | 1 | window scale factor |
-| `title` | 16 | "Untitled" | window title (char[128]) |
-| `dirty_count` | 144 | 0 | 0=nothing, N=render N rects |
-| `dirty_rects` | 148 | — | Rect[32], each 16 bytes |
-| `mouse_x` | 660 | 0 | Mouse X position (int32) |
-| `mouse_y` | 664 | 0 | Mouse Y position (int32) |
-| `mouse_buttons` | 668 | 0 | Mouse buttons (bit 0=L, bit 1=R) |
-| `mouse_wheel` | 672 | 0 | Mouse wheel delta (int32) |
-| `keys` | 676 | all 0 | Keyboard state (uint8[256], USB HID) |
-| `gamepad_buttons` | 932 | 0 | Gamepad button state |
-| `ticks` | 936 | 0 | Time in milliseconds |
-| `target_fps` | 940 | 0 | Target FPS (0 = no limit) |
-| `audio_size` | 944 | 0 | Buffer size in bytes (0 = audio off) |
-| `audio_sample_rate` | 948 | 0 | Sample rate in Hz |
-| `audio_bpp` | 952 | 0 | Bytes per sample (1=u8, 2=s16, 4=f32) |
-| `audio_channels` | 956 | 0 | Number of channels |
-| `audio_write` | 960 | 0 | Write position (ROM → Host) |
-| `audio_read` | 964 | 0 | Read position (Host → ROM) |
-| `audio_underrun` | 968 | 0 | Underrun counter (Host → ROM) |
-| `audio_overrun` | 972 | 0 | Overrun counter (Host → ROM) |
-| `vram_offset` | 976 | 0 | Offset from state base to VRAM buffer |
-| `audio_buffer_offset` | 980 | 0 | Offset from state base to audio buffer |
-| `r_bits` | 984 | 0 | Red bit count |
-| `r_shift` | 988 | 0 | Red bit shift |
-| `g_bits` | 992 | 0 | Green bit count |
-| `g_shift` | 996 | 0 | Green bit shift |
-| `b_bits` | 1000 | 0 | Blue bit count |
-| `b_shift` | 1004 | 0 | Blue bit shift |
-| `a_bits` | 1008 | 0 | Alpha bit count |
-| `a_shift` | 1012 | 0 | Alpha bit shift |
+| `scale` | 8 | 1 | window scale factor |
+| `title` | 12 | "Untitled" | window title (char[128]) |
+| `dirty_rects` | 140 | 0 | Pointer to {uint32 count; Rect rects[32];} |
+| `mouse_x` | 144 | 0 | Mouse X position (int32) |
+| `mouse_y` | 148 | 0 | Mouse Y position (int32) |
+| `mouse_buttons` | 152 | 0 | Mouse buttons (bit 0=L, bit 1=R) |
+| `mouse_wheel` | 156 | 0 | Mouse wheel delta (int32) |
+| `keys` | 160 | all 0 | Keyboard state (uint8[256], USB HID) |
+| `gamepad_buttons` | 416 | 0 | Gamepad button state |
+| `ticks` | 420 | 0 | Time in milliseconds |
+| `target_fps` | 424 | 0 | Target FPS (0 = no limit) |
+| `audio_size` | 428 | 0 | Buffer size in bytes (0 = audio off) |
+| `audio_sample_rate` | 432 | 0 | Sample rate in Hz |
+| `audio_bpp` | 436 | 0 | Bytes per sample (1=u8, 2=s16, 4=f32) |
+| `audio_channels` | 440 | 0 | Number of channels |
+| `audio_write` | 444 | 0 | Write position (ROM → Host) |
+| `audio_read` | 448 | 0 | Read position (Host → ROM) |
+| `audio_underrun` | 452 | 0 | Underrun counter (Host → ROM) |
+| `audio_overrun` | 456 | 0 | Overrun counter (Host → ROM) |
+| `vram_offset` | 460 | 0 | Offset from state base to VRAM buffer |
+| `audio_buffer_offset` | 464 | 0 | Offset from state base to audio buffer |
+| `r_bits` | 468 | 0 | Red bit count |
+| `r_shift` | 472 | 0 | Red bit shift |
+| `g_bits` | 476 | 0 | Green bit count |
+| `g_shift` | 480 | 0 | Green bit shift |
+| `b_bits` | 484 | 0 | Blue bit count |
+| `b_shift` | 488 | 0 | Blue bit shift |
+| `a_bits` | 492 | 0 | Alpha bit count |
+| `a_shift` | 496 | 0 | Alpha bit shift |
+| `x_bits` | 500 | 0 | Padding bit count |
+| `x_shift` | 504 | 0 | Padding bit shift |
 
 **Total struct size: 1024 bytes.**
 
@@ -131,12 +131,15 @@ int wupdate() {
     static State s = {0};
     static uint8_t vram[320 * 240 * 2];
     if (s.width == 0) {
-        s.width = 320; s.height = 240; s.bpp = 16;
+        s.width = 320; s.height = 240;
+        s.r_bits = 5; s.r_shift = 11; s.g_bits = 6; s.g_shift = 5; s.b_bits = 5; s.b_shift = 0;
         s.vram_offset = sizeof(State);
     }
     // draw into vram ...
-    s.dirty_count = 1;
-    s.dirty_rects[0] = (Rect){0, 0, 320, 240};
+    static struct { uint32_t count; Rect rects[32]; } my_dirty;
+    my_dirty.count = 1;
+    my_dirty.rects[0] = (Rect){0, 0, 320, 240};
+    s.dirty_rects = (uint32_t)&my_dirty;
     return (int)&s;
 }
 ```
@@ -148,7 +151,6 @@ int wupdate() {
 |------|------|-------------|
 | `width` | `uint32` | Screen width in pixels |
 | `height` | `uint32` | Screen height in pixels |
-| `bpp` | `uint32` | Bits per pixel (1, 2, 4, 8, 16, 24, 32, or 64) |
 | `scale` | `uint32` | Window scale factor |
 | `title` | `char[128]` | Window title |
 
@@ -165,8 +167,7 @@ The host reads VRAM at `(uint8_t*)state + vram_offset`.
 ### Dirty Rectangles (ROM writes, Host reads)
 | Name | Type | Description |
 |------|------|-------------|
-| `dirty_count` | `uint32` | 0=nothing, N=render N rects |
-| `dirty_rects` | `Rect[32]` | Array of dirty rectangles |
+| `dirty_rects` | `uint32` | Pointer (WASM offset) to a `{ uint32 count; Rect rects[32]; }` struct |
 
 **Rect struct:** `{ int x, y, w, h; }` — 16 bytes each
 
@@ -225,27 +226,32 @@ Instead of redrawing the entire screen every frame, the ROM specifies which regi
 
 ### How it works
 
-1. ROM draws to its VRAM buffer
-2. ROM sets `dirty_count` and fills `dirty_rects`
-3. Host renders only the dirty regions
+1. ROM allocates a `{ uint32_t count; Rect rects[32]; }` struct
+2. ROM draws to its VRAM buffer
+3. ROM sets `count` and fills `rects` in the struct
+4. ROM sets `state.dirty_rects` to the pointer (address) of that struct
+5. Host reads the pointer and renders only the dirty regions
 
 ### Values
 
-- `dirty_count = 0` → nothing changed, host skips rendering
-- `dirty_count = N` (1-32) → host renders N dirty rectangles
-- Set `dirty_count = 1` and `dirty_rects[0]` for full-screen redraw
+- `state.dirty_rects = 0` or `count = 0` → nothing changed, host skips rendering
+- `count = N` (1-32) → host renders N dirty rectangles
+- Set `count = 1` and `rects[0]` for full-screen redraw
 
 ### Example
 
 ```c
+static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
+
 int wupdate() {
     // Move player
     player_x += 1;
 
     // Mark old and new positions as dirty
-    state.dirty_count = 2;
-    state.dirty_rects[0] = (Rect){old_x, player_y, 20, 24};
-    state.dirty_rects[1] = (Rect){player_x, player_y, 20, 24};
+    my_dirty_list.count = 2;
+    my_dirty_list.rects[0] = (Rect){old_x, player_y, 20, 24};
+    my_dirty_list.rects[1] = (Rect){player_x, player_y, 20, 24};
+    state.dirty_rects = (uint32_t)&my_dirty_list;
     return (int)&state;
 }
 ```

@@ -8,6 +8,32 @@ typedef struct { int x, y, w, h; } Rect;
 #include "../audio_common/decoders/dr_mp3.h"
 #include "data/audio.h"
 
+/* SET_BPP(s, bpp) — sets channel bits/shifts for standard pixel formats.
+ * The host derives BPP from these fields; there is no separate bpp field. */
+#define SET_BPP(s, bpp_val) do { \
+    if ((bpp_val) == 32) { \
+        (s)->r_bits=8;(s)->r_shift=0; \
+        (s)->g_bits=8;(s)->g_shift=8; \
+        (s)->b_bits=8;(s)->b_shift=16; \
+        (s)->a_bits=8;(s)->a_shift=24; \
+        (s)->x_bits=0;(s)->x_shift=0; \
+    } else if ((bpp_val) == 16) { \
+        (s)->r_bits=5;(s)->r_shift=11; \
+        (s)->g_bits=6;(s)->g_shift=5; \
+        (s)->b_bits=5;(s)->b_shift=0; \
+        (s)->a_bits=0;(s)->a_shift=0; \
+        (s)->x_bits=0;(s)->x_shift=0; \
+    } else if ((bpp_val) == 8) { \
+        (s)->r_bits=3;(s)->r_shift=5; \
+        (s)->g_bits=3;(s)->g_shift=2; \
+        (s)->b_bits=2;(s)->b_shift=0; \
+        (s)->a_bits=0;(s)->a_shift=0; \
+        (s)->x_bits=0;(s)->x_shift=0; \
+    } \
+} while(0)
+
+
+
 
 
 typedef struct {
@@ -189,6 +215,7 @@ int wupdate() {
 
     my_dirty_list.count = 1;
     my_dirty_list.rects[0] = (Rect){0, 0, 320, 240};
+    SET_BPP(&rom.s, 16);
     rom.s.dirty_rects = (uint32_t)&my_dirty_list;
     return (int)&rom.s;
 }

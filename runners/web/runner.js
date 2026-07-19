@@ -106,6 +106,7 @@
 
   // Timing
   let startTime = performance.now();
+  let lastFrameTime = 0;
 
   // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -613,9 +614,9 @@
       }
 
       if (statePtr) {
-        memView.setUint32(statePtr + 964, readPtr, true);
+        memView.setUint32(statePtr + 448, readPtr, true);  // audio_read
         if (underrun) {
-          const uOff = statePtr + 968;
+          const uOff = statePtr + 452;  // audio_underrun
           memView.setUint32(uOff, memView.getUint32(uOff, true) + 1, true);
         }
       }
@@ -634,8 +635,19 @@
 
   // ── Main Loop ──────────────────────────────────────────────────────────
 
-  function frame() {
+  function frame(now) {
     if (!running) return;
+
+    // Respect target_fps: read it from state if available
+    const targetFps = statePtr ? getMem().getUint32(statePtr + 424, true) : 0;
+    if (targetFps > 0) {
+      const interval = 1000 / targetFps;
+      if (now - lastFrameTime < interval - 0.5) {
+        requestAnimationFrame(frame);
+        return;
+      }
+    }
+    lastFrameTime = now;
 
     // 1. Write input to globals
     writeInputToGlobals();
@@ -677,19 +689,11 @@
     if (g.dirtyRectsPtr) {
       renderDirtyRects(g, w, h, bpp, statePtr + g.vramOffset, g.dirtyRectsPtr);
     }
-    
 
-
-    // 6. Reset mouse wheel
+    // 5. Reset mouse wheel
     resetInput();
-    
-    // Check if ROM wants a specific framerate
-    var target = g.targetFps;
-    if (target > 0) {
-      setTimeout(frame, 1000 / target);
-    } else {
-      requestAnimationFrame(frame);
-    }
+
+    requestAnimationFrame(frame);
   }
 
   // ── WASM Loading ───────────────────────────────────────────────────────
@@ -776,13 +780,8 @@
       console.log('ROM loaded. Title:', readTitle());
       
       running = true;
-      var nextFrame = function () { requestAnimationFrame(frame); };
-      var target = g.targetFps;
-      if (target > 0) {
-        var delay = 1000 / target;
-        nextFrame = function () { setTimeout(frame, delay); };
-      }
-      nextFrame();
+      lastFrameTime = 0;
+      requestAnimationFrame(frame);
     }).catch(function (err) {
       console.error('Failed to load ROM:', err);
     });

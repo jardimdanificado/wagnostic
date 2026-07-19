@@ -256,7 +256,12 @@ static void init_gpu_pipeline() {
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
     glBindVertexArray(0);
+
+    // Alpha blending: src_alpha over black background (matches web runner behavior)
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
+
 
 static void init_textures_and_pbos() {
     for (int i = 0; i < 3; i++) {
