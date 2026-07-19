@@ -32,10 +32,8 @@ typedef struct {
     uint8_t reserved[8];
 } State;
 
-static struct {
-    State s;
-    uint8_t vram[640 * 480 * 4];
-} rom;
+static State state;
+static uint8_t* vram = 0;
 
 static int current_bpp = 16;
 static int frame_count = 0;
@@ -43,14 +41,14 @@ static int resize_state = 0;
 static int initialized = 0;
 
 static void set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b) {
-    if (x < 0 || x >= (int)rom.s.width || y < 0 || y >= (int)rom.s.height) return;
-    int idx = y * (int)rom.s.width + x;
+    if (x < 0 || x >= (int)state.width || y < 0 || y >= (int)state.height || !vram) return;
+    int idx = y * (int)state.width + x;
     if (current_bpp == 8) {
-        rom.vram[idx] = ((r & 0xE0) | ((g & 0xE0) >> 3) | ((b & 0xC0) >> 6));
+        vram[idx] = ((r & 0xE0) | ((g & 0xE0) >> 3) | ((b & 0xC0) >> 6));
     } else if (current_bpp == 16) {
-        ((uint16_t*)rom.vram)[idx] = (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+        ((uint16_t*)vram)[idx] = (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
     } else {
-        ((uint32_t*)rom.vram)[idx] = 0xFF000000 | (b << 16) | (g << 8) | r;
+        ((uint32_t*)vram)[idx] = 0xFF000000 | (b << 16) | (g << 8) | r;
     }
 }
 
@@ -61,7 +59,7 @@ static void fill_rect(int rx, int ry, int rw, int rh, uint8_t r, uint8_t g, uint
 }
 
 static void clear(uint8_t r, uint8_t g, uint8_t b) {
-    fill_rect(0, 0, (int)rom.s.width, (int)rom.s.height, r, g, b);
+    fill_rect(0, 0, (int)state.width, (int)state.height, r, g, b);
 }
 
 static const uint8_t font5x7[10][7] = {
@@ -102,9 +100,9 @@ static void draw_keyboard(int ox, int oy, int qw, int qh) {
         if (key_idx >= 256) break;
         int cx = i % cols, cy = i / cols;
         int px = ox + 4 + cx * cell_w, py = oy + 12 + cy * cell_h;
-        uint8_t cr = rom.s.keys[key_idx] ? 0 : 50;
-        uint8_t cg = rom.s.keys[key_idx] ? 200 : 50;
-        uint8_t cb = rom.s.keys[key_idx] ? 80 : 60;
+        uint8_t cr = state.keys[key_idx] ? 0 : 50;
+        uint8_t cg = state.keys[key_idx] ? 200 : 50;
+        uint8_t cb = state.keys[key_idx] ? 80 : 60;
         fill_rect(px, py, cell_w - 1, cell_h - 1, cr, cg, cb);
     }
 }
@@ -128,26 +126,26 @@ static void draw_dirty_anim(int ox, int oy, int qw, int qh) {
 }
 
 static void draw_mouse(int ox, int oy, int qw, int qh) {
-    int mx = rom.s.mouse_x, my = rom.s.mouse_y;
-    int cx = ox + (mx * qw) / (int)rom.s.width;
-    int cy = oy + (my * qh) / (int)rom.s.height;
+    int mx = state.mouse_x, my = state.mouse_y;
+    int cx = ox + (mx * qw) / (int)state.width;
+    int cy = oy + (my * qh) / (int)state.height;
 
     for (int x = ox; x < ox + qw; x++) set_pixel(x, cy, 60, 60, 80);
     for (int y = oy; y < oy + qh; y++) set_pixel(cx, y, 60, 60, 80);
 
     fill_rect(cx - 2, cy - 2, 5, 5, 255, 255, 255);
 
-    uint8_t lb = (rom.s.mouse_buttons & 1) ? 255 : 80;
+    uint8_t lb = (state.mouse_buttons & 1) ? 255 : 80;
     fill_rect(ox + 2, oy + qh - 12, 15, 10, lb, 30, 30);
 
-    uint8_t rb = (rom.s.mouse_buttons & 2) ? 100 : 80;
+    uint8_t rb = (state.mouse_buttons & 2) ? 100 : 80;
     fill_rect(ox + 22, oy + qh - 12, 15, 10, 30, 30, rb);
 
-    draw_number(ox + 45, oy + qh - 12, (int)rom.s.mouse_wheel, 255, 255, 0);
+    draw_number(ox + 45, oy + qh - 12, (int)state.mouse_wheel, 255, 255, 0);
 }
 
 static void update_title(void) {
-    char* t = rom.s.title;
+    char* t = state.title;
     int i = 0;
     const char* prefix = "Full Test - ";
     while (*prefix) t[i++] = *prefix++;
@@ -157,17 +155,41 @@ static void update_title(void) {
     t[i] = '\0';
 }
 
+static void allocate_vram(uint32_t w, uint32_t h) {
+    uint32_t max_bpp_bytes = 4;
+    uint32_t required_bytes = w * h * max_bpp_bytes;
+    uint32_t pages = (required_bytes + 65535) / 65536;
+    
+    uint32_t current_pages = __builtin_wasm_memory_size(0);
+    
+    // Simplification for the example: just grow memory if it's the first time
+    // In a real app we'd keep track of allocated size or use malloc
+    if (!vram) {
+        __builtin_wasm_memory_grow(0, pages);
+        vram = (uint8_t*)(current_pages * 65536);
+        state.vram_offset = (uint32_t)((uint8_t*)vram - (uint8_t*)&state);
+    } else {
+        // Assume we grew enough the first time if we resize down,
+        // or grow more if we resize up. For this example we just grow if needed.
+        uint32_t current_allocated_bytes = (__builtin_wasm_memory_size(0) - current_pages) * 65536;
+        if (required_bytes > current_allocated_bytes) {
+            __builtin_wasm_memory_grow(0, pages);
+            // vram stays the same ptr, we just expanded memory behind it
+        }
+    }
+}
+
 int wupdate() {
     if (!initialized) {
-        rom.s.width = 320;
-        rom.s.height = 240;
-        rom.s.bpp = 16;
-        rom.s.scale = 2;
-        rom.s.audio_size = 8192;
-        rom.s.audio_sample_rate = 22050;
-        rom.s.audio_bpp = 2;
-        rom.s.audio_channels = 1;
-        rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
+        state.width = 320;
+        state.height = 240;
+        state.bpp = 16;
+        state.scale = 2;
+        state.audio_size = 8192;
+        state.audio_sample_rate = 22050;
+        state.audio_bpp = 2;
+        state.audio_channels = 1;
+        allocate_vram(state.width, state.height);
         update_title();
         initialized = 1;
     }
@@ -176,31 +198,32 @@ int wupdate() {
 
     static int sp_was = 0, r_was = 0, k1_was = 0, k2_was = 0, k3_was = 0;
 
-    if (rom.s.keys[44] && !sp_was) {
+    if (state.keys[44] && !sp_was) {
         if (current_bpp == 8) current_bpp = 16;
         else if (current_bpp == 16) current_bpp = 32;
         else current_bpp = 8;
-        rom.s.bpp = current_bpp;
+        state.bpp = current_bpp;
         update_title();
     }
-    sp_was = rom.s.keys[44];
+    sp_was = state.keys[44];
 
-    if (rom.s.keys[21] && !r_was) {
+    if (state.keys[21] && !r_was) {
         resize_state = (resize_state + 1) % 3;
-        if (resize_state == 0) { rom.s.width = 320; rom.s.height = 240; rom.s.scale = 2; }
-        else if (resize_state == 1) { rom.s.width = 640; rom.s.height = 480; rom.s.scale = 1; }
-        else { rom.s.width = 160; rom.s.height = 120; rom.s.scale = 4; }
+        if (resize_state == 0) { state.width = 320; state.height = 240; state.scale = 2; }
+        else if (resize_state == 1) { state.width = 640; state.height = 480; state.scale = 1; }
+        else { state.width = 160; state.height = 120; state.scale = 4; }
+        allocate_vram(state.width, state.height);
     }
-    r_was = rom.s.keys[21];
+    r_was = state.keys[21];
 
-    if (rom.s.keys[30] && !k1_was) { current_bpp = 8; rom.s.bpp = 8; update_title(); }
-    if (rom.s.keys[31] && !k2_was) { current_bpp = 16; rom.s.bpp = 16; update_title(); }
-    if (rom.s.keys[32] && !k3_was) { current_bpp = 32; rom.s.bpp = 32; update_title(); }
-    k1_was = rom.s.keys[30]; k2_was = rom.s.keys[31]; k3_was = rom.s.keys[32];
+    if (state.keys[30] && !k1_was) { current_bpp = 8; state.bpp = 8; update_title(); }
+    if (state.keys[31] && !k2_was) { current_bpp = 16; state.bpp = 16; update_title(); }
+    if (state.keys[32] && !k3_was) { current_bpp = 32; state.bpp = 32; update_title(); }
+    k1_was = state.keys[30]; k2_was = state.keys[31]; k3_was = state.keys[32];
 
-    if (rom.s.keys[41]) return 0;
+    if (state.keys[41]) return 0;
 
-    int W = (int)rom.s.width, H = (int)rom.s.height;
+    int W = (int)state.width, H = (int)state.height;
     clear(15, 15, 20);
 
     fill_rect(W/2, 0, 1, H, 60, 60, 80);
@@ -210,10 +233,10 @@ int wupdate() {
     draw_dirty_anim(W/2 + 1, 0, W/2 - 1, H/2);
     draw_mouse(0, H/2 + 1, W/2, H/2 - 1);
 
-    rom.s.dirty_count = 3;
-    rom.s.dirty_rects[0] = (Rect){0, 0, W/2, H/2};
-    rom.s.dirty_rects[1] = (Rect){W/2, 0, W - W/2, H/2};
-    rom.s.dirty_rects[2] = (Rect){0, H/2, W/2, H - H/2};
+    state.dirty_count = 3;
+    state.dirty_rects[0] = (Rect){0, 0, W/2, H/2};
+    state.dirty_rects[1] = (Rect){W/2, 0, W - W/2, H/2};
+    state.dirty_rects[2] = (Rect){0, H/2, W/2, H - H/2};
 
-    return (int)&rom.s;
+    return (int)&state;
 }

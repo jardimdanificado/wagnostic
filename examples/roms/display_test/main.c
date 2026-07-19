@@ -34,7 +34,7 @@ typedef struct {
 
 static struct {
     State s;
-    uint8_t vram[320 * 240 * 4];
+    uint8_t vram[640 * 480 * 4];
 } rom;
 
 static int current_bpp = 16;

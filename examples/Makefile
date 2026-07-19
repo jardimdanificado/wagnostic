@@ -14,6 +14,8 @@ ROM_DIRS = \
 	roms/audio_mp3 \
 	roms/audio_ogg \
 	roms/full_test \
+	roms/full_test_static \
+	roms/full_test_dynamic \
 	roms/buttons_test \
 	roms/fallback_test \
 	roms/bpp1_test \
@@ -31,7 +33,7 @@ RUNNER_DIRS = ../runners/wasm3 ../runners/spidermonkey
 export CLANG = clang
 export CFLAGS = --target=wasm32 -nostdlib -fno-delete-null-pointer-checks -O3 -w
 export LDFLAGS = -Wl,--no-entry -Wl,--export-all -Wl,--allow-undefined
-export MEM_FLAGS = -Wl,--initial-memory=8388608
+export MEM_FLAGS = 
 
 # ── Host build flags ────────────────────────────────────────────────────────
 CC = gcc

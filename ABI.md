@@ -265,7 +265,7 @@ int wupdate() {
 ```bash
 clang --target=wasm32 -nostdlib -O3 \
     -Wl,--no-entry -Wl,--export-all -Wl,--allow-undefined \
-    -Wl,--initial-memory=8388608 main.c -o rom.wasm
+    main.c -o rom.wasm
 ```
 
 Only `wupdate` needs to be exported. The `--export-all` flag is used for
