@@ -220,7 +220,7 @@ static void render_rect_to_texture(SDL_Texture *texture, uint8_t *vram, Wagnosti
 
     if (!r_b && !g_b && !b_b && !a_b) {
         if (BPP == 32) {
-            a_b = 8; a_s = 24; b_b = 8; b_s = 16; g_b = 8; g_s = 8; r_b = 8; r_s = 0;
+            a_b = 8; a_s = 24; r_b = 8; r_s = 16; g_b = 8; g_s = 8; b_b = 8; b_s = 0;
         } else if (BPP == 24) {
             b_b = 8; b_s = 16; g_b = 8; g_s = 8; r_b = 8; r_s = 0;
         } else if (BPP == 16) {

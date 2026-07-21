@@ -311,7 +311,7 @@ static void unpack_rect_cpu(WagnosticState *s, uint8_t* vram, uint32_t* dst, int
     uint32_t bpp = compute_bpp(s);
     if (!r_b && !g_b && !b_b && !a_b) {
         if (bpp == 32) {
-            a_b = 8; a_s = 24; b_b = 8; b_s = 16; g_b = 8; g_s = 8; r_b = 8; r_s = 0;
+            a_b = 8; a_s = 24; r_b = 8; r_s = 16; g_b = 8; g_s = 8; b_b = 8; b_s = 0;
         } else if (bpp == 24) {
             b_b = 8; b_s = 16; g_b = 8; g_s = 8; r_b = 8; r_s = 0;
         } else if (bpp == 16) {
