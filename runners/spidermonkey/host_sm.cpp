@@ -120,7 +120,8 @@ static inline uint32_t compute_bpp(WagnosticState* s) {
     if (max_bit <= 8)  return 8;
     if (max_bit <= 16) return 16;
     if (max_bit <= 24) return 24;
-    return 32;
+    if (max_bit <= 32) return 32;
+    return 64;
 }
 
 
@@ -298,7 +299,38 @@ static void render_quad(GLuint tex_id) {
     glUseProgram(0);
 }
 
-static void unpack_rect_cpu(WagnosticState *s, uint8_t* vram, uint32_t* dst, int rx, int ry, int rw, int rh) {
+typedef enum {
+    FMT_GENERIC = 0,
+    FMT_RGBA8888_LE,
+    FMT_BGRA8888_LE,
+    FMT_RGBX8888_LE,
+    FMT_BGRX8888_LE,
+    FMT_RGB888,
+    FMT_BGR888,
+    FMT_RGB565,
+    FMT_BGR565,
+    FMT_RGB555,
+    FMT_BGR555,
+    FMT_RGB444,
+    FMT_RGBA4444,
+    FMT_ARGB4444,
+    FMT_RGB333,
+    FMT_RGB332,
+    FMT_RGB222,
+    FMT_RGBA2222,
+    FMT_RGB111,
+    FMT_GRAY8,
+    FMT_RGB666,
+    FMT_MONO1,
+    FMT_MONO2,
+    FMT_MONO4
+} WagnosticPixelFormat;
+
+static WagnosticPixelFormat detect_pixel_format(WagnosticState *s, uint32_t BPP,
+                                               uint32_t *r_b_out, uint32_t *r_s_out,
+                                               uint32_t *g_b_out, uint32_t *g_s_out,
+                                               uint32_t *b_b_out, uint32_t *b_s_out,
+                                               uint32_t *a_b_out, uint32_t *a_s_out) {
     uint32_t r_b = s ? s->r_bits : 0;
     uint32_t r_s = s ? s->r_shift : 0;
     uint32_t g_b = s ? s->g_bits : 0;
@@ -307,64 +339,412 @@ static void unpack_rect_cpu(WagnosticState *s, uint8_t* vram, uint32_t* dst, int
     uint32_t b_s = s ? s->b_shift : 0;
     uint32_t a_b = s ? s->a_bits : 0;
     uint32_t a_s = s ? s->a_shift : 0;
-    
-    uint32_t bpp = compute_bpp(s);
-    if (!r_b && !g_b && !b_b && !a_b) {
-        if (bpp == 32) {
-            a_b = 8; a_s = 24; r_b = 8; r_s = 16; g_b = 8; g_s = 8; b_b = 8; b_s = 0;
-        } else if (bpp == 24) {
-            b_b = 8; b_s = 16; g_b = 8; g_s = 8; r_b = 8; r_s = 0;
-        } else if (bpp == 16) {
-            r_b = 5; r_s = 11; g_b = 6; g_s = 5; b_b = 5; b_s = 0;
-        } else if (bpp == 8) {
-            r_b = 3; r_s = 5; g_b = 3; g_s = 2; b_b = 2; b_s = 0;
-        } else if (bpp == 4 || bpp == 2 || bpp == 1) {
-            a_b = bpp; a_s = 0;
-        }
-    }
-    
-    int is_grayscale = (!r_b && !g_b && !b_b && a_b);
-    
-    for (int y = ry; y < ry + rh; y++) {
-        for (int x = rx; x < rx + rw; x++) {
-            uint32_t idx = y * W + x;
-            uint64_t px = 0;
-            uint32_t bpp = compute_bpp(s);
-            if (bpp == 64) px = ((uint64_t*)vram)[idx];
-            else if (bpp == 32) px = ((uint32_t*)vram)[idx];
-            else if (bpp == 24) {
-                uint8_t *p = vram + idx * 3;
-                px = p[0] | (p[1] << 8) | (p[2] << 16);
-            }
-            else if (bpp == 16) px = ((uint16_t*)vram)[idx];
-            else if (bpp == 8) px = vram[idx];
-            else if (bpp == 4) {
-                uint8_t b_val = vram[idx / 2];
-                px = (idx % 2 == 0) ? (b_val >> 4) : (b_val & 0x0F);
-            }
-            else if (bpp == 2) {
-                uint8_t b_val = vram[idx / 4];
-                px = (b_val >> (6 - (idx % 4) * 2)) & 0x03;
-            }
-            else if (bpp == 1) {
-                uint8_t b_val = vram[idx / 8];
-                px = (b_val >> (7 - (idx % 8))) & 1;
-            }
+    uint32_t x_b = s ? s->x_bits : 0;
 
-            uint32_t r = 0, g = 0, b = 0, a = 255;
-            if (is_grayscale) {
-                uint32_t lum = 0;
-                if (a_b > 0) lum = (uint32_t)(((px >> a_s) & ((1ULL << a_b) - 1)) * 255 / ((1ULL << a_b) - 1));
-                else lum = px ? 255 : 0;
-                r = g = b = lum;
-                a = 255;
-            } else {
-                if (r_b) r = (uint32_t)(((px >> r_s) & ((1ULL << r_b) - 1)) * 255 / ((1ULL << r_b) - 1));
-                if (g_b) g = (uint32_t)(((px >> g_s) & ((1ULL << g_b) - 1)) * 255 / ((1ULL << g_b) - 1));
-                if (b_b) b = (uint32_t)(((px >> b_s) & ((1ULL << b_b) - 1)) * 255 / ((1ULL << b_b) - 1));
-                if (a_b) a = (uint32_t)(((px >> a_s) & ((1ULL << a_b) - 1)) * 255 / ((1ULL << a_b) - 1));
+    if (!r_b && !g_b && !b_b && !a_b && !x_b) {
+        if (BPP == 32) { r_b = 8; r_s = 16; g_b = 8; g_s = 8; b_b = 8; b_s = 0; a_b = 8; a_s = 24; }
+        else if (BPP == 24) { r_b = 8; r_s = 16; g_b = 8; g_s = 8; b_b = 8; b_s = 0; }
+        else if (BPP == 16) { r_b = 5; r_s = 11; g_b = 6; g_s = 5; b_b = 5; b_s = 0; }
+        else if (BPP == 8)  { r_b = 3; r_s = 5;  g_b = 3; g_s = 2; b_b = 2; b_s = 0; }
+        else if (BPP == 4 || BPP == 2 || BPP == 1) { a_b = BPP; a_s = 0; }
+    }
+
+    if (r_b_out) *r_b_out = r_b; if (r_s_out) *r_s_out = r_s;
+    if (g_b_out) *g_b_out = g_b; if (g_s_out) *g_s_out = g_s;
+    if (b_b_out) *b_b_out = b_b; if (b_s_out) *b_s_out = b_s;
+    if (a_b_out) *a_b_out = a_b; if (a_s_out) *a_s_out = a_s;
+
+    if (BPP == 1) return FMT_MONO1;
+    if (BPP == 2) return FMT_MONO2;
+    if (BPP == 4) return FMT_MONO4;
+
+    if (BPP == 32) {
+        if (r_b == 8 && r_s == 0  && g_b == 8 && g_s == 8 && b_b == 8 && b_s == 16 && a_b == 8 && a_s == 24) return FMT_RGBA8888_LE;
+        if (r_b == 8 && r_s == 16 && g_b == 8 && g_s == 8 && b_b == 8 && b_s == 0  && a_b == 8 && a_s == 24) return FMT_BGRA8888_LE;
+        if (r_b == 8 && r_s == 0  && g_b == 8 && g_s == 8 && b_b == 8 && b_s == 16 && a_b == 0) return FMT_RGBX8888_LE;
+        if (r_b == 8 && r_s == 16 && g_b == 8 && g_s == 8 && b_b == 8 && b_s == 0  && a_b == 0) return FMT_BGRX8888_LE;
+    }
+
+    if (BPP == 24) {
+        if (r_b == 8 && r_s == 0  && g_b == 8 && g_s == 8 && b_b == 8 && b_s == 16) return FMT_RGB888;
+        if (r_b == 8 && r_s == 16 && g_b == 8 && g_s == 8 && b_b == 8 && b_s == 0)  return FMT_BGR888;
+    }
+
+    if (BPP == 16) {
+        if (r_b == 5 && r_s == 11 && g_b == 6 && g_s == 5  && b_b == 5 && b_s == 0  && a_b == 0) return FMT_RGB565;
+        if (r_b == 5 && r_s == 0  && g_b == 6 && g_s == 5  && b_b == 5 && b_s == 11 && a_b == 0) return FMT_BGR565;
+        if (r_b == 5 && r_s == 10 && g_b == 5 && g_s == 5  && b_b == 5 && b_s == 0  && (a_b == 0 || a_b == 1)) return FMT_RGB555;
+        if (r_b == 5 && r_s == 0  && g_b == 5 && g_s == 5  && b_b == 5 && b_s == 10 && (a_b == 0 || a_b == 1)) return FMT_BGR555;
+        if (r_b == 4 && r_s == 8  && g_b == 4 && g_s == 4  && b_b == 4 && b_s == 0  && a_b == 0) return FMT_RGB444;
+        if (r_b == 4 && r_s == 12 && g_b == 4 && g_s == 8  && b_b == 4 && b_s == 4  && a_b == 4 && a_s == 0) return FMT_RGBA4444;
+        if (r_b == 4 && r_s == 8  && g_b == 4 && g_s == 4  && b_b == 4 && b_s == 0  && a_b == 4 && a_s == 12) return FMT_ARGB4444;
+        if (r_b == 3 && r_s == 6  && g_b == 3 && g_s == 3  && b_b == 3 && b_s == 0  && a_b == 0) return FMT_RGB333;
+    }
+
+    if (BPP == 8) {
+        if (r_b == 3 && r_s == 5 && g_b == 3 && g_s == 2 && b_b == 2 && b_s == 0 && a_b == 0) return FMT_RGB332;
+        if (r_b == 2 && r_s == 4 && g_b == 2 && g_s == 2 && b_b == 2 && b_s == 0 && a_b == 0) return FMT_RGB222;
+        if (r_b == 2 && r_s == 6 && g_b == 2 && g_s == 4 && b_b == 2 && b_s == 2 && a_b == 2 && a_s == 0) return FMT_RGBA2222;
+        if (r_b == 1 && r_s == 2 && g_b == 1 && g_s == 1 && b_b == 1 && b_s == 0 && a_b == 0) return FMT_RGB111;
+        if (r_b == 0 && g_b == 0 && b_b == 0) return FMT_GRAY8;
+    }
+
+    if ((BPP == 24 || BPP == 32) && r_b == 6 && r_s == 12 && g_b == 6 && g_s == 6 && b_b == 6 && b_s == 0 && a_b == 0) {
+        return FMT_RGB666;
+    }
+
+    return FMT_GENERIC;
+}
+
+static void unpack_rect_cpu(WagnosticState *s, uint8_t* vram, uint32_t* dst, int rx, int ry, int rw, int rh) {
+    uint32_t BPP = compute_bpp(s);
+    uint32_t r_b = 0, r_s = 0, g_b = 0, g_s = 0, b_b = 0, b_s = 0, a_b = 0, a_s = 0;
+    WagnosticPixelFormat fmt = detect_pixel_format(s, BPP, &r_b, &r_s, &g_b, &g_s, &b_b, &b_s, &a_b, &a_s);
+
+    switch (fmt) {
+        case FMT_RGBA8888_LE: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint32_t *src = (const uint32_t *)(vram + (y * W + rx) * 4);
+                memcpy(dst_line, src, rw * sizeof(uint32_t));
             }
-            dst[(y - ry) * rw + (x - rx)] = (a << 24) | (b << 16) | (g << 8) | r;
+            break;
+        }
+        case FMT_BGRA8888_LE: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint32_t *src = (const uint32_t *)(vram + (y * W + rx) * 4);
+                for (int x = 0; x < rw; x++) {
+                    uint32_t px = src[x];
+                    dst_line[x] = (px & 0xFF00FF00) | ((px & 0x00FF0000) >> 16) | ((px & 0x000000FF) << 16);
+                }
+            }
+            break;
+        }
+        case FMT_RGBX8888_LE: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint32_t *src = (const uint32_t *)(vram + (y * W + rx) * 4);
+                for (int x = 0; x < rw; x++) {
+                    dst_line[x] = 0xFF000000 | (src[x] & 0x00FFFFFF);
+                }
+            }
+            break;
+        }
+        case FMT_BGRX8888_LE: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint32_t *src = (const uint32_t *)(vram + (y * W + rx) * 4);
+                for (int x = 0; x < rw; x++) {
+                    uint32_t px = src[x];
+                    dst_line[x] = 0xFF000000 | (px & 0x0000FF00) | ((px & 0x00FF0000) >> 16) | ((px & 0x000000FF) << 16);
+                }
+            }
+            break;
+        }
+        case FMT_RGB888: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint8_t *src = vram + (y * W + rx) * 3;
+                for (int x = 0; x < rw; x++) {
+                    dst_line[x] = 0xFF000000 | (src[2] << 16) | (src[1] << 8) | src[0];
+                    src += 3;
+                }
+            }
+            break;
+        }
+        case FMT_BGR888: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint8_t *src = vram + (y * W + rx) * 3;
+                for (int x = 0; x < rw; x++) {
+                    dst_line[x] = 0xFF000000 | (src[0] << 16) | (src[1] << 8) | src[2];
+                    src += 3;
+                }
+            }
+            break;
+        }
+        case FMT_RGB565: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint16_t *src = (const uint16_t *)(vram) + y * W + rx;
+                for (int x = 0; x < rw; x++) {
+                    uint32_t px = src[x];
+                    uint32_t r = (px >> 11) & 0x1F; r = (r << 3) | (r >> 2);
+                    uint32_t g = (px >> 5)  & 0x3F; g = (g << 2) | (g >> 4);
+                    uint32_t b = px & 0x1F;        b = (b << 3) | (b >> 2);
+                    dst_line[x] = 0xFF000000 | (b << 16) | (g << 8) | r;
+                }
+            }
+            break;
+        }
+        case FMT_BGR565: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint16_t *src = (const uint16_t *)(vram) + y * W + rx;
+                for (int x = 0; x < rw; x++) {
+                    uint32_t px = src[x];
+                    uint32_t b = (px >> 11) & 0x1F; b = (b << 3) | (b >> 2);
+                    uint32_t g = (px >> 5)  & 0x3F; g = (g << 2) | (g >> 4);
+                    uint32_t r = px & 0x1F;        r = (r << 3) | (r >> 2);
+                    dst_line[x] = 0xFF000000 | (b << 16) | (g << 8) | r;
+                }
+            }
+            break;
+        }
+        case FMT_RGB555: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint16_t *src = (const uint16_t *)(vram) + y * W + rx;
+                for (int x = 0; x < rw; x++) {
+                    uint32_t px = src[x];
+                    uint32_t r = (px >> 10) & 0x1F; r = (r << 3) | (r >> 2);
+                    uint32_t g = (px >> 5)  & 0x1F; g = (g << 3) | (g >> 2);
+                    uint32_t b = px & 0x1F;        b = (b << 3) | (b >> 2);
+                    uint32_t a = (a_b == 1 && !(px & (1 << a_s))) ? 0 : 255;
+                    dst_line[x] = (a << 24) | (b << 16) | (g << 8) | r;
+                }
+            }
+            break;
+        }
+        case FMT_BGR555: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint16_t *src = (const uint16_t *)(vram) + y * W + rx;
+                for (int x = 0; x < rw; x++) {
+                    uint32_t px = src[x];
+                    uint32_t b = (px >> 10) & 0x1F; b = (b << 3) | (b >> 2);
+                    uint32_t g = (px >> 5)  & 0x1F; g = (g << 3) | (g >> 2);
+                    uint32_t r = px & 0x1F;        r = (r << 3) | (r >> 2);
+                    uint32_t a = (a_b == 1 && !(px & (1 << a_s))) ? 0 : 255;
+                    dst_line[x] = (a << 24) | (b << 16) | (g << 8) | r;
+                }
+            }
+            break;
+        }
+        case FMT_RGB444: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint16_t *src = (const uint16_t *)(vram) + y * W + rx;
+                for (int x = 0; x < rw; x++) {
+                    uint32_t px = src[x];
+                    uint32_t r = (px >> 8) & 0x0F; r = (r << 4) | r;
+                    uint32_t g = (px >> 4) & 0x0F; g = (g << 4) | g;
+                    uint32_t b = px & 0x0F;        b = (b << 4) | b;
+                    dst_line[x] = 0xFF000000 | (b << 16) | (g << 8) | r;
+                }
+            }
+            break;
+        }
+        case FMT_RGBA4444: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint16_t *src = (const uint16_t *)(vram) + y * W + rx;
+                for (int x = 0; x < rw; x++) {
+                    uint32_t px = src[x];
+                    uint32_t r = (px >> 12) & 0x0F; r = (r << 4) | r;
+                    uint32_t g = (px >> 8)  & 0x0F; g = (g << 4) | g;
+                    uint32_t b = (px >> 4)  & 0x0F; b = (b << 4) | b;
+                    uint32_t a = px & 0x0F;         a = (a << 4) | a;
+                    dst_line[x] = (a << 24) | (b << 16) | (g << 8) | r;
+                }
+            }
+            break;
+        }
+        case FMT_ARGB4444: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint16_t *src = (const uint16_t *)(vram) + y * W + rx;
+                for (int x = 0; x < rw; x++) {
+                    uint32_t px = src[x];
+                    uint32_t a = (px >> 12) & 0x0F; a = (a << 4) | a;
+                    uint32_t r = (px >> 8)  & 0x0F; r = (r << 4) | r;
+                    uint32_t g = (px >> 4)  & 0x0F; g = (g << 4) | g;
+                    uint32_t b = px & 0x0F;         b = (b << 4) | b;
+                    dst_line[x] = (a << 24) | (b << 16) | (g << 8) | r;
+                }
+            }
+            break;
+        }
+        case FMT_RGB333: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint16_t *src = (const uint16_t *)(vram) + y * W + rx;
+                for (int x = 0; x < rw; x++) {
+                    uint32_t px = src[x];
+                    uint32_t r = (px >> 6) & 7; r = (r << 5) | (r << 2) | (r >> 1);
+                    uint32_t g = (px >> 3) & 7; g = (g << 5) | (g << 2) | (g >> 1);
+                    uint32_t b = px & 7;        b = (b << 5) | (b << 2) | (b >> 1);
+                    dst_line[x] = 0xFF000000 | (b << 16) | (g << 8) | r;
+                }
+            }
+            break;
+        }
+        case FMT_RGB332: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint8_t *src = vram + y * W + rx;
+                for (int x = 0; x < rw; x++) {
+                    uint32_t px = src[x];
+                    uint32_t r = (px >> 5) & 7; r = (r << 5) | (r << 2) | (r >> 1);
+                    uint32_t g = (px >> 2) & 7; g = (g << 5) | (g << 2) | (g >> 1);
+                    uint32_t b = px & 3;        b = (b << 6) | (b << 4) | (b << 2) | b;
+                    dst_line[x] = 0xFF000000 | (b << 16) | (g << 8) | r;
+                }
+            }
+            break;
+        }
+        case FMT_RGB222: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint8_t *src = vram + y * W + rx;
+                for (int x = 0; x < rw; x++) {
+                    uint32_t px = src[x];
+                    uint32_t r = (px >> 4) & 3; r = (r << 6) | (r << 4) | (r << 2) | r;
+                    uint32_t g = (px >> 2) & 3; g = (g << 6) | (g << 4) | (g << 2) | g;
+                    uint32_t b = px & 3;        b = (b << 6) | (b << 4) | (b << 2) | b;
+                    dst_line[x] = 0xFF000000 | (b << 16) | (g << 8) | r;
+                }
+            }
+            break;
+        }
+        case FMT_RGBA2222: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint8_t *src = vram + y * W + rx;
+                for (int x = 0; x < rw; x++) {
+                    uint32_t px = src[x];
+                    uint32_t r = (px >> 6) & 3; r = (r << 6) | (r << 4) | (r << 2) | r;
+                    uint32_t g = (px >> 4) & 3; g = (g << 6) | (g << 4) | (g << 2) | g;
+                    uint32_t b = (px >> 2) & 3; b = (b << 6) | (b << 4) | (b << 2) | b;
+                    uint32_t a = px & 3;        a = (a << 6) | (a << 4) | (a << 2) | a;
+                    dst_line[x] = (a << 24) | (b << 16) | (g << 8) | r;
+                }
+            }
+            break;
+        }
+        case FMT_RGB111: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint8_t *src = vram + y * W + rx;
+                for (int x = 0; x < rw; x++) {
+                    uint32_t px = src[x];
+                    uint32_t r = (px & 4) ? 255 : 0;
+                    uint32_t g = (px & 2) ? 255 : 0;
+                    uint32_t b = (px & 1) ? 255 : 0;
+                    dst_line[x] = 0xFF000000 | (b << 16) | (g << 8) | r;
+                }
+            }
+            break;
+        }
+        case FMT_GRAY8: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                const uint8_t *src = vram + y * W + rx;
+                for (int x = 0; x < rw; x++) {
+                    uint32_t lum = src[x];
+                    dst_line[x] = 0xFF000000 | (lum << 16) | (lum << 8) | lum;
+                }
+            }
+            break;
+        }
+        case FMT_RGB666: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                for (int x = rx; x < rx + rw; x++) {
+                    size_t idx = y * W + x;
+                    uint32_t px = (BPP == 32) ? ((uint32_t*)vram)[idx] : (vram[idx*3] | (vram[idx*3+1]<<8) | (vram[idx*3+2]<<16));
+                    uint32_t r = (px >> 12) & 0x3F; r = (r << 2) | (r >> 4);
+                    uint32_t g = (px >> 6)  & 0x3F; g = (g << 2) | (g >> 4);
+                    uint32_t b = px & 0x3F;         b = (b << 2) | (b >> 4);
+                    dst_line[x - rx] = 0xFF000000 | (b << 16) | (g << 8) | r;
+                }
+            }
+            break;
+        }
+        case FMT_MONO1: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                for (int x = rx; x < rx + rw; x++) {
+                    size_t idx = y * W + x;
+                    uint8_t b_val = vram[idx / 8];
+                    uint8_t bit = (b_val >> (7 - (idx % 8))) & 1;
+                    dst_line[x - rx] = bit ? 0xFFFFFFFF : 0xFF000000;
+                }
+            }
+            break;
+        }
+        case FMT_MONO2: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                for (int x = rx; x < rx + rw; x++) {
+                    size_t idx = y * W + x;
+                    uint8_t b_val = vram[idx / 4];
+                    uint8_t val = (b_val >> (6 - (idx % 4) * 2)) & 0x03;
+                    val = (val << 6) | (val << 4) | (val << 2) | val;
+                    dst_line[x - rx] = 0xFF000000 | (val << 16) | (val << 8) | val;
+                }
+            }
+            break;
+        }
+        case FMT_MONO4: {
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                for (int x = rx; x < rx + rw; x++) {
+                    size_t idx = y * W + x;
+                    uint8_t b_val = vram[idx / 2];
+                    uint8_t val = (idx % 2 == 0) ? (b_val >> 4) : (b_val & 0x0F);
+                    val = (val << 4) | val;
+                    dst_line[x - rx] = 0xFF000000 | (val << 16) | (val << 8) | val;
+                }
+            }
+            break;
+        }
+        default: {
+            int is_grayscale = (!r_b && !g_b && !b_b && a_b);
+            for (int y = ry; y < ry + rh; y++) {
+                uint32_t *dst_line = dst + (y - ry) * rw;
+                for (int x = rx; x < rx + rw; x++) {
+                    uint32_t idx = y * W + x;
+                    uint64_t px = 0;
+                    if (BPP == 64) px = ((uint64_t*)vram)[idx];
+                    else if (BPP == 32) px = ((uint32_t*)vram)[idx];
+                    else if (BPP == 24) {
+                        uint8_t *p = vram + idx * 3;
+                        px = p[0] | (p[1] << 8) | (p[2] << 16);
+                    }
+                    else if (BPP == 16) px = ((uint16_t*)vram)[idx];
+                    else if (BPP == 8) px = vram[idx];
+                    else if (BPP == 4) {
+                        uint8_t b_val = vram[idx / 2];
+                        px = (idx % 2 == 0) ? (b_val >> 4) : (b_val & 0x0F);
+                    }
+                    else if (BPP == 2) {
+                        uint8_t b_val = vram[idx / 4];
+                        px = (b_val >> (6 - (idx % 4) * 2)) & 0x03;
+                    }
+                    else if (BPP == 1) {
+                        uint8_t b_val = vram[idx / 8];
+                        px = (b_val >> (7 - (idx % 8))) & 1;
+                    }
+
+                    uint32_t r = 0, g = 0, b = 0, a = 255;
+                    if (is_grayscale) {
+                        uint32_t lum = 0;
+                        if (a_b > 0) lum = (uint32_t)(((px >> a_s) & ((1ULL << a_b) - 1)) * 255 / ((1ULL << a_b) - 1));
+                        else lum = px ? 255 : 0;
+                        r = g = b = lum;
+                        a = 255;
+                    } else {
+                        if (r_b) r = (uint32_t)(((px >> r_s) & ((1ULL << r_b) - 1)) * 255 / ((1ULL << r_b) - 1));
+                        if (g_b) g = (uint32_t)(((px >> g_s) & ((1ULL << g_b) - 1)) * 255 / ((1ULL << g_b) - 1));
+                        if (b_b) b = (uint32_t)(((px >> b_s) & ((1ULL << b_b) - 1)) * 255 / ((1ULL << b_b) - 1));
+                        if (a_b) a = (uint32_t)(((px >> a_s) & ((1ULL << a_b) - 1)) * 255 / ((1ULL << a_b) - 1));
+                    }
+                    dst_line[x - rx] = (a << 24) | (b << 16) | (g << 8) | r;
+                }
+            }
+            break;
         }
     }
 }
