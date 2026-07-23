@@ -96,40 +96,11 @@
                 <button id="downloadBtn" style="display: none;">Download .wasm</button>
             </div>
             <textarea id="code" spellcheck="false">
-#include <stdint.h>
-
-typedef struct { int x, y, w, h; } Rect;
-
-typedef struct {
-    uint32_t width, height, bpp, scale;
-    char title[128];
-    uint32_t dirty_count;
-    Rect dirty_rects[32];
-    int32_t mouse_x, mouse_y;
-    uint32_t mouse_buttons;
-    int32_t mouse_wheel;
-    uint8_t keys[256];
-    uint32_t gamepad_buttons;
-    uint32_t ticks;
-    uint32_t target_fps;
-    uint32_t audio_size, audio_sample_rate, audio_bpp, audio_channels;
-    uint32_t audio_write, audio_read;
-    uint32_t audio_underrun, audio_overrun;
-    uint32_t vram_offset;
-    uint32_t audio_buffer_offset;
-    uint32_t r_bits;
-    uint32_t r_shift;
-    uint32_t g_bits;
-    uint32_t g_shift;
-    uint32_t b_bits;
-    uint32_t b_shift;
-    uint32_t a_bits;
-    uint32_t a_shift;
-    uint8_t reserved[8];
-} State;
+#include "wagnostic.h"
 
 static struct {
-    State s;
+    WagnosticState s;
+    WagnosticDirtyList dl;
     uint8_t vram[320 * 240 * 4];
 } rom;
 
@@ -138,20 +109,17 @@ static int initialized = 0;
 
 int wupdate() {
     if (!initialized) {
-        rom.s.width = 320;
-        rom.s.height = 240;
-        rom.s.bpp = 32;
-        rom.s.scale = 1;
+        w_setup(&rom.s, "Wagnostic Demo", 320, 240, 32, 1);
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
         initialized = 1;
     }
 
-    // Preenche a tela de azul escuro
+    // Fill screen with dark blue
     for (int i = 0; i < 320 * 240; i++) {
         _fb[i] = 0xFF222288;
     }
     
-    // Desenha um quadrado verde onde o mouse estiver
+    // Draw green box at mouse position
     int mx = rom.s.mouse_x;
     int my = rom.s.mouse_y;
     for (int y = my - 10; y < my + 10; y++) {
@@ -162,8 +130,7 @@ int wupdate() {
         }
     }
 
-    rom.s.dirty_count = 1;
-    rom.s.dirty_rects[0] = (Rect){0, 0, 320, 240};
+    w_redraw(&rom.s, &rom.dl);
     return (int)&rom.s;
 }
 </textarea>
