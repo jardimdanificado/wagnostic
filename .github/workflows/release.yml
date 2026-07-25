@@ -30,11 +30,11 @@ jobs:
       - run: |
           sudo apt-get update -qq
           sudo apt-get install -y clang
-          make -C examples roms
+          make -C roms
       - uses: actions/upload-artifact@v4
         with:
           name: wagnostic-${{ inputs.version }}-roms
-          path: examples/*.wasm
+          path: roms/*.wasm
 
   build:
     needs: roms
@@ -77,7 +77,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: wagnostic-${{ inputs.version }}-roms
-          path: examples/
+          path: roms/
 
       - name: Deps (Linux x64 / ARM64)
         if: matrix.target == 'linux-x64' || matrix.target == 'linux-arm64'
@@ -90,7 +90,7 @@ jobs:
           docker run --rm -v "$PWD:/src" -w /src i386/debian:12 bash -c "
             apt-get update -qq &&
             apt-get install -y build-essential libsdl2-dev libgl1-mesa-dev pkg-config make git &&
-            make -C runners/wasm3
+            make -C emulators/wasm3
           "
       - name: Deps (macOS)
         if: startsWith(matrix.target, 'macos')
@@ -112,16 +112,16 @@ jobs:
 
       - name: Build (Linux / macOS)
         if: startsWith(matrix.target, 'linux') && matrix.target != 'linux-x86' || startsWith(matrix.target, 'macos')
-        run: make -C runners/wasm3
+        run: make -C emulators/wasm3
       - name: Build (Windows MinGW)
         if: startsWith(matrix.target, 'windows-mingw')
         shell: msys2 {0}
-        run: make -C runners/wasm3
+        run: make -C emulators/wasm3
       - name: Build (Windows MSVC)
         if: startsWith(matrix.target, 'windows-msvc')
         shell: powershell
         run: |
-          git clone --depth 1 https://github.com/wasm3/wasm3.git runners/wasm3/wasm3
+          git clone --depth 1 https://github.com/wasm3/wasm3.git emulators/wasm3/wasm3
           vcpkg install sdl2:${{ matrix.target == 'windows-msvc' && 'x64' || 'x86' }}-windows glew:${{ matrix.target == 'windows-msvc' && 'x64' || 'x86' }}-windows
           cmake -S . -B build -A ${{ matrix.target == 'windows-msvc' && 'x64' || 'Win32' }} `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `

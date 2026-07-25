@@ -6,7 +6,7 @@ Minimalist, platform-agnostic WASM runtime for multimedia apps.
 
 ```bash
 make -C examples           # builds the wasm3 host and the example ROMs
-./examples/wagnostic examples/buttons_test.wasm
+./examples/wagnostic roms/buttons_test.wasm
 ```
 
 A ROM allocates a state struct in its linear memory and returns its address from `wupdate()`:

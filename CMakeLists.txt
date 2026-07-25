@@ -7,16 +7,16 @@ set(CMAKE_C_STANDARD 11)
 find_package(SDL2 REQUIRED)
 
 # Sources
-file(GLOB WASM3_SRC "runners/wasm3/wasm3/source/*.c")
+file(GLOB WASM3_SRC "emulators/wasm3/wasm3/source/*.c")
 set(SOURCES 
-    runners/wasm3/host.c
+    emulators/wasm3/host.c
     ${WASM3_SRC}
 )
 
 add_executable(wagnostic ${SOURCES})
 
 target_include_directories(wagnostic PRIVATE 
-    runners/wasm3/wasm3/source
+    emulators/wasm3/wasm3/source
     ${SDL2_INCLUDE_DIRS}
 )
 

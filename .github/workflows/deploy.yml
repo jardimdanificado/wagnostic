@@ -44,11 +44,11 @@ jobs:
                           flat[f'sysroot/{prefix}/{rel}'] = base64.b64encode(open(full, 'rb').read()).decode('utf-8')
               return flat
           sysroot = build_flat('/tmp/xcc/include', 'include')
-          with open('runners/web/sysroot.json', 'w') as f:
+          with open('emulators/web/sysroot.json', 'w') as f:
               json.dump(sysroot, f)"
           
-          cp /tmp/xcc/cc.wasm runners/web/
-          cp -r runners/web/* dist/
+          cp /tmp/xcc/cc.wasm emulators/web/
+          cp -r emulators/web/* dist/
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

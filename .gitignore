@@ -15,9 +15,9 @@ wagnostic-bench-*
 wagnostic-wasmtime
 wagnostic-*
 v8_Linux_x64
-examples/runners/lib/*
+examples/emulators/lib/*
 wagn0/
-runners/wasm3/wasm3
+emulators/wasm3/wasm3
 *.wag
 *.tar
 node_modules

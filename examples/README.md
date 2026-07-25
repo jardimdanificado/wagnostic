@@ -3,8 +3,8 @@
 ## Structure
 
 ```
-examples/                # ROMs + Makefile that builds the hosts
-├── roms/                # Example ROMs
+.
+├── roms/                # Example ROMs (at root level)
 │   ├── audio_mp3
 │   ├── audio_ogg
 │   ├── audio_wav
@@ -13,13 +13,13 @@ examples/                # ROMs + Makefile that builds the hosts
 │   ├── fallback_test
 │   ├── full_test
 │   └── input_test
-└── Makefile             # builds runners/wasm3 into ./wagnostic
-                         # and runners/spidermonkey into ./wagnostic-sm
-
-runners/                 # Host runtimes (built by examples/Makefile)
-├── wasm3/               # Native host (C + SDL2)
-├── spidermonkey/        # Native host (C++ + SpiderMonkey + SDL2)
-└── web/                 # Browser runner
+├── emulators/           # Host runtimes / emulators (at root level)
+│   ├── wasm3/           # Native host (C + SDL2)
+│   ├── spidermonkey/    # Native host (C++ + SpiderMonkey + SDL2)
+│   └── web/             # Browser emulator
+└── examples/
+    └── Makefile         # builds emulators/wasm3 into ./wagnostic
+                         # and emulators/spidermonkey into ./wagnostic-sm
 ```
 
 ## Building
@@ -72,8 +72,8 @@ static void redraw() {
 ## Running
 
 ```bash
-./wagnostic roms/buttons_test/buttons_test.wasm     # wasm3 host
-./wagnostic-sm roms/buttons_test/buttons_test.wasm  # SpiderMonkey host
+./examples/wagnostic roms/buttons_test.wasm     # wasm3 host
+./examples/wagnostic-sm roms/buttons_test.wasm  # SpiderMonkey host
 ```
 
 ## Example ROMs
