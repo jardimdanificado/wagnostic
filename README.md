@@ -103,18 +103,21 @@ All other fields are optional. The host applies sensible defaults so a ROM with 
 | `audio_read` | 448 | 0 | Read position (Host → ROM) |
 | `audio_underrun` | 452 | 0 | Underrun counter (Host → ROM) |
 | `audio_overrun` | 456 | 0 | Overrun counter (Host → ROM) |
-| `vram_offset` | 460 | 0 | Offset from state base to VRAM buffer |
-| `audio_buffer_offset` | 464 | 0 | Offset from state base to audio buffer |
-| `r_bits` | 468 | 0 | Red bit count |
-| `r_shift` | 472 | 0 | Red bit shift |
-| `g_bits` | 476 | 0 | Green bit count |
-| `g_shift` | 480 | 0 | Green bit shift |
-| `b_bits` | 484 | 0 | Blue bit count |
-| `b_shift` | 488 | 0 | Blue bit shift |
-| `a_bits` | 492 | 0 | Alpha bit count |
-| `a_shift` | 496 | 0 | Alpha bit shift |
-| `x_bits` | 500 | 0 | Padding bit count |
-| `x_shift` | 504 | 0 | Padding bit shift |
+| `audio_chunk_samples` | 460 | 0 | Suggested callback chunk size in samples (0 = Host default 512) |
+| `audio_volume` | 464 | 255 | Master audio volume (0..255, 0 = muted / default 255) |
+| `audio_paused` | 468 | 0 | Pause audio output (0 = active, 1 = paused) |
+| `vram_offset` | 472 | 0 | Offset from state base to VRAM buffer |
+| `audio_buffer_offset` | 476 | 0 | Offset from state base to audio buffer |
+| `r_bits` | 480 | 0 | Red bit count |
+| `r_shift` | 484 | 0 | Red bit shift |
+| `g_bits` | 488 | 0 | Green bit count |
+| `g_shift` | 492 | 0 | Green bit shift |
+| `b_bits` | 496 | 0 | Blue bit count |
+| `b_shift` | 500 | 0 | Blue bit shift |
+| `a_bits` | 504 | 0 | Alpha bit count |
+| `a_shift` | 508 | 0 | Alpha bit shift |
+| `x_bits` | 512 | 0 | Padding bit count |
+| `x_shift` | 516 | 0 | Padding bit shift |
 
 **Total struct size: 1024 bytes.**
 
@@ -203,6 +206,9 @@ The host reads VRAM at `(uint8_t*)state + vram_offset`.
 | `audio_read` | `uint32` | Host → ROM | Read position |
 | `audio_underrun` | `uint32` | Host → ROM | Underrun counter |
 | `audio_overrun` | `uint32` | Host → ROM | Overrun counter |
+| `audio_chunk_samples` | `uint32` | ROM → Host | Callback chunk size in samples (0 = Host default 512) |
+| `audio_volume` | `uint32` | ROM → Host | Master volume (0..255, 0 = muted / default 255) |
+| `audio_paused` | `uint32` | ROM → Host | Pause audio output (0 = active, 1 = paused) |
 | `audio_buffer_offset` | `uint32` | ROM → Host | Offset from state base to audio ring buffer |
 
 The audio buffer is allocated separately, like VRAM:
@@ -312,9 +318,6 @@ Because the ABI uses a single struct pointer instead of named globals, **any lan
 | Language | Return state pointer |
 |----------|---------------------|
 | **C** | `return (int)&state;` |
-| **AssemblyScript** | `return <i32>state_ptr;` |
-| **Zig** | `return @intCast(i32, @intFromPtr(&state));` |
-| **V** | `return int(&state)` |
 | **Rust** | `return &state as *const _ as i32;` |
 | **Go (TinyGo)** | `return int(uintptr(unsafe.Pointer(&state)))` |
 

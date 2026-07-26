@@ -192,18 +192,21 @@
       audioRead:       mem.getUint32(ptr + 448, true),
       audioUnderrun:   mem.getUint32(ptr + 452, true),
       audioOverrun:    mem.getUint32(ptr + 456, true),
-      vramOffset:      mem.getUint32(ptr + 460, true),
-      audioBuffer:     mem.getUint32(ptr + 464, true),
-      rBits:           mem.getUint32(ptr + 468, true),
-      rShift:          mem.getUint32(ptr + 472, true),
-      gBits:           mem.getUint32(ptr + 476, true),
-      gShift:          mem.getUint32(ptr + 480, true),
-      bBits:           mem.getUint32(ptr + 484, true),
-      bShift:          mem.getUint32(ptr + 488, true),
-      aBits:           mem.getUint32(ptr + 492, true),
-      aShift:          mem.getUint32(ptr + 496, true),
-      xBits:           mem.getUint32(ptr + 500, true),
-      xShift:          mem.getUint32(ptr + 504, true),
+      audioChunkSamples: mem.getUint32(ptr + 460, true),
+      audioVolume:       mem.getUint32(ptr + 464, true),
+      audioPaused:       mem.getUint32(ptr + 468, true),
+      vramOffset:      mem.getUint32(ptr + 472, true),
+      audioBuffer:     mem.getUint32(ptr + 476, true),
+      rBits:           mem.getUint32(ptr + 480, true),
+      rShift:          mem.getUint32(ptr + 484, true),
+      gBits:           mem.getUint32(ptr + 488, true),
+      gShift:          mem.getUint32(ptr + 492, true),
+      bBits:           mem.getUint32(ptr + 496, true),
+      bShift:          mem.getUint32(ptr + 500, true),
+      aBits:           mem.getUint32(ptr + 504, true),
+      aShift:          mem.getUint32(ptr + 508, true),
+      xBits:           mem.getUint32(ptr + 512, true),
+      xShift:          mem.getUint32(ptr + 516, true),
     };
 
     // Derive BPP from channel info
@@ -961,7 +964,7 @@
     }
   }
 
-  function initAudio(sampleRate, channels) {
+  function initAudio(sampleRate, channels, chunkSamples) {
     if (audioProcessor) {
       audioProcessor.disconnect();
       audioProcessor = null;
@@ -987,7 +990,7 @@
     }
 
     // Use ScriptProcessorNode for broad compatibility
-    const bufferSize = 2048;
+    const bufferSize = (chunkSamples && chunkSamples >= 128) ? chunkSamples : 512;
     audioProcessor = audioCtx.createScriptProcessor(bufferSize, 0, channels || 1);
     audioEnabled = true;
     audioFrac = 0;
@@ -996,7 +999,17 @@
       if (!wasmInstance || !audioEnabled) return;
 
       const g = readGlobals();
-      if (!statePtr || g.audioSize === 0 || g.audioBpp === 0 || !g.audioBuffer) return;
+      if (!statePtr || g.audioSize === 0 || g.audioBpp === 0 || !g.audioBuffer || g.audioPaused) {
+        const outputChannels = e.outputBuffer.numberOfChannels;
+        const framesPerBuffer = e.outputBuffer.length;
+        for (let ch = 0; ch < outputChannels; ch++) {
+          const out = e.outputBuffer.getChannelData(ch);
+          out.fill(0);
+        }
+        return;
+      }
+
+      const volScale = (g.audioVolume === 0) ? 1.0 : Math.min(1.0, g.audioVolume / 255.0);
 
       const writePtr   = g.audioWrite;
       let   readPtr    = g.audioRead;
@@ -1045,7 +1058,7 @@
           } else if (channels === 1 && ch === 1) {
             sample = outputs[0][i];
           }
-          outputs[ch][i] = sample;
+          outputs[ch][i] = sample * volScale;
         }
 
         audioFrac += step;
@@ -1128,7 +1141,7 @@
     // Initialize audio if audio globals changed or were enabled after startup
     if (g.audioSampleRate > 0 && g.audioBpp > 0 && g.audioChannels > 0) {
       if (!audioEnabled) {
-        initAudio(g.audioSampleRate, g.audioChannels);
+        initAudio(g.audioSampleRate, g.audioChannels, g.audioChunkSamples);
       }
     }
 
@@ -1217,7 +1230,7 @@
       canvas.style.display = 'block';
 
       if (g.audioSampleRate > 0 && g.audioBpp > 0 && g.audioChannels > 0) {
-        initAudio(g.audioSampleRate, g.audioChannels);
+        initAudio(g.audioSampleRate, g.audioChannels, g.audioChunkSamples);
       }
 
       if (audioCtx && audioCtx.state === 'suspended') {

@@ -90,6 +90,7 @@ typedef struct {
     uint32_t audio_size, audio_sample_rate, audio_bpp, audio_channels;
     uint32_t audio_write, audio_read;
     uint32_t audio_underrun, audio_overrun;
+    uint32_t audio_chunk_samples, audio_volume, audio_paused;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
     uint32_t r_bits, r_shift;
@@ -97,7 +98,7 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
-    uint8_t reserved[516];
+    uint8_t reserved[504];
 } WagnosticState;
 
 static_assert(sizeof(WagnosticState) == 1024, "WagnosticState size mismatch — check struct layout");
@@ -875,7 +876,8 @@ static void host_audio_callback(void* userdata, Uint8* stream_ptr, int len_bytes
     uint32_t w   = s ? s->audio_write : 0;
     uint32_t sz  = s ? s->audio_size  : 0;
     uint32_t bpp = s ? s->audio_bpp   : 0;
-    if (sz == 0 || !audio_buf) {
+    if (sz == 0 || !audio_buf || (s && s->audio_paused)) {
+        memset(stream_ptr, 0, len_bytes);
         if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
         return;
     }
@@ -901,6 +903,12 @@ static void host_audio_callback(void* userdata, Uint8* stream_ptr, int len_bytes
         }
         stream[i] = sample;
     }
+
+    if (s && s->audio_volume > 0 && s->audio_volume < 255) {
+        float vol = (float)s->audio_volume / 255.0f;
+        for (int i = 0; i < total_samples; i++) stream[i] *= vol;
+    }
+
     if (s) s->audio_read = r;
 
     if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
@@ -989,7 +997,7 @@ static void init_from_state() {
         wanted.freq     = s->audio_sample_rate ? s->audio_sample_rate : 44100;
         wanted.format   = AUDIO_F32;
         wanted.channels = s->audio_channels ? s->audio_channels : 1;
-        wanted.samples  = 1024;
+        wanted.samples  = (s && s->audio_chunk_samples >= 128) ? s->audio_chunk_samples : 512;
         wanted.callback = host_audio_callback;
         wanted.userdata = NULL;
         audio_dev = SDL_OpenAudioDevice(NULL, 0, &wanted, NULL, 0);
@@ -1032,7 +1040,7 @@ static void check_audio_config_change() {
             wanted.freq     = cur_rate;
             wanted.format   = AUDIO_F32;
             wanted.channels = cur_channels;
-            wanted.samples  = 1024;
+            wanted.samples  = (s && s->audio_chunk_samples >= 128) ? s->audio_chunk_samples : 512;
             wanted.callback = host_audio_callback;
             wanted.userdata = NULL;
             audio_dev = SDL_OpenAudioDevice(NULL, 0, &wanted, NULL, 0);

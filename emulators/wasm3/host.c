@@ -39,6 +39,7 @@ typedef struct {
     uint32_t audio_size, audio_sample_rate, audio_bpp, audio_channels;
     uint32_t audio_write, audio_read;
     uint32_t audio_underrun, audio_overrun;
+    uint32_t audio_chunk_samples, audio_volume, audio_paused;
     uint32_t vram_offset;
     uint32_t audio_buffer_offset;
     uint32_t r_bits, r_shift;
@@ -46,7 +47,7 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
-    uint8_t reserved[516];
+    uint8_t reserved[504];
 } WagnosticState;
 
 static int g_is_tar = 0;
@@ -720,7 +721,7 @@ static void host_audio_callback(void *userdata, Uint8 *stream_ptr, int len_bytes
     uint32_t r_off = s ? s->audio_read  : 0;
     uint32_t w_off = s ? s->audio_write : 0;
 
-    if (!abuf || size == 0 || bpp == 0 || bpp > 4) {
+    if (!abuf || size == 0 || bpp == 0 || bpp > 4 || (s && s->audio_paused)) {
         memset(stream, 0, len_bytes);
         if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
         return;
@@ -769,6 +770,11 @@ static void host_audio_callback(void *userdata, Uint8 *stream_ptr, int len_bytes
 
     int underrun = (stream_idx < nsamples);
     for (int i = stream_idx; i < nsamples; i++) stream[i] = 0.0f;
+
+    if (s && s->audio_volume > 0 && s->audio_volume < 255) {
+        float vol = (float)s->audio_volume / 255.0f;
+        for (int i = 0; i < stream_idx; i++) stream[i] *= vol;
+    }
 
     if (bytes_read > 0 && s) {
         s->audio_read = (r_off + bytes_read) % size;
@@ -923,7 +929,7 @@ int main(int argc, char **argv) {
         wanted.freq     = prev_audio_rate ? prev_audio_rate : 44100;
         wanted.format   = AUDIO_F32;
         wanted.channels = prev_audio_channels ? prev_audio_channels : 1;
-        wanted.samples  = 1024;
+        wanted.samples  = (state && state->audio_chunk_samples >= 128) ? state->audio_chunk_samples : 512;
         wanted.callback = host_audio_callback;
         audio_dev = SDL_OpenAudioDevice(NULL, 0, &wanted, NULL, 0);
         if (audio_dev) SDL_PauseAudioDevice(audio_dev, 0);
@@ -1107,7 +1113,7 @@ int main(int argc, char **argv) {
                     wanted.freq     = cur_rate;
                     wanted.format   = AUDIO_F32;
                     wanted.channels = cur_channels;
-                    wanted.samples  = 1024;
+                    wanted.samples  = (state && state->audio_chunk_samples >= 128) ? state->audio_chunk_samples : 512;
                     wanted.callback = host_audio_callback;
                     audio_dev = SDL_OpenAudioDevice(NULL, 0, &wanted, NULL, 0);
                     if (audio_dev) SDL_PauseAudioDevice(audio_dev, 0);
