@@ -13,11 +13,36 @@ typedef struct { int x, y, w, h; } Rect;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 #include <SDL2/SDL.h>
 
 #include "wasm3.h"
 #include "m3_env.h"
 #include "m3_api_libc.h"
+
+static int32_t generate_unique_id(void) {
+    uint64_t t = (uint64_t)time(NULL);
+    uint64_t pc = (uint64_t)SDL_GetPerformanceCounter();
+    uint32_t pid = 0;
+#if defined(_WIN32)
+    pid = (uint32_t)GetCurrentProcessId();
+#elif defined(__unix__) || defined(__APPLE__) || defined(__linux__)
+    pid = (uint32_t)getpid();
+#endif
+    uint64_t h = t ^ (pc << 16) ^ ((uint64_t)pid << 32) ^ (uint64_t)clock();
+    h ^= h >> 30;
+    h *= 0xbf58476d1ce4e5b9ULL;
+    h ^= h >> 27;
+    h *= 0x94d049bb133111ebULL;
+    h ^= h >> 31;
+    int32_t res = (int32_t)h;
+    return res ? res : 1;
+}
 
 /* ================================================================
  * WagnosticState struct (must match wagnostic.h exactly)
@@ -47,7 +72,8 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
-    uint8_t reserved[504];
+    int32_t unique;
+    uint8_t reserved[500];
 } WagnosticState;
 
 static int g_is_tar = 0;
@@ -874,7 +900,11 @@ int main(int argc, char **argv) {
     }
     refresh_memory();
 
+    int32_t session_unique = generate_unique_id();
     WagnosticState *state = get_state();
+    if (state) {
+        state->unique = session_unique;
+    }
 
     /* ---- Read initial config ---- */
     uint32_t W, H, BPP, SCALE;
@@ -1037,6 +1067,7 @@ int main(int argc, char **argv) {
             state->mouse_wheel = mouse_wheel;
             state->gamepad_buttons = gamepad_buttons;
             state->ticks = SDL_GetTicks();
+            if (state->unique == 0) state->unique = session_unique;
         }
 
         /* ---- Step 2: Call wupdate(), exit if return is 0 ---- */

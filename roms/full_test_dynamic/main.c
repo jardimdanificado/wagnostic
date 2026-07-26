@@ -53,7 +53,8 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
-    uint8_t reserved[504];
+    int32_t unique;
+    uint8_t reserved[500];
 } State;
 
 static State state;

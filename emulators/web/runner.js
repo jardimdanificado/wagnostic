@@ -171,7 +171,8 @@
     // +484 b_bits uint32  +488 b_shift uint32
     // +492 a_bits uint32  +496 a_shift uint32
     // +500 x_bits uint32  +504 x_shift uint32
-    // +508 reserved[516]
+    // +520 unique int32
+    // +524 reserved[500]
     let s = {
       w:               mem.getUint32(ptr + 0, true),
       h:               mem.getUint32(ptr + 4, true),
@@ -207,6 +208,7 @@
       aShift:          mem.getUint32(ptr + 508, true),
       xBits:           mem.getUint32(ptr + 512, true),
       xShift:          mem.getUint32(ptr + 516, true),
+      unique:          mem.getInt32(ptr + 520, true),
     };
 
     // Derive BPP from channel info

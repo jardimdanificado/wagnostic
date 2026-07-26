@@ -37,7 +37,8 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
-    uint8_t reserved[516];
+    int32_t unique;
+    uint8_t reserved[500];
 } State;
 
 static struct {
@@ -118,6 +119,7 @@ All other fields are optional. The host applies sensible defaults so a ROM with 
 | `a_shift` | 508 | 0 | Alpha bit shift |
 | `x_bits` | 512 | 0 | Padding bit count |
 | `x_shift` | 516 | 0 | Padding bit shift |
+| `unique` | 520 | 0 | Unique session ID generated when session is created |
 
 **Total struct size: 1024 bytes.**
 

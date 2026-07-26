@@ -18,6 +18,33 @@ typedef struct { int x, y, w, h; } Rect;
 #include <cstring>
 #include <cstdint>
 #include <cmath>
+#include <ctime>
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+#include <SDL2/SDL.h>
+
+static int32_t generate_unique_id(void) {
+    uint64_t t = (uint64_t)time(NULL);
+    uint64_t pc = (uint64_t)SDL_GetPerformanceCounter();
+    uint32_t pid = 0;
+#if defined(_WIN32)
+    pid = (uint32_t)GetCurrentProcessId();
+#elif defined(__unix__) || defined(__APPLE__) || defined(__linux__)
+    pid = (uint32_t)getpid();
+#endif
+    uint64_t h = t ^ (pc << 16) ^ ((uint64_t)pid << 32) ^ (uint64_t)clock();
+    h ^= h >> 30;
+    h *= 0xbf58476d1ce4e5b9ULL;
+    h ^= h >> 27;
+    h *= 0x94d049bb133111ebULL;
+    h ^= h >> 31;
+    int32_t res = (int32_t)h;
+    return res ? res : 1;
+}
+
 /* ================================================================
  * TAR Helpers
  * ================================================================ */
@@ -98,7 +125,8 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
-    uint8_t reserved[504];
+    int32_t unique;
+    uint8_t reserved[500];
 } WagnosticState;
 
 static_assert(sizeof(WagnosticState) == 1024, "WagnosticState size mismatch — check struct layout");
@@ -1190,6 +1218,12 @@ int main(int argc, char** argv) {
         if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
     }
 
+    int32_t session_unique = generate_unique_id();
+    {
+        WagnosticState *s = get_state();
+        if (s) s->unique = session_unique;
+    }
+
     // ---- Set up SDL window / GL / audio from initial ROM config ----
     init_from_state();
 
@@ -1204,7 +1238,10 @@ int main(int argc, char** argv) {
         // ---- 1. Write input into state struct ----
         {
             WagnosticState *s = get_state();
-            if (s) s->ticks = SDL_GetTicks();
+            if (s) {
+                s->ticks = SDL_GetTicks();
+                if (s->unique == 0) s->unique = session_unique;
+            }
         }
 
         SDL_Event ev;
