@@ -16,18 +16,22 @@ WASM3_SRC = $(WASM3_DIR)/m3_api_libc.c \
 
 OBJS = gifnostic.o gif_encoder.o $(WASM3_SRC:.c=.o)
 
+HOST = gifnostic
+
 .PHONY: all clean
 
-all: gifnostic libgifnostic.a
+all: host libgifnostic.a
+
+host: $(HOST)
+
+$(HOST): main.c gifnostic.c gif_encoder.c $(WASM3_SRC)
+	$(CC) $(CFLAGS) $^ -o $@ -lm
 
 libgifnostic.a: $(OBJS)
 	$(AR) rcs $@ $^
-
-gifnostic: main.c gifnostic.c gif_encoder.c $(WASM3_SRC)
-	$(CC) $(CFLAGS) $^ -o $@ -lm
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f gifnostic libgifnostic.a *.o $(WASM3_DIR)/*.o
+	rm -f $(HOST) libgifnostic.a *.o $(WASM3_DIR)/*.o

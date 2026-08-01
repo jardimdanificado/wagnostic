@@ -5,6 +5,10 @@
 #include "gifnostic.h"
 #include "gif_encoder.h"
 
+#if defined(_WIN32)
+#  include <windows.h>
+#endif
+
 static void print_usage(const char* prog) {
     printf("Usage: %s [options] <rom.wasm | rom.wag | rom.tar>\n", prog);
     printf("Gifnostic - Pure WASM3 Headless Wagnostic Emulator & GIF Exporter\n\n");
@@ -21,9 +25,17 @@ static void print_usage(const char* prog) {
 }
 
 static double get_time_sec(void) {
+#if defined(_WIN32)
+    static LARGE_INTEGER freq = {0};
+    LARGE_INTEGER count;
+    if (freq.QuadPart == 0) QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&count);
+    return (double)count.QuadPart / (double)freq.QuadPart;
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+#endif
 }
 
 int main(int argc, char** argv) {

@@ -3,7 +3,7 @@ CC = gcc
 SM_CXXFLAGS = $(shell pkg-config --cflags mozjs-140)
 SM_LDFLAGS = $(shell pkg-config --libs mozjs-140)
 
-HOST = ../../wagnostic-sm
+HOST = wagnostic-sm
 
 .PHONY: all host clean
 

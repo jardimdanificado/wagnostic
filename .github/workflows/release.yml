@@ -90,7 +90,8 @@ jobs:
           docker run --rm -v "$PWD:/src" -w /src i386/debian:12 bash -c "
             apt-get update -qq &&
             apt-get install -y build-essential libsdl2-dev libgl1-mesa-dev pkg-config make git &&
-            make -C emulators/wasm3
+            make -C emulators/wasm3 &&
+            make -C emulators/gifnostic
           "
       - name: Deps (macOS)
         if: startsWith(matrix.target, 'macos')
@@ -112,11 +113,15 @@ jobs:
 
       - name: Build (Linux / macOS)
         if: startsWith(matrix.target, 'linux') && matrix.target != 'linux-x86' || startsWith(matrix.target, 'macos')
-        run: make -C emulators/wasm3
+        run: |
+          make -C emulators/wasm3
+          make -C emulators/gifnostic
       - name: Build (Windows MinGW)
         if: startsWith(matrix.target, 'windows-mingw')
         shell: msys2 {0}
-        run: make -C emulators/wasm3
+        run: |
+          make -C emulators/wasm3
+          make -C emulators/gifnostic
       - name: Build (Windows MSVC)
         if: startsWith(matrix.target, 'windows-msvc')
         shell: powershell
@@ -128,22 +133,27 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=${{ matrix.target == 'windows-msvc' && 'x64' || 'x86' }}-windows
           cmake --build build --config Release
 
-      - name: Rename binary
+      - name: Rename binaries
         shell: bash
         run: |
-          EXT=""; SRC="wagnostic"
+          EXT=""; SRC="emulators/wasm3/wagnostic"; GIF_SRC="emulators/gifnostic/gifnostic"
           case "${{ matrix.target }}" in
-            windows-msvc)   SRC="build/Release/wagnostic.exe"; EXT=".exe" ;;
-            windows-msvc32) SRC="build/Release/wagnostic.exe"; EXT=".exe" ;;
+            windows-msvc)   SRC="build/Release/wagnostic.exe"; GIF_SRC="build/Release/gifnostic.exe"; EXT=".exe" ;;
+            windows-msvc32) SRC="build/Release/wagnostic.exe"; GIF_SRC="build/Release/gifnostic.exe"; EXT=".exe" ;;
             windows-*)      EXT=".exe" ;;
           esac
           DST="wagnostic-${{ inputs.version }}-${{ matrix.target }}${EXT}"
+          GIF_DST="gifnostic-${{ inputs.version }}-${{ matrix.target }}${EXT}"
           if [ -f "$SRC" ]; then mv "$SRC" "$DST"; fi
+          if [ -f "${GIF_SRC}${EXT}" ]; then mv "${GIF_SRC}${EXT}" "$GIF_DST"
+          elif [ -f "$GIF_SRC" ]; then mv "$GIF_SRC" "$GIF_DST"; fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: wagnostic-${{ inputs.version }}-${{ matrix.target }}
-          path: wagnostic-${{ inputs.version }}-${{ matrix.target }}*
+          path: |
+            wagnostic-${{ inputs.version }}-${{ matrix.target }}*
+            gifnostic-${{ inputs.version }}-${{ matrix.target }}*
 
   release:
     name: Publish release
