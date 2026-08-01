@@ -1,13 +1,13 @@
 {
   "name": "wagnostic-node",
   "version": "1.0.0",
-  "description": "Native SDL2 Host for Wagnostic written in Node.js",
-  "main": "index.js",
+  "description": "Single-File Native SDL2 Host for Wagnostic written in Node.js",
+  "main": "wagnostic.js",
   "bin": {
-    "wagnostic-node": "index.js"
+    "wagnostic-node": "wagnostic.js"
   },
   "scripts": {
-    "start": "node index.js"
+    "start": "node wagnostic.js"
   },
   "keywords": [
     "wagnostic",

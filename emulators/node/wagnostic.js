@@ -1,12 +1,55 @@
 #!/usr/bin/env node
 
+/**
+ * Wagnostic Single-File Node.js SDL2 Host (`wagnostic.js`)
+ * 
+ * Standalone Host written for Node.js.
+ * Requires only @kmamal/sdl for native windowing, rendering, and audio.
+ */
+
 const fs = require('fs');
 const path = require('path');
 const sdl = require('@kmamal/sdl');
-const { WagnosticState } = require('./abi');
-const WagnosticAudio = require('./audio');
 
-// ── Gamepad Bitmasks (ABI.md) ───────────────────────────
+// ── ABI Offsets & Constants (ABI.md) ────────────────────
+const STRUCT_SIZE = 1024;
+
+const OFFSETS = {
+  width: 0,                // uint32
+  height: 4,               // uint32
+  scale: 8,                // uint32
+  title: 12,               // char[128]
+  dirty_rects: 140,        // uint32 (pointer)
+  mouse_x: 144,            // int32
+  mouse_y: 148,            // int32
+  mouse_buttons: 152,      // uint32 (bitmask: 1=left, 2=right, 4=middle)
+  mouse_wheel: 156,        // int32
+  keys: 160,               // uint8[256] array
+  gamepad_buttons: 416,    // uint32
+  ticks: 420,              // uint32
+  target_fps: 424,         // uint32
+  audio_size: 428,         // uint32
+  audio_sample_rate: 432,  // uint32
+  audio_bpp: 436,          // uint32
+  audio_channels: 440,     // uint32
+  audio_write: 444,        // uint32
+  audio_read: 448,         // uint32
+  audio_underrun: 452,     // uint32
+  audio_overrun: 456,      // uint32
+  audio_chunk_samples: 460,// uint32
+  audio_volume: 464,       // uint32
+  audio_paused: 468,       // uint32
+  vram_offset: 472,        // uint32
+  audio_buffer_offset: 476,// uint32
+  r_bits: 480, r_shift: 484, // uint32
+  g_bits: 488, g_shift: 492, // uint32
+  b_bits: 496, b_shift: 500, // uint32
+  a_bits: 504, a_shift: 508, // uint32
+  x_bits: 512, x_shift: 516, // uint32
+  unique: 520,             // int32
+};
+
+// Gamepad Bitmasks
 const GP_UP    = 1 << 0;
 const GP_DOWN  = 1 << 1;
 const GP_LEFT  = 1 << 2;
@@ -15,6 +58,180 @@ const GP_A     = 1 << 4;
 const GP_B     = 1 << 5;
 const GP_SEL   = 1 << 6;
 const GP_START = 1 << 7;
+
+// ── WagnosticState Wrapper ──────────────────────────────
+class WagnosticState {
+  constructor(buffer, statePtr) {
+    this.buffer = buffer;
+    this.statePtr = statePtr;
+    this.view = new DataView(buffer, statePtr, STRUCT_SIZE);
+    this.uint8 = new Uint8Array(buffer, statePtr, STRUCT_SIZE);
+  }
+
+  updateBuffer(buffer) {
+    this.buffer = buffer;
+    this.view = new DataView(buffer, this.statePtr, STRUCT_SIZE);
+    this.uint8 = new Uint8Array(buffer, this.statePtr, STRUCT_SIZE);
+  }
+
+  get width() { return this.view.getUint32(OFFSETS.width, true); }
+  get height() { return this.view.getUint32(OFFSETS.height, true); }
+  get scale() { return this.view.getUint32(OFFSETS.scale, true); }
+  
+  get title() {
+    const rawName = this.uint8.subarray(OFFSETS.title, OFFSETS.title + 128);
+    const nullIdx = rawName.indexOf(0);
+    const slice = nullIdx >= 0 ? rawName.subarray(0, nullIdx) : rawName;
+    return new TextDecoder('utf-8').decode(slice) || 'Untitled';
+  }
+
+  get dirtyRectsPtr() { return this.view.getUint32(OFFSETS.dirty_rects, true); }
+  get targetFps() { return this.view.getUint32(OFFSETS.target_fps, true) || 60; }
+  get vramOffset() { return this.view.getUint32(OFFSETS.vram_offset, true); }
+
+  get rBits() { return this.view.getUint32(OFFSETS.r_bits, true); }
+  get rShift() { return this.view.getUint32(OFFSETS.r_shift, true); }
+  get gBits() { return this.view.getUint32(OFFSETS.g_bits, true); }
+  get gShift() { return this.view.getUint32(OFFSETS.g_shift, true); }
+  get bBits() { return this.view.getUint32(OFFSETS.b_bits, true); }
+  get bShift() { return this.view.getUint32(OFFSETS.b_shift, true); }
+  get aBits() { return this.view.getUint32(OFFSETS.a_bits, true); }
+  get aShift() { return this.view.getUint32(OFFSETS.a_shift, true); }
+
+  // Inputs
+  setMousePos(x, y) {
+    this.view.setInt32(OFFSETS.mouse_x, x, true);
+    this.view.setInt32(OFFSETS.mouse_y, y, true);
+  }
+
+  setMouseButtons(buttons) {
+    this.view.setUint32(OFFSETS.mouse_buttons, buttons, true);
+  }
+
+  addMouseWheel(delta) {
+    const cur = this.view.getInt32(OFFSETS.mouse_wheel, true);
+    this.view.setInt32(OFFSETS.mouse_wheel, cur + delta, true);
+  }
+
+  setKeyState(scancode, pressed) {
+    if (scancode >= 0 && scancode < 256) {
+      this.uint8[OFFSETS.keys + scancode] = pressed ? 1 : 0;
+    }
+  }
+
+  setGamepadButtons(mask) {
+    this.view.setUint32(OFFSETS.gamepad_buttons, mask, true);
+  }
+
+  setTicks(ticks) {
+    this.view.setUint32(OFFSETS.ticks, ticks, true);
+  }
+
+  // Audio getters / setters
+  get audioSize() { return this.view.getUint32(OFFSETS.audio_size, true); }
+  get audioSampleRate() { return this.view.getUint32(OFFSETS.audio_sample_rate, true); }
+  get audioBpp() { return this.view.getUint32(OFFSETS.audio_bpp, true); }
+  get audioChannels() { return this.view.getUint32(OFFSETS.audio_channels, true); }
+  get audioWrite() { return this.view.getUint32(OFFSETS.audio_write, true); }
+  get audioRead() { return this.view.getUint32(OFFSETS.audio_read, true); }
+  get audioBufferOffset() { return this.view.getUint32(OFFSETS.audio_buffer_offset, true); }
+
+  setAudioRead(ptr) {
+    this.view.setUint32(OFFSETS.audio_read, ptr, true);
+  }
+}
+
+// ── WagnosticAudio Driver ───────────────────────────────
+class WagnosticAudio {
+  constructor() {
+    this.device = null;
+    this.channels = 0;
+    this.sampleRate = 0;
+    this.bpp = 0;
+  }
+
+  setup(state) {
+    const size = state.audioSize;
+    if (size === 0) return;
+
+    const channels = state.audioChannels || 2;
+    const sampleRate = state.audioSampleRate || 44100;
+    const bpp = state.audioBpp || 16;
+
+    if (this.device && this.channels === channels && this.sampleRate === sampleRate && this.bpp === bpp) {
+      return;
+    }
+
+    if (this.device) {
+      try { this.device.close(); } catch (e) {}
+      this.device = null;
+    }
+
+    let format = 's16lsb';
+    if (bpp === 8) format = 'u8';
+    else if (bpp === 32) format = 'f32lsb';
+
+    try {
+      this.device = sdl.audio.openDevice({
+        type: 'playback',
+        channels,
+        frequency: sampleRate,
+        format,
+      });
+      this.channels = channels;
+      this.sampleRate = sampleRate;
+      this.bpp = bpp;
+      this.device.play();
+    } catch (err) {
+      console.warn('[Audio] Failed to open SDL audio device:', err.message);
+      this.device = null;
+    }
+  }
+
+  process(state, memoryBuffer) {
+    const size = state.audioSize;
+    if (!this.device || size === 0) return;
+
+    let write = state.audioWrite;
+    let read = state.audioRead;
+    if (write === read) return;
+
+    const bufOffset = state.statePtr + state.audioBufferOffset;
+    const uint8 = new Uint8Array(memoryBuffer);
+
+    let bytesAvailable = 0;
+    if (write >= read) {
+      bytesAvailable = write - read;
+    } else {
+      bytesAvailable = (size - read) + write;
+    }
+
+    if (bytesAvailable <= 0) return;
+
+    let chunk;
+    if (write >= read) {
+      chunk = Buffer.from(uint8.buffer, uint8.byteOffset + bufOffset + read, bytesAvailable);
+      read = (read + bytesAvailable) % size;
+    } else {
+      const part1 = uint8.subarray(bufOffset + read, bufOffset + size);
+      const part2 = uint8.subarray(bufOffset, bufOffset + write);
+      chunk = Buffer.concat([Buffer.from(part1.buffer, part1.byteOffset, part1.byteLength), Buffer.from(part2.buffer, part2.byteOffset, part2.byteLength)]);
+      read = write;
+    }
+
+    try {
+      this.device.enqueue(chunk);
+      state.setAudioRead(read);
+    } catch (e) {}
+  }
+
+  close() {
+    if (this.device) {
+      try { this.device.close(); } catch (e) {}
+      this.device = null;
+    }
+  }
+}
 
 // ── Parse Arguments ──────────────────────────────────────
 function parseArgs() {
@@ -37,8 +254,8 @@ function parseArgs() {
   }
 
   if (!romPath) {
-    console.log('Wagnostic Node.js SDL2 Host');
-    console.log('Usage: node index.js <path-to-rom.wasm> [--scale=N] [--fps=N] [--no-audio]');
+    console.log('Wagnostic Single-File Node.js SDL2 Host');
+    console.log('Usage: node wagnostic.js <path-to-rom.wasm> [--scale=N] [--fps=N] [--no-audio]');
     process.exit(1);
   }
 
@@ -47,27 +264,20 @@ function parseArgs() {
 
 // ── Helper to resolve pixel format for SDL2 ───────────────
 function getPixelFormatInfo(state) {
-  const rBits = state.rBits;
-  const rShift = state.rShift;
-  const gBits = state.gBits;
-  const gShift = state.gShift;
-  const bBits = state.bBits;
-  const bShift = state.bShift;
+  const rBits = state.rBits, rShift = state.rShift;
+  const gBits = state.gBits, gShift = state.gShift;
+  const bBits = state.bBits, bShift = state.bShift;
 
-  // Standard RGB565 (16-bit)
   if (rBits === 5 && rShift === 11 && gBits === 6 && gShift === 5 && bBits === 5 && bShift === 0) {
     return { format: 'rgb565', bpp: 2, convert: false };
   }
-  // Standard RGBA8888 (32-bit)
   if (rBits === 8 && rShift === 0 && gBits === 8 && gShift === 8 && bBits === 8 && bShift === 16) {
     return { format: 'rgba32', bpp: 4, convert: false };
   }
-  // Standard BGRA8888 (32-bit)
   if (rBits === 8 && rShift === 16 && gBits === 8 && gShift === 8 && bBits === 8 && bShift === 0) {
     return { format: 'bgra32', bpp: 4, convert: false };
   }
 
-  // Fallback to RGBA32 conversion
   return { format: 'rgba32', bpp: 4, convert: true };
 }
 
@@ -109,7 +319,7 @@ function convertPixelsToRgba32(state, vramRaw, width, height, outBuffer) {
   }
 }
 
-// ── Main Host Function ───────────────────────────────────
+// ── Main Host Execution ───────────────────────────────────
 async function main() {
   const { romPath, forcedScale, forcedFps, enableAudio } = parseArgs();
 
@@ -121,7 +331,6 @@ async function main() {
 
   const wasmBytes = fs.readFileSync(absoluteRomPath);
 
-  // WASM Imports / Stubs
   const importObject = {
     env: {
       memory: new WebAssembly.Memory({ initial: 16 }),
@@ -171,7 +380,6 @@ async function main() {
   let ticks = 0;
   let isRunning = true;
 
-  // Frame timing
   let targetFps = forcedFps || 60;
   let frameIntervalNs = BigInt(Math.floor(1e9 / targetFps));
   let lastFrameTime = process.hrtime.bigint();
@@ -186,35 +394,33 @@ async function main() {
     process.exit(0);
   }
 
-  // Input mapping for arrow keys & WASD to Gamepad mask
   function updateGamepadKey(scancode, pressed) {
-    if (scancode === 82 || scancode === 26) { // Up / W
+    if (scancode === 82 || scancode === 26) {
       if (pressed) gamepadMask |= GP_UP; else gamepadMask &= ~GP_UP;
     }
-    if (scancode === 81 || scancode === 22) { // Down / S
+    if (scancode === 81 || scancode === 22) {
       if (pressed) gamepadMask |= GP_DOWN; else gamepadMask &= ~GP_DOWN;
     }
-    if (scancode === 80 || scancode === 4) { // Left / A
+    if (scancode === 80 || scancode === 4) {
       if (pressed) gamepadMask |= GP_LEFT; else gamepadMask &= ~GP_LEFT;
     }
-    if (scancode === 79 || scancode === 7) { // Right / D
+    if (scancode === 79 || scancode === 7) {
       if (pressed) gamepadMask |= GP_RIGHT; else gamepadMask &= ~GP_RIGHT;
     }
-    if (scancode === 29 || scancode === 13) { // Z / J -> A
+    if (scancode === 29 || scancode === 13) {
       if (pressed) gamepadMask |= GP_A; else gamepadMask &= ~GP_A;
     }
-    if (scancode === 27 || scancode === 14) { // X / K -> B
+    if (scancode === 27 || scancode === 14) {
       if (pressed) gamepadMask |= GP_B; else gamepadMask &= ~GP_B;
     }
-    if (scancode === 43) { // Tab -> Select
+    if (scancode === 43) {
       if (pressed) gamepadMask |= GP_SEL; else gamepadMask &= ~GP_SEL;
     }
-    if (scancode === 40) { // Enter -> Start
+    if (scancode === 40) {
       if (pressed) gamepadMask |= GP_START; else gamepadMask &= ~GP_START;
     }
   }
 
-  // ── Main Frame Loop ────────────────────────────────────
   function gameLoop() {
     if (!isRunning) return;
 
@@ -225,7 +431,6 @@ async function main() {
     }
     lastFrameTime = now;
 
-    // Execute ROM update
     let statePtr = 0;
     try {
       statePtr = exports.wupdate();
@@ -247,20 +452,17 @@ async function main() {
     ticks++;
     state.setTicks(ticks);
 
-    // Update target FPS if requested by ROM
     const romFps = state.targetFps;
     if (!forcedFps && romFps && romFps !== targetFps) {
       targetFps = romFps;
       frameIntervalNs = BigInt(Math.floor(1e9 / targetFps));
     }
 
-    // Read window parameters
     const width = state.width || 320;
     const height = state.height || 240;
     const scale = forcedScale || state.scale || 1;
     const title = state.title || 'Wagnostic Host (Node.js)';
 
-    // Initialize or Resize Window
     if (!window || currentWidth !== width || currentHeight !== height || currentScale !== scale || currentTitle !== title) {
       if (window && !window.destroyed) {
         try { window.destroy(); } catch (e) {}
@@ -284,7 +486,6 @@ async function main() {
         return;
       }
 
-      // Window Event Listeners
       window.on('close', () => {
         exitCleanly();
       });
@@ -314,9 +515,9 @@ async function main() {
 
       window.on('mouseButtonDown', (e) => {
         if (!state) return;
-        if (e.button === 1) mouseButtonsMask |= 1; // Left
-        if (e.button === 3) mouseButtonsMask |= 2; // Right
-        if (e.button === 2) mouseButtonsMask |= 4; // Middle
+        if (e.button === 1) mouseButtonsMask |= 1;
+        if (e.button === 3) mouseButtonsMask |= 2;
+        if (e.button === 2) mouseButtonsMask |= 4;
         state.setMouseButtons(mouseButtonsMask);
       });
 
@@ -334,13 +535,11 @@ async function main() {
       });
     }
 
-    // Audio Processing
     if (audio && isRunning) {
       audio.setup(state);
       audio.process(state, memory.buffer);
     }
 
-    // VRAM Rendering
     if (window && !window.destroyed && isRunning) {
       const vramOffset = state.vramOffset;
       if (vramOffset > 0) {
@@ -368,9 +567,7 @@ async function main() {
 
         try {
           window.render(width, height, renderStride, renderFormat, renderBuffer);
-        } catch (err) {
-          // Ignore render errors if window is destroyed during close
-        }
+        } catch (err) {}
       }
     }
 
