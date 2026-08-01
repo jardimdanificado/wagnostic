@@ -1,0 +1,24 @@
+{
+  "name": "wagnostic-node",
+  "version": "1.0.0",
+  "description": "Native SDL2 Host for Wagnostic written in Node.js",
+  "main": "index.js",
+  "bin": {
+    "wagnostic-node": "index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "wagnostic",
+    "emulator",
+    "host",
+    "wasm",
+    "sdl2"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@kmamal/sdl": "^0.11.0"
+  }
+}

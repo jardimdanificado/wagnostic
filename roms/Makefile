@@ -17,8 +17,7 @@ ROM_DIRS = \
 	bpp2_test \
 	bpp4_test \
 	exotic1_test \
-	exotic2_test \
-	benchmark_rgb
+	exotic2_test
 
 .PHONY: all clean $(ROM_DIRS)
 

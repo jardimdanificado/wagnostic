@@ -115,41 +115,58 @@ int wupdate() {
             JS_SetPropertyStr(ctx, js_wagnostic_obj, "mouse_y", JS_NewInt32(ctx, 0));
             JS_SetPropertyStr(ctx, global, "wagnostic", js_wagnostic_obj);
             
-            // Eval script
-            const char *script_code = NULL;
-            int script_size = 0;
-            for (int i = 0; i < WAGNOSTIC_ASSET_COUNT; i++) {
-                if (strcmp(WAGNOSTIC_ASSETS[i].path, "game.js") == 0) {
-                    script_code = (const char*)WAGNOSTIC_ASSETS[i].data;
-                    script_size = WAGNOSTIC_ASSETS[i].size;
-                    break;
+            // JavaScript code embedded directly as a string (Exact original demo)
+            const char *script_code = 
+                "var t = 0;\n"
+                "function frame() {\n"
+                "  var w = wagnostic.width;\n"
+                "  var h = wagnostic.height;\n"
+                "  t += 1;\n"
+                "  for (var y = 0; y < h; y++) {\n"
+                "    for (var x = 0; x < w; x++) {\n"
+                "      var v = (x ^ y) + t;\n"
+                "      set_pixel(x, y, v % 255, (v * 2) % 255, (v * 3) % 255);\n"
+                "    }\n"
+                "  }\n"
+                "  var mx = wagnostic.mouse_x;\n"
+                "  var my = wagnostic.mouse_y;\n"
+                "  for (var dy = -5; dy <= 5; dy++) {\n"
+                "    for (var dx = -5; dx <= 5; dx++) {\n"
+                "      set_pixel(mx + dx, my + dy, 255, 0, 0);\n"
+                "    }\n"
+                "  }\n"
+                "}\n";
+            
+            if (script_code) {
+                JSValue res = JS_Eval(ctx, script_code, strlen(script_code), "main.js", 0);
+                if (JS_IsException(res)) {
+                    JS_GetException(ctx);
                 }
             }
-            
-            if (script_code && script_size > 0) {
-                char *buf = (char*)malloc(script_size + 1);
-                if (buf) {
-                    memcpy(buf, script_code, script_size);
-                    buf[script_size] = '\0';
-                    JS_Eval(ctx, buf, script_size, "game.js", 0);
-                    free(buf);
-                }
-            }
-            
-            js_frame_func = JS_GetPropertyStr(ctx, global, "frame");
         }
     }
     
     if (ctx) {
-        // Update input to JS
-        JS_SetPropertyStr(ctx, js_wagnostic_obj, "mouse_x", JS_NewInt32(ctx, rom.s.mouse_x));
-        JS_SetPropertyStr(ctx, js_wagnostic_obj, "mouse_y", JS_NewInt32(ctx, rom.s.mouse_y));
+        JSValue global = JS_GetGlobalObject(ctx);
+        JSValue wagnostic_obj = JS_GetPropertyStr(ctx, global, "wagnostic");
+        
+        // Update input & ticks to JS
+        JS_SetPropertyStr(ctx, wagnostic_obj, "mouse_x", JS_NewInt32(ctx, rom.s.mouse_x));
+        JS_SetPropertyStr(ctx, wagnostic_obj, "mouse_y", JS_NewInt32(ctx, rom.s.mouse_y));
+        JS_SetPropertyStr(ctx, wagnostic_obj, "ticks", JS_NewInt32(ctx, rom.s.ticks));
         
         // Call frame()
-        if (JS_IsFunction(ctx, js_frame_func)) {
-            JS_PushArg(ctx, js_frame_func);
-            JS_PushArg(ctx, JS_NULL);
-            JS_Call(ctx, 0);
+        JSValue js_frame = JS_GetPropertyStr(ctx, global, "frame");
+        if (JS_IsFunction(ctx, js_frame)) {
+            if (!JS_StackCheck(ctx, 2)) {
+                JS_PushArg(ctx, js_frame);
+                JS_PushArg(ctx, JS_NULL);
+                JSValue res = JS_Call(ctx, 0);
+                if (JS_IsException(res)) {
+                    // Clear exception state so runtime doesn't lock up
+                    JS_GetException(ctx);
+                }
+            }
         }
     }
     
