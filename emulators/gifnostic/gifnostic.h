@@ -56,7 +56,7 @@ typedef struct WagnosticContext WagnosticContext;
 /* Create context from WASM byte buffer */
 WagnosticContext* wagnostic_create(const uint8_t* wasm_bytes, size_t wasm_size, uint32_t stack_size_bytes);
 
-/* Create context from file path (.wasm or .wag/.tar archive containing main.wasm) */
+/* Create context from file path (.wasm WebAssembly binary) */
 WagnosticContext* wagnostic_create_from_file(const char* file_path, uint32_t stack_size_bytes);
 
 /* Destroy context and free resources */

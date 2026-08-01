@@ -10,7 +10,7 @@
 #endif
 
 static void print_usage(const char* prog) {
-    printf("Usage: %s [options] <rom.wasm | rom.wag | rom.tar>\n", prog);
+    printf("Usage: %s [options] <rom.wasm>\n", prog);
     printf("Gifnostic - Pure WASM3 Headless Wagnostic Emulator & GIF Exporter\n\n");
     printf("Options:\n");
     printf("  -n <frames>       Run for N frames (0 = run until ROM quits, default: 60)\n");

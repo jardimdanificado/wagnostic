@@ -66,38 +66,7 @@ static int32_t generate_unique_id(void) {
     return res ? res : 1;
 }
 
-static uint8_t* tar_extract_file(const char* tar_path, const char* target_filename, size_t* out_sz) {
-    FILE* f = fopen(tar_path, "rb");
-    if (!f) return NULL;
-    uint8_t header[512];
-    uint8_t* best_data = NULL;
-    size_t best_sz = 0;
-    while (fread(header, 1, 512, f) == 512) {
-        if (header[0] == '\0') break;
-        char name[101];
-        memcpy(name, header, 100);
-        name[100] = '\0';
-        size_t size = 0;
-        for (int i = 0; i < 11; i++) {
-            if (header[124 + i] >= '0' && header[124 + i] <= '7')
-                size = size * 8 + (header[124 + i] - '0');
-        }
-        if (strcmp(name, target_filename) == 0) {
-            if (best_data) free(best_data);
-            best_data = (uint8_t*)malloc(size);
-            best_sz = size;
-            fread(best_data, 1, size, f);
-            long remainder = (512 - (size % 512)) % 512;
-            fseek(f, remainder, SEEK_CUR);
-        } else {
-            long skip = size + ((512 - (size % 512)) % 512);
-            fseek(f, skip, SEEK_CUR);
-        }
-    }
-    fclose(f);
-    if (out_sz) *out_sz = best_sz;
-    return best_data;
-}
+
 
 static void refresh_memory(WagnosticContext* ctx) {
     if (!ctx || !ctx->runtime) return;
@@ -194,26 +163,25 @@ WagnosticContext* wagnostic_create(const uint8_t* wasm_bytes, size_t wasm_size, 
 WagnosticContext* wagnostic_create_from_file(const char* file_path, uint32_t stack_size_bytes) {
     if (!file_path) return NULL;
 
-    size_t sz = 0;
-    uint8_t* wasm_data = tar_extract_file(file_path, "main.wasm", &sz);
+    FILE* f = fopen(file_path, "rb");
+    if (!f) return NULL;
+
+    fseek(f, 0, SEEK_END);
+    size_t sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    uint8_t* wasm_data = (uint8_t*)malloc(sz);
     if (!wasm_data) {
-        FILE* f = fopen(file_path, "rb");
-        if (!f) return NULL;
-        fseek(f, 0, SEEK_END);
-        sz = ftell(f);
-        fseek(f, 0, SEEK_SET);
-        wasm_data = (uint8_t*)malloc(sz);
-        if (!wasm_data) {
-            fclose(f);
-            return NULL;
-        }
-        if (fread(wasm_data, 1, sz, f) != sz) {
-            free(wasm_data);
-            fclose(f);
-            return NULL;
-        }
         fclose(f);
+        return NULL;
     }
+
+    if (fread(wasm_data, 1, sz, f) != sz) {
+        free(wasm_data);
+        fclose(f);
+        return NULL;
+    }
+    fclose(f);
 
     WagnosticContext* ctx = wagnostic_create(wasm_data, sz, stack_size_bytes);
     free(wasm_data);
