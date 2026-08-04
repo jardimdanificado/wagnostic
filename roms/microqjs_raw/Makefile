@@ -40,7 +40,10 @@ LDFLAGS = \
 # All C sources that make up the ROM
 SRCS = \
 	main.c \
-	mquickjs_amalgamated.c \
+	$(MQJS)/mquickjs.c \
+	$(MQJS)/cutils.c \
+	$(MQJS)/dtoa.c \
+	$(MQJS)/libm.c \
 	shim/libc_shim.c
 
 .PHONY: all run clean gen-assets

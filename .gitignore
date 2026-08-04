@@ -4,8 +4,6 @@ emulators/wasm3/wagnostic
 wagnostic-term
 emulators/spidermonkey/wagnostic-sm
 emulators/gifnostic/gifnostic
-gifnostic
-gifnostic-*
 *.o
 *.a
 wagnostic.sh
