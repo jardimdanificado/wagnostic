@@ -1582,6 +1582,64 @@ static const WagnerAsset* _wagner_find_asset(const char* path) {
     return NULL;
 }
 
+Image raw_image_load(const uint8_t* data, size_t size) {
+    if (!data || size < 13) return (Image){0};
+    if (data[0] == 'W' && data[1] == 'R' && data[2] == 'A' && data[3] == 'W' && data[4] == 'I') {
+        uint32_t w = *(uint32_t*)(data + 5);
+        uint32_t h = *(uint32_t*)(data + 9);
+        const uint8_t* pixels = data + 13;
+        return (Image){
+            .pixels = (void*)pixels,
+            .width = (int)w,
+            .height = (int)h,
+            .stride = (int)w,
+            .bpp = 32,
+            .r_bits = 8, .r_shift = 0,
+            .g_bits = 8, .g_shift = 8,
+            .b_bits = 8, .b_shift = 16,
+            .a_bits = 8, .a_shift = 24
+        };
+    }
+    return (Image){0};
+}
+
+Gif raw_video_load(const uint8_t* data, size_t size) {
+    Gif g = {0};
+    if (!data || size < 21) return g;
+    if (data[0] == 'W' && data[1] == 'R' && data[2] == 'A' && data[3] == 'W' && data[4] == 'V') {
+        uint32_t w = *(uint32_t*)(data + 5);
+        uint32_t h = *(uint32_t*)(data + 9);
+        uint32_t z = *(uint32_t*)(data + 13);
+        uint32_t fps = *(uint32_t*)(data + 17);
+        const uint8_t* raw_frames = data + 21;
+
+        g.width = (int)w;
+        g.height = (int)h;
+        g.frame_count = (int)z;
+        g.frames = (Image*)malloc(sizeof(Image) * (size_t)z);
+        g.delays = (int*)malloc(sizeof(int) * (size_t)z);
+
+        int delay_ms = fps > 0 ? (1000 / (int)fps) : 33;
+        size_t frame_bytes = (size_t)(w * h * 4);
+
+        for (uint32_t i = 0; i < z; i++) {
+            g.delays[i] = delay_ms;
+            g.frames[i] = (Image){
+                .pixels = (void*)(raw_frames + (i * frame_bytes)),
+                .width = (int)w,
+                .height = (int)h,
+                .stride = (int)w,
+                .bpp = 32,
+                .r_bits = 8, .r_shift = 0,
+                .g_bits = 8, .g_shift = 8,
+                .b_bits = 8, .b_shift = 16,
+                .a_bits = 8, .a_shift = 24
+            };
+        }
+    }
+    return g;
+}
+
 Image load_image(const char* path) {
     if (!path) return (Image){0};
     for (int i = 0; i < _wagner_img_cache_count; i++) {
@@ -1593,14 +1651,12 @@ Image load_image(const char* path) {
 
     const WagnerAsset* asset = _wagner_find_asset(path);
     if (asset) {
-        Image img = {0};
+        Image img = raw_image_load((uint8_t*)asset->data, asset->size);
 #ifndef WAGNER_NO_PNG_DECODE
-        img = img_load((uint8_t*)asset->data, asset->size);
+        if (!img.pixels) img = img_load((uint8_t*)asset->data, asset->size);
 #endif
 #ifndef WAGNER_NO_GIF_DECODE
-        if (!img.pixels) {
-            img = gif_load((uint8_t*)asset->data, asset->size);
-        }
+        if (!img.pixels) img = gif_load((uint8_t*)asset->data, asset->size);
 #endif
         if (img.pixels && _wagner_img_cache_count < _WAGNER_MAX_CACHE_ENTRIES) {
             _wagner_img_cache[_wagner_img_cache_count].path = path;
@@ -1617,6 +1673,8 @@ Gif load_gif_anim(const char* path) {
     if (!path) return (Gif){0};
     const WagnerAsset* asset = _wagner_find_asset(path);
     if (asset) {
+        Gif g = raw_video_load((uint8_t*)asset->data, asset->size);
+        if (g.frames) return g;
 #ifndef WAGNER_NO_GIF_DECODE
         return gif_load_anim((uint8_t*)asset->data, asset->size);
 #endif

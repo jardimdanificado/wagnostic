@@ -43,7 +43,7 @@ LDFLAGS = \
 	-Wl,--no-entry \
 	-Wl,--export-all \
 	-Wl,--allow-undefined \
-	-Wl,--initial-memory=2097152
+	-Wl,--initial-memory=16777216
 
 # All C sources that make up the ROM
 SRCS = \
