@@ -5,9 +5,6 @@
 ROM_DIRS = \
 	display_test \
 	input_test \
-	audio_wav \
-	audio_mp3 \
-	audio_ogg \
 	full_test \
 	full_test_static \
 	full_test_dynamic \
@@ -18,7 +15,8 @@ ROM_DIRS = \
 	bpp4_test \
 	exotic1_test \
 	exotic2_test \
-	mquickjs_wagner
+	mquickjs_wagner \
+	microqjs_raw
 
 
 .PHONY: all clean $(ROM_DIRS)

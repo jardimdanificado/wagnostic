@@ -46,15 +46,28 @@ JSValue js_pixel(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue js_text(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue js_rgb(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue js_rgba(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
-JSValue js_play_tone(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
-JSValue js_play_noise(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
-JSValue js_stop_all_sounds(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue js_is_key_down(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue js_is_key_pressed(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue js_set_title(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue js_set_size(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue js_set_scale(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue js_load_image(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue js_create_image(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue js_texture(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue js_no_texture(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue js_color_key(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue js_no_color_key(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue js_image(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 
 #include "mqjs_stdlib.h"
 
 static uint8_t js_heap[512 * 1024];
 static JSContext *ctx = NULL;
 static JSValue js_wagnostic_obj = JS_UNDEFINED;
+
+#define MAX_JS_IMAGES 64
+static Image js_images[MAX_JS_IMAGES];
+static int js_image_count = 0;
 
 static void report_exception(JSContext *ctx, JSValue res) {
     if (JS_IsException(res)) {
@@ -66,6 +79,54 @@ static void report_exception(JSContext *ctx, JSValue res) {
             _wagner_rom.state.title[127] = '\0';
         }
     }
+}
+
+static JSValue create_js_image_obj(JSContext *ctx, int id, int w, int h) {
+    JSValue obj = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, obj, "_id", JS_NewInt32(ctx, id));
+    JS_SetPropertyStr(ctx, obj, "width", JS_NewInt32(ctx, w));
+    JS_SetPropertyStr(ctx, obj, "height", JS_NewInt32(ctx, h));
+    return obj;
+}
+
+static int get_js_image_id(JSContext *ctx, JSValue val) {
+    if (JS_IsInt(val)) {
+        int id = -1;
+        JS_ToInt32(ctx, &id, val);
+        return id;
+    }
+    if (JS_IsPtr(val)) {
+        JSValue id_val = JS_GetPropertyStr(ctx, val, "_id");
+        if (JS_IsInt(id_val)) {
+            int id = -1;
+            JS_ToInt32(ctx, &id, id_val);
+            return id;
+        }
+    }
+    return -1;
+}
+
+static JSValue create_js_audio_obj(JSContext *ctx, int id) {
+    JSValue obj = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, obj, "_id", JS_NewInt32(ctx, id));
+    return obj;
+}
+
+static int get_js_audio_id(JSContext *ctx, JSValue val) {
+    if (JS_IsInt(val)) {
+        int id = -1;
+        JS_ToInt32(ctx, &id, val);
+        return id;
+    }
+    if (JS_IsPtr(val)) {
+        JSValue id_val = JS_GetPropertyStr(ctx, val, "_id");
+        if (JS_IsInt(id_val)) {
+            int id = -1;
+            JS_ToInt32(ctx, &id, id_val);
+            return id;
+        }
+    }
+    return -1;
 }
 
 /* Function Implementations */
@@ -279,25 +340,149 @@ JSValue js_rgba(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     return JS_NewInt32(ctx, (int32_t)rgba(r, g, b, a));
 }
 
-JSValue js_play_tone(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
-    double freq = 440.0, dur = 0.1, vol = 0.5;
-    if (argc > 0) JS_ToNumber(ctx, &freq, argv[0]);
-    if (argc > 1) JS_ToNumber(ctx, &dur, argv[1]);
-    if (argc > 2) JS_ToNumber(ctx, &vol, argv[2]);
-    play_tone((float)freq, (float)dur, (float)vol);
+JSValue js_is_key_down(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    if (argc >= 1) {
+        int key = 0;
+        JS_ToInt32(ctx, &key, argv[0]);
+        if (key >= 0 && key < 256) {
+            return JS_NewBool(wagner.keys[key]);
+        }
+    }
+    return JS_NewBool(0);
+}
+
+JSValue js_is_key_pressed(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    if (argc >= 1) {
+        int key = 0;
+        JS_ToInt32(ctx, &key, argv[0]);
+        if (key >= 0 && key < 256) {
+            return JS_NewBool(wagner.keys_pressed[key]);
+        }
+    }
+    return JS_NewBool(0);
+}
+
+JSValue js_set_title(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    if (argc >= 1) {
+        JSCStringBuf sbuf;
+        const char *str = JS_ToCString(ctx, argv[0], &sbuf);
+        if (str) {
+            strncpy(_wagner_rom.state.title, str, 127);
+            _wagner_rom.state.title[127] = '\0';
+        }
+    }
     return JS_UNDEFINED;
 }
 
-JSValue js_play_noise(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
-    double dur = 0.1, vol = 0.5;
-    if (argc > 0) JS_ToNumber(ctx, &dur, argv[0]);
-    if (argc > 1) JS_ToNumber(ctx, &vol, argv[1]);
-    play_noise((float)dur, (float)vol);
+JSValue js_set_size(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    if (argc >= 2) {
+        int w = 0, h = 0;
+        JS_ToInt32(ctx, &w, argv[0]);
+        JS_ToInt32(ctx, &h, argv[1]);
+        if (w > 0 && h > 0 && w <= 640 && h <= 480) {
+            w_setup(&_wagner_rom.state, NULL, w, h, WAGNER_CFG_BPP, w_scale);
+            wagner.width = w; wagner.height = h;
+            screen.width = w; screen.height = h;
+            screen.stride = w;
+        }
+    }
     return JS_UNDEFINED;
 }
 
-JSValue js_stop_all_sounds(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
-    stop_all_sounds();
+JSValue js_set_scale(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    if (argc >= 1) {
+        int s = 0;
+        JS_ToInt32(ctx, &s, argv[0]);
+        if (s > 0 && s <= 8) {
+            _wagner_rom.state.scale = (uint32_t)s;
+            wagner.scale = s;
+        }
+    }
+    return JS_UNDEFINED;
+}
+
+JSValue js_load_image(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    if (argc >= 1) {
+        JSCStringBuf sbuf;
+        const char *path = JS_ToCString(ctx, argv[0], &sbuf);
+        if (path && js_image_count < MAX_JS_IMAGES) {
+            Image img = load_image(path);
+            if (img.pixels) {
+                int id = js_image_count++;
+                js_images[id] = img;
+                return create_js_image_obj(ctx, id, img.width, img.height);
+            }
+        }
+    }
+    return JS_NULL;
+}
+
+JSValue js_create_image(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    if (argc >= 2 && js_image_count < MAX_JS_IMAGES) {
+        int w = 0, h = 0;
+        JS_ToInt32(ctx, &w, argv[0]);
+        JS_ToInt32(ctx, &h, argv[1]);
+        if (w > 0 && h > 0) {
+            Image img = create_image(w, h);
+            if (img.pixels) {
+                int id = js_image_count++;
+                js_images[id] = img;
+                return create_js_image_obj(ctx, id, img.width, img.height);
+            }
+        }
+    }
+    return JS_NULL;
+}
+
+JSValue js_texture(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    if (argc >= 1) {
+        int id = get_js_image_id(ctx, argv[0]);
+        if (id >= 0 && id < js_image_count) {
+            texture(js_images[id]);
+        }
+    }
+    return JS_UNDEFINED;
+}
+
+JSValue js_no_texture(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    no_texture();
+    return JS_UNDEFINED;
+}
+
+JSValue js_color_key(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    if (argc >= 1) {
+        int col = 0;
+        JS_ToInt32(ctx, &col, argv[0]);
+        color_key((uint32_t)col);
+    }
+    return JS_UNDEFINED;
+}
+
+JSValue js_no_color_key(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    no_color_key();
+    return JS_UNDEFINED;
+}
+
+JSValue js_image(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    if (argc >= 3) {
+        int id = get_js_image_id(ctx, argv[0]);
+        if (id >= 0 && id < js_image_count) {
+            Image img = js_images[id];
+            double x = 0, y = 0, w = img.width, h = img.height;
+            JS_ToNumber(ctx, &x, argv[1]);
+            JS_ToNumber(ctx, &y, argv[2]);
+            if (argc >= 4) JS_ToNumber(ctx, &w, argv[3]);
+            if (argc >= 5) JS_ToNumber(ctx, &h, argv[4]);
+            
+            push();
+            translate((float)x, (float)y);
+            scale((float)w, (float)h);
+            texture(img);
+            rect();
+            no_texture();
+            pop();
+        }
+    }
     return JS_UNDEFINED;
 }
 
@@ -305,10 +490,7 @@ JSValue js_stop_all_sounds(JSContext *ctx, JSValue *this_val, int argc, JSValue 
 
 void setup() {
     ctx = JS_NewContext(js_heap, sizeof(js_heap), &js_stdlib);
-    if (!ctx) {
-        strcpy(_wagner_rom.state.title, "JS_NewContext failed");
-        return;
-    }
+    if (!ctx) return;
     
     JSValue global = JS_GetGlobalObject(ctx);
     
@@ -319,6 +501,9 @@ void setup() {
     JS_SetPropertyStr(ctx, js_wagnostic_obj, "mouse_x", JS_NewInt32(ctx, (int)wagner.mouse.x));
     JS_SetPropertyStr(ctx, js_wagnostic_obj, "mouse_y", JS_NewInt32(ctx, (int)wagner.mouse.y));
     JS_SetPropertyStr(ctx, js_wagnostic_obj, "mouse_down", JS_NewBool(wagner.mouse_down));
+    JS_SetPropertyStr(ctx, js_wagnostic_obj, "mouse_pressed", JS_NewBool(wagner.mouse_pressed));
+    JS_SetPropertyStr(ctx, js_wagnostic_obj, "mouse_released", JS_NewBool(wagner.mouse_released));
+    JS_SetPropertyStr(ctx, js_wagnostic_obj, "mouse_wheel", JS_NewInt32(ctx, (int)_wagner_rom.state.mouse_wheel));
     JS_SetPropertyStr(ctx, global, "wagnostic", js_wagnostic_obj);
     JS_SetPropertyStr(ctx, global, "wagner", js_wagnostic_obj);
 
@@ -342,6 +527,13 @@ void setup() {
     JS_SetPropertyStr(ctx, global, "KEY_RIGHT", JS_NewInt32(ctx, KEY_RIGHT));
     JS_SetPropertyStr(ctx, global, "KEY_SPACE", JS_NewInt32(ctx, KEY_SPACE));
     JS_SetPropertyStr(ctx, global, "KEY_ENTER", JS_NewInt32(ctx, KEY_ENTER));
+    JS_SetPropertyStr(ctx, global, "KEY_W", JS_NewInt32(ctx, KEY_W));
+    JS_SetPropertyStr(ctx, global, "KEY_A", JS_NewInt32(ctx, KEY_A));
+    JS_SetPropertyStr(ctx, global, "KEY_S", JS_NewInt32(ctx, KEY_S));
+    JS_SetPropertyStr(ctx, global, "KEY_D", JS_NewInt32(ctx, KEY_D));
+    JS_SetPropertyStr(ctx, global, "KEY_1", JS_NewInt32(ctx, KEY_1));
+    JS_SetPropertyStr(ctx, global, "KEY_2", JS_NewInt32(ctx, KEY_2));
+    JS_SetPropertyStr(ctx, global, "KEY_3", JS_NewInt32(ctx, KEY_3));
 
     // Load embedded game.js asset
     const char *script_code = NULL;
@@ -357,8 +549,6 @@ void setup() {
     if (script_code) {
         JSValue res = JS_Eval(ctx, script_code, script_len, "game.js", 0);
         report_exception(ctx, res);
-    } else {
-        strcpy(_wagner_rom.state.title, "game.js not found in assets");
     }
 
     // Call JS setup() if available
@@ -374,10 +564,7 @@ void setup() {
 }
 
 void draw() {
-    if (!ctx) {
-        strcpy(_wagner_rom.state.title, "ctx is NULL");
-        return;
-    }
+    if (!ctx) return;
     
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue wag_obj = JS_GetPropertyStr(ctx, global, "wagner");
@@ -386,6 +573,9 @@ void draw() {
     JS_SetPropertyStr(ctx, wag_obj, "mouse_x", JS_NewInt32(ctx, (int)wagner.mouse.x));
     JS_SetPropertyStr(ctx, wag_obj, "mouse_y", JS_NewInt32(ctx, (int)wagner.mouse.y));
     JS_SetPropertyStr(ctx, wag_obj, "mouse_down", JS_NewBool(wagner.mouse_down));
+    JS_SetPropertyStr(ctx, wag_obj, "mouse_pressed", JS_NewBool(wagner.mouse_pressed));
+    JS_SetPropertyStr(ctx, wag_obj, "mouse_released", JS_NewBool(wagner.mouse_released));
+    JS_SetPropertyStr(ctx, wag_obj, "mouse_wheel", JS_NewInt32(ctx, (int)_wagner_rom.state.mouse_wheel));
     JS_SetPropertyStr(ctx, wag_obj, "fps", JS_NewInt32(ctx, wagner.fps));
     JS_SetPropertyStr(ctx, wag_obj, "frame_count", JS_NewInt32(ctx, wagner.frame_count));
     
@@ -398,7 +588,5 @@ void draw() {
             JSValue res = JS_Call(ctx, 0);
             report_exception(ctx, res);
         }
-    } else {
-        strcpy(_wagner_rom.state.title, "draw function not found");
     }
 }

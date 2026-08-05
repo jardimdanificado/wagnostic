@@ -16,19 +16,14 @@ typedef struct {
     uint32_t gamepad_buttons;
     uint32_t ticks;
     uint32_t target_fps;
-    uint32_t audio_size, audio_sample_rate, audio_bpp, audio_channels;
-    uint32_t audio_write, audio_read;
-    uint32_t audio_underrun, audio_overrun;
-    uint32_t audio_chunk_samples, audio_volume, audio_paused;
     uint32_t vram_offset;
-    uint32_t audio_buffer_offset;
     uint32_t r_bits, r_shift;
     uint32_t g_bits, g_shift;
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
     int32_t unique;
-    uint8_t reserved[500];
+    uint8_t reserved[548];
 } WagnosticState;
 
 _Static_assert(sizeof(WagnosticState) == 1024, "Size mismatch");

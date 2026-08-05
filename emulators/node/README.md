@@ -30,8 +30,5 @@ Ou com `node`:
 node wagnostic.js ../../roms/input_test.wasm --scale=2
 ```
 
-### Opções de Linha de Comando
-
 - `--scale=N`: Define a escala inicial da janela (ex: `--scale=2` para 2x).
 - `--fps=N`: Força o limite de quadros por segundo (ex: `--fps=60`).
-- `--no-audio`: Desativa a inicialização do dispositivo de áudio.

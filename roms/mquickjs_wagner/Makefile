@@ -3,7 +3,7 @@
 # =============================================================================
 #
 #  This ROM bundles MicroQuickJS inside a Wagnostic WASM ROM and exposes
-#  Wagner C drawing & state-machine functions directly to JavaScript.
+#  Wagner C drawing, state-machine, texture & audio functions to JavaScript.
 #
 #  Usage:
 #    make            → builds ../mquickjs_wagner.wasm
@@ -33,7 +33,8 @@ CFLAGS = \
 	-I$(WAGNER_ROOT)/lib/decoders \
 	-DWAGNER_CFG_BPP=32 \
 	-DWAGNER_NO_PNG_DECODE \
-	-DWAGNER_NO_AUDIO_DECODE \
+	-Dalloca=__builtin_alloca \
+	-DUINT_MAX=0xffffffff \
 	-I.
 
 LDFLAGS = \

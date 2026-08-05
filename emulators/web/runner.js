@@ -92,12 +92,6 @@
   let keysDown     = new Uint8Array(KEYS_COUNT);
   let gamepadBtns  = 0;
 
-  // Audio state
-  let audioCtx      = null;
-  let audioProcessor = null;
-  let audioEnabled   = false;
-  let audioFrac      = 0;
-
   // Pre-allocated render buffers
   let imageData = null;
 
@@ -142,37 +136,6 @@
     const mem = getMem();
     const ptr = statePtr;
 
-    // Layout (1024 bytes, no packing):
-    // +0   width      uint32
-    // +4   height     uint32
-    // +8   scale      uint32
-    // +12  title      char[128]
-    // +140 dirty_rects uint32  (WASM pointer to { uint32 count; Rect rects[32]; })
-    // +144 mouse_x    int32
-    // +148 mouse_y    int32
-    // +152 mouse_buttons uint32
-    // +156 mouse_wheel int32
-    // +160 keys       uint8[256]
-    // +416 gamepad_buttons uint32
-    // +420 ticks      uint32
-    // +424 target_fps uint32
-    // +428 audio_size uint32
-    // +432 audio_sample_rate uint32
-    // +436 audio_bpp  uint32
-    // +440 audio_channels uint32
-    // +444 audio_write uint32
-    // +448 audio_read uint32
-    // +452 audio_underrun uint32
-    // +456 audio_overrun uint32
-    // +460 vram_offset uint32
-    // +464 audio_buffer_offset uint32
-    // +468 r_bits uint32  +472 r_shift uint32
-    // +476 g_bits uint32  +480 g_shift uint32
-    // +484 b_bits uint32  +488 b_shift uint32
-    // +492 a_bits uint32  +496 a_shift uint32
-    // +500 x_bits uint32  +504 x_shift uint32
-    // +520 unique int32
-    // +524 reserved[500]
     let s = {
       w:               mem.getUint32(ptr + 0, true),
       h:               mem.getUint32(ptr + 4, true),
@@ -185,30 +148,18 @@
       gamepadButtons:  mem.getUint32(ptr + 416, true),
       ticks:           mem.getUint32(ptr + 420, true),
       targetFps:       mem.getUint32(ptr + 424, true),
-      audioSize:       mem.getUint32(ptr + 428, true),
-      audioSampleRate: mem.getUint32(ptr + 432, true),
-      audioBpp:        mem.getUint32(ptr + 436, true),
-      audioChannels:   mem.getUint32(ptr + 440, true),
-      audioWrite:      mem.getUint32(ptr + 444, true),
-      audioRead:       mem.getUint32(ptr + 448, true),
-      audioUnderrun:   mem.getUint32(ptr + 452, true),
-      audioOverrun:    mem.getUint32(ptr + 456, true),
-      audioChunkSamples: mem.getUint32(ptr + 460, true),
-      audioVolume:       mem.getUint32(ptr + 464, true),
-      audioPaused:       mem.getUint32(ptr + 468, true),
-      vramOffset:      mem.getUint32(ptr + 472, true),
-      audioBuffer:     mem.getUint32(ptr + 476, true),
-      rBits:           mem.getUint32(ptr + 480, true),
-      rShift:          mem.getUint32(ptr + 484, true),
-      gBits:           mem.getUint32(ptr + 488, true),
-      gShift:          mem.getUint32(ptr + 492, true),
-      bBits:           mem.getUint32(ptr + 496, true),
-      bShift:          mem.getUint32(ptr + 500, true),
-      aBits:           mem.getUint32(ptr + 504, true),
-      aShift:          mem.getUint32(ptr + 508, true),
-      xBits:           mem.getUint32(ptr + 512, true),
-      xShift:          mem.getUint32(ptr + 516, true),
-      unique:          mem.getInt32(ptr + 520, true),
+      vramOffset:      mem.getUint32(ptr + 428, true),
+      rBits:           mem.getUint32(ptr + 432, true),
+      rShift:          mem.getUint32(ptr + 436, true),
+      gBits:           mem.getUint32(ptr + 440, true),
+      gShift:          mem.getUint32(ptr + 444, true),
+      bBits:           mem.getUint32(ptr + 448, true),
+      bShift:          mem.getUint32(ptr + 452, true),
+      aBits:           mem.getUint32(ptr + 456, true),
+      aShift:          mem.getUint32(ptr + 460, true),
+      xBits:           mem.getUint32(ptr + 464, true),
+      xShift:          mem.getUint32(ptr + 468, true),
+      unique:          mem.getInt32(ptr + 472, true)
     };
 
     // Derive BPP from channel info
@@ -958,143 +909,6 @@
     });
   }
 
-  // ── Audio ──────────────────────────────────────────────────────────────
-
-  function resumeAudio() {
-    if (audioCtx && audioCtx.state === 'suspended') {
-      audioCtx.resume().catch(function () {});
-    }
-  }
-
-  function initAudio(sampleRate, channels, chunkSamples) {
-    if (audioProcessor) {
-      audioProcessor.disconnect();
-      audioProcessor = null;
-    }
-    if (audioCtx && sampleRate && audioCtx.sampleRate !== sampleRate) {
-      try { audioCtx.close(); } catch (e) {}
-      audioCtx = null;
-    }
-    if (!audioCtx) {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      try {
-        if (sampleRate > 0) {
-          audioCtx = new AudioCtx({ sampleRate: sampleRate });
-        } else {
-          audioCtx = new AudioCtx();
-        }
-      } catch (e) {
-        audioCtx = new AudioCtx();
-      }
-    }
-    if (audioCtx.state === 'suspended') {
-      audioCtx.resume().catch(function () {});
-    }
-
-    // Use ScriptProcessorNode for broad compatibility
-    const bufferSize = (chunkSamples && chunkSamples >= 128) ? chunkSamples : 512;
-    audioProcessor = audioCtx.createScriptProcessor(bufferSize, 0, channels || 1);
-    audioEnabled = true;
-    audioFrac = 0;
-
-    audioProcessor.onaudioprocess = function (e) {
-      if (!wasmInstance || !audioEnabled) return;
-
-      const g = readGlobals();
-      if (!statePtr || g.audioSize === 0 || g.audioBpp === 0 || !g.audioBuffer || g.audioPaused) {
-        const outputChannels = e.outputBuffer.numberOfChannels;
-        const framesPerBuffer = e.outputBuffer.length;
-        for (let ch = 0; ch < outputChannels; ch++) {
-          const out = e.outputBuffer.getChannelData(ch);
-          out.fill(0);
-        }
-        return;
-      }
-
-      const volScale = (g.audioVolume === 0) ? 1.0 : Math.min(1.0, g.audioVolume / 255.0);
-
-      const writePtr   = g.audioWrite;
-      let   readPtr    = g.audioRead;
-      const bufPtr     = statePtr + g.audioBuffer;
-      const size       = g.audioSize;
-      const bpp        = g.audioBpp;
-      const channels   = g.audioChannels || 1;
-      const sampleRate = g.audioSampleRate || audioCtx.sampleRate;
-      const frameSize  = bpp * channels;
-
-      let available = writePtr - readPtr;
-      if (available < 0) available += size;
-
-      const outputChannels = e.outputBuffer.numberOfChannels;
-      const framesPerBuffer = e.outputBuffer.length;
-      const outputs = [];
-      for (let ch = 0; ch < outputChannels; ch++) {
-        outputs.push(e.outputBuffer.getChannelData(ch));
-      }
-
-      const step = (sampleRate > 0 && audioCtx.sampleRate > 0) ? (sampleRate / audioCtx.sampleRate) : 1.0;
-      const memView = getMem();
-      const u8View = new Uint8Array(wasmMemory.buffer);
-      let underrun = false;
-
-      for (let i = 0; i < framesPerBuffer; i++) {
-        if (available < frameSize) {
-          underrun = true;
-          for (let ch = 0; ch < outputChannels; ch++) {
-            outputs[ch][i] = 0;
-          }
-          continue;
-        }
-
-        for (let ch = 0; ch < outputChannels; ch++) {
-          let sample = 0;
-          if (ch < channels) {
-            const sampleByteOff = bufPtr + ((readPtr + ch * bpp) % size);
-            if (bpp === 1) {
-              sample = (u8View[sampleByteOff] - 128) / 128.0;
-            } else if (bpp === 2) {
-              sample = memView.getInt16(sampleByteOff, true) / 32768.0;
-            } else if (bpp === 4) {
-              sample = memView.getFloat32(sampleByteOff, true);
-            }
-          } else if (channels === 1 && ch === 1) {
-            sample = outputs[0][i];
-          }
-          outputs[ch][i] = sample * volScale;
-        }
-
-        audioFrac += step;
-        while (audioFrac >= 1.0) {
-          if (available >= frameSize) {
-            readPtr = (readPtr + frameSize) % size;
-            available -= frameSize;
-          } else {
-            underrun = true;
-          }
-          audioFrac -= 1.0;
-        }
-      }
-
-      if (statePtr) {
-        memView.setUint32(statePtr + 448, readPtr, true);  // audio_read
-        if (underrun) {
-          const uOff = statePtr + 452;  // audio_underrun
-          memView.setUint32(uOff, memView.getUint32(uOff, true) + 1, true);
-        }
-      }
-    };
-
-    audioProcessor.connect(audioCtx.destination);
-  }
-
-  function stopAudio() {
-    if (audioProcessor) {
-      audioProcessor.disconnect();
-      audioProcessor = null;
-    }
-    audioEnabled = false;
-  }
-
   // ── Main Loop ──────────────────────────────────────────────────────────
 
   function frame(now) {
@@ -1139,12 +953,6 @@
 
     if (w !== prevWidth || h !== prevHeight || bpp !== prevBpp || scale !== prevScale) {
       resizeCanvas(w, h, scale);
-    }
-    // Initialize audio if audio globals changed or were enabled after startup
-    if (g.audioSampleRate > 0 && g.audioBpp > 0 && g.audioChannels > 0) {
-      if (!audioEnabled) {
-        initAudio(g.audioSampleRate, g.audioChannels, g.audioChunkSamples);
-      }
     }
 
     // 4. Render dirty rects (via pointer)

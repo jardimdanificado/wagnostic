@@ -28,25 +28,13 @@ const OFFSETS = {
   gamepad_buttons: 416,    // uint32
   ticks: 420,              // uint32
   target_fps: 424,         // uint32
-  audio_size: 428,         // uint32
-  audio_sample_rate: 432,  // uint32
-  audio_bpp: 436,          // uint32
-  audio_channels: 440,     // uint32
-  audio_write: 444,        // uint32
-  audio_read: 448,         // uint32
-  audio_underrun: 452,     // uint32
-  audio_overrun: 456,      // uint32
-  audio_chunk_samples: 460,// uint32
-  audio_volume: 464,       // uint32
-  audio_paused: 468,       // uint32
-  vram_offset: 472,        // uint32
-  audio_buffer_offset: 476,// uint32
-  r_bits: 480, r_shift: 484, // uint32
-  g_bits: 488, g_shift: 492, // uint32
-  b_bits: 496, b_shift: 500, // uint32
-  a_bits: 504, a_shift: 508, // uint32
-  x_bits: 512, x_shift: 516, // uint32
-  unique: 520,             // int32
+  vram_offset: 428,        // uint32
+  r_bits: 432, r_shift: 436, // uint32
+  g_bits: 440, g_shift: 444, // uint32
+  b_bits: 448, b_shift: 452, // uint32
+  a_bits: 456, a_shift: 460, // uint32
+  x_bits: 464, x_shift: 468, // uint32
+  unique: 472,             // int32
 };
 
 // Gamepad Bitmasks
@@ -126,111 +114,6 @@ class WagnosticState {
   setTicks(ticks) {
     this.view.setUint32(OFFSETS.ticks, ticks, true);
   }
-
-  // Audio getters / setters
-  get audioSize() { return this.view.getUint32(OFFSETS.audio_size, true); }
-  get audioSampleRate() { return this.view.getUint32(OFFSETS.audio_sample_rate, true); }
-  get audioBpp() { return this.view.getUint32(OFFSETS.audio_bpp, true); }
-  get audioChannels() { return this.view.getUint32(OFFSETS.audio_channels, true); }
-  get audioWrite() { return this.view.getUint32(OFFSETS.audio_write, true); }
-  get audioRead() { return this.view.getUint32(OFFSETS.audio_read, true); }
-  get audioBufferOffset() { return this.view.getUint32(OFFSETS.audio_buffer_offset, true); }
-
-  setAudioRead(ptr) {
-    this.view.setUint32(OFFSETS.audio_read, ptr, true);
-  }
-}
-
-// ── WagnosticAudio Driver ───────────────────────────────
-class WagnosticAudio {
-  constructor() {
-    this.device = null;
-    this.channels = 0;
-    this.sampleRate = 0;
-    this.bpp = 0;
-  }
-
-  setup(state) {
-    const size = state.audioSize;
-    if (size === 0) return;
-
-    const channels = state.audioChannels || 2;
-    const sampleRate = state.audioSampleRate || 44100;
-    const bpp = state.audioBpp || 16;
-
-    if (this.device && this.channels === channels && this.sampleRate === sampleRate && this.bpp === bpp) {
-      return;
-    }
-
-    if (this.device) {
-      try { this.device.close(); } catch (e) {}
-      this.device = null;
-    }
-
-    let format = 's16lsb';
-    if (bpp === 8) format = 'u8';
-    else if (bpp === 32) format = 'f32lsb';
-
-    try {
-      this.device = sdl.audio.openDevice({
-        type: 'playback',
-        channels,
-        frequency: sampleRate,
-        format,
-      });
-      this.channels = channels;
-      this.sampleRate = sampleRate;
-      this.bpp = bpp;
-      this.device.play();
-    } catch (err) {
-      console.warn('[Audio] Failed to open SDL audio device:', err.message);
-      this.device = null;
-    }
-  }
-
-  process(state, memoryBuffer) {
-    const size = state.audioSize;
-    if (!this.device || size === 0) return;
-
-    let write = state.audioWrite;
-    let read = state.audioRead;
-    if (write === read) return;
-
-    const bufOffset = state.statePtr + state.audioBufferOffset;
-    const uint8 = new Uint8Array(memoryBuffer);
-
-    let bytesAvailable = 0;
-    if (write >= read) {
-      bytesAvailable = write - read;
-    } else {
-      bytesAvailable = (size - read) + write;
-    }
-
-    if (bytesAvailable <= 0) return;
-
-    let chunk;
-    if (write >= read) {
-      chunk = Buffer.from(uint8.buffer, uint8.byteOffset + bufOffset + read, bytesAvailable);
-      read = (read + bytesAvailable) % size;
-    } else {
-      const part1 = uint8.subarray(bufOffset + read, bufOffset + size);
-      const part2 = uint8.subarray(bufOffset, bufOffset + write);
-      chunk = Buffer.concat([Buffer.from(part1.buffer, part1.byteOffset, part1.byteLength), Buffer.from(part2.buffer, part2.byteOffset, part2.byteLength)]);
-      read = write;
-    }
-
-    try {
-      this.device.enqueue(chunk);
-      state.setAudioRead(read);
-    } catch (e) {}
-  }
-
-  close() {
-    if (this.device) {
-      try { this.device.close(); } catch (e) {}
-      this.device = null;
-    }
-  }
 }
 
 // ── Parse Arguments ──────────────────────────────────────
@@ -239,15 +122,12 @@ function parseArgs() {
   let romPath = null;
   let forcedScale = 0;
   let forcedFps = 0;
-  let enableAudio = true;
 
   for (const arg of args) {
     if (arg.startsWith('--scale=')) {
       forcedScale = parseInt(arg.split('=')[1], 10) || 0;
     } else if (arg.startsWith('--fps=')) {
       forcedFps = parseInt(arg.split('=')[1], 10) || 0;
-    } else if (arg === '--no-audio') {
-      enableAudio = false;
     } else if (!arg.startsWith('-') && !romPath) {
       romPath = arg;
     }
@@ -255,11 +135,11 @@ function parseArgs() {
 
   if (!romPath) {
     console.log('Wagnostic Single-File Node.js SDL2 Host');
-    console.log('Usage: node wagnostic.js <path-to-rom.wasm> [--scale=N] [--fps=N] [--no-audio]');
+    console.log('Usage: node wagnostic.js <path-to-rom.wasm> [--scale=N] [--fps=N]');
     process.exit(1);
   }
 
-  return { romPath, forcedScale, forcedFps, enableAudio };
+  return { romPath, forcedScale, forcedFps };
 }
 
 // ── Helper to resolve pixel format for SDL2 ───────────────
@@ -267,7 +147,11 @@ function getPixelFormatInfo(state) {
   const rBits = state.rBits, rShift = state.rShift;
   const gBits = state.gBits, gShift = state.gShift;
   const bBits = state.bBits, bShift = state.bShift;
+  const aBits = state.aBits, aShift = state.aShift;
+  const xBits = state.xBits, xShift = state.xShift;
 
+  const bpp = (rBits + gBits + bBits + aBits + xBits) / 8;
+  
   if (rBits === 5 && rShift === 11 && gBits === 6 && gShift === 5 && bBits === 5 && bShift === 0) {
     return { format: 'rgb565', bpp: 2, convert: false };
   }
@@ -321,7 +205,7 @@ function convertPixelsToRgba32(state, vramRaw, width, height, outBuffer) {
 
 // ── Main Host Execution ───────────────────────────────────
 async function main() {
-  const { romPath, forcedScale, forcedFps, enableAudio } = parseArgs();
+  const { romPath, forcedScale, forcedFps } = parseArgs();
 
   const absoluteRomPath = path.resolve(process.cwd(), romPath);
   if (!fs.existsSync(absoluteRomPath)) {
@@ -367,7 +251,6 @@ async function main() {
   const memory = exports.memory || importObject.env.memory;
   let state = null;
   let window = null;
-  let audio = enableAudio ? new WagnosticAudio() : null;
 
   let currentWidth = 0;
   let currentHeight = 0;
@@ -387,10 +270,6 @@ async function main() {
   function exitCleanly() {
     if (!isRunning) return;
     isRunning = false;
-    if (audio) {
-      audio.close();
-      audio = null;
-    }
     process.exit(0);
   }
 
@@ -464,80 +343,81 @@ async function main() {
     const title = state.title || 'Wagnostic Host (Node.js)';
 
     if (!window || currentWidth !== width || currentHeight !== height || currentScale !== scale || currentTitle !== title) {
-      if (window && !window.destroyed) {
-        try { window.destroy(); } catch (e) {}
-      }
+      if (window && !window.destroyed && currentWidth === width && currentHeight === height && currentScale === scale) {
+        currentTitle = title;
+        try { window.setTitle(title); } catch (e) {}
+      } else {
+        if (window && !window.destroyed) {
+          window.removeAllListeners('close');
+          try { window.destroy(); } catch (e) {}
+        }
 
-      currentWidth = width;
-      currentHeight = height;
-      currentScale = scale;
-      currentTitle = title;
+        currentWidth = width;
+        currentHeight = height;
+        currentScale = scale;
+        currentTitle = title;
 
-      try {
-        window = sdl.video.createWindow({
-          title: currentTitle,
-          width: width * scale,
-          height: height * scale,
-          resizable: true,
+        try {
+          window = sdl.video.createWindow({
+            title: currentTitle,
+            width: width * scale,
+            height: height * scale,
+            resizable: true,
+          });
+        } catch (err) {
+          console.error('Failed to create SDL window:', err.message);
+          exitCleanly();
+          return;
+        }
+
+        window.on('close', () => {
+          exitCleanly();
         });
-      } catch (err) {
-        console.error('Failed to create SDL window:', err.message);
-        exitCleanly();
-        return;
+
+        window.on('keyDown', (e) => {
+          if (!state) return;
+          const scancode = e.scancode;
+          state.setKeyState(scancode, true);
+          updateGamepadKey(scancode, true);
+          state.setGamepadButtons(gamepadMask);
+        });
+
+        window.on('keyUp', (e) => {
+          if (!state) return;
+          const scancode = e.scancode;
+          state.setKeyState(scancode, false);
+          updateGamepadKey(scancode, false);
+          state.setGamepadButtons(gamepadMask);
+        });
+
+        window.on('mouseMove', (e) => {
+          if (!state) return;
+          const mx = Math.floor(e.x / currentScale);
+          const my = Math.floor(e.y / currentScale);
+          state.setMousePos(mx, my);
+        });
+
+        window.on('mouseButtonDown', (e) => {
+          if (!state) return;
+          if (e.button === 1) mouseButtonsMask |= 1;
+          if (e.button === 3) mouseButtonsMask |= 2;
+          if (e.button === 2) mouseButtonsMask |= 4;
+          state.setMouseButtons(mouseButtonsMask);
+        });
+
+        window.on('mouseButtonUp', (e) => {
+          if (!state) return;
+          if (e.button === 1) mouseButtonsMask &= ~1;
+          if (e.button === 3) mouseButtonsMask &= ~2;
+          if (e.button === 2) mouseButtonsMask &= ~4;
+          state.setMouseButtons(mouseButtonsMask);
+        });
+
+        window.on('mouseWheel', (e) => {
+          if (!state) return;
+          state.addMouseWheel(e.dy || 0);
+        });
       }
-
-      window.on('close', () => {
-        exitCleanly();
-      });
-
-      window.on('keyDown', (e) => {
-        if (!state) return;
-        const scancode = e.scancode;
-        state.setKeyState(scancode, true);
-        updateGamepadKey(scancode, true);
-        state.setGamepadButtons(gamepadMask);
-      });
-
-      window.on('keyUp', (e) => {
-        if (!state) return;
-        const scancode = e.scancode;
-        state.setKeyState(scancode, false);
-        updateGamepadKey(scancode, false);
-        state.setGamepadButtons(gamepadMask);
-      });
-
-      window.on('mouseMove', (e) => {
-        if (!state) return;
-        const mx = Math.floor(e.x / currentScale);
-        const my = Math.floor(e.y / currentScale);
-        state.setMousePos(mx, my);
-      });
-
-      window.on('mouseButtonDown', (e) => {
-        if (!state) return;
-        if (e.button === 1) mouseButtonsMask |= 1;
-        if (e.button === 3) mouseButtonsMask |= 2;
-        if (e.button === 2) mouseButtonsMask |= 4;
-        state.setMouseButtons(mouseButtonsMask);
-      });
-
-      window.on('mouseButtonUp', (e) => {
-        if (!state) return;
-        if (e.button === 1) mouseButtonsMask &= ~1;
-        if (e.button === 3) mouseButtonsMask &= ~2;
-        if (e.button === 2) mouseButtonsMask &= ~4;
-        state.setMouseButtons(mouseButtonsMask);
-      });
-
-      window.on('mouseWheel', (e) => {
-        if (!state) return;
-        state.addMouseWheel(e.dy || 0);
-      });
-    }
-
-    if (audio && isRunning) {
-      audio.setup(state);
-      audio.process(state, memory.buffer);
     }
 
     if (window && !window.destroyed && isRunning) {

@@ -27,18 +27,14 @@ typedef struct {
     uint32_t gamepad_buttons;
     uint32_t ticks;
     uint32_t target_fps;
-    uint32_t audio_size, audio_sample_rate, audio_bpp, audio_channels;
-    uint32_t audio_write, audio_read;
-    uint32_t audio_underrun, audio_overrun;
     uint32_t vram_offset;
-    uint32_t audio_buffer_offset;
     uint32_t r_bits, r_shift;
     uint32_t g_bits, g_shift;
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
     int32_t unique;
-    uint8_t reserved[500];
+    uint8_t reserved[552];
 } State;
 
 static struct {
@@ -96,30 +92,18 @@ All other fields are optional. The host applies sensible defaults so a ROM with 
 | `gamepad_buttons` | 416 | 0 | Gamepad button state |
 | `ticks` | 420 | 0 | Time in milliseconds |
 | `target_fps` | 424 | 0 | Target FPS (0 = no limit) |
-| `audio_size` | 428 | 0 | Buffer size in bytes (0 = audio off) |
-| `audio_sample_rate` | 432 | 0 | Sample rate in Hz |
-| `audio_bpp` | 436 | 0 | Bytes per sample (1=u8, 2=s16, 4=f32) |
-| `audio_channels` | 440 | 0 | Number of channels |
-| `audio_write` | 444 | 0 | Write position (ROM → Host) |
-| `audio_read` | 448 | 0 | Read position (Host → ROM) |
-| `audio_underrun` | 452 | 0 | Underrun counter (Host → ROM) |
-| `audio_overrun` | 456 | 0 | Overrun counter (Host → ROM) |
-| `audio_chunk_samples` | 460 | 0 | Suggested callback chunk size in samples (0 = Host default 512) |
-| `audio_volume` | 464 | 255 | Master audio volume (0..255, 0 = muted / default 255) |
-| `audio_paused` | 468 | 0 | Pause audio output (0 = active, 1 = paused) |
-| `vram_offset` | 472 | 0 | Offset from state base to VRAM buffer |
-| `audio_buffer_offset` | 476 | 0 | Offset from state base to audio buffer |
-| `r_bits` | 480 | 0 | Red bit count |
-| `r_shift` | 484 | 0 | Red bit shift |
-| `g_bits` | 488 | 0 | Green bit count |
-| `g_shift` | 492 | 0 | Green bit shift |
-| `b_bits` | 496 | 0 | Blue bit count |
-| `b_shift` | 500 | 0 | Blue bit shift |
-| `a_bits` | 504 | 0 | Alpha bit count |
-| `a_shift` | 508 | 0 | Alpha bit shift |
-| `x_bits` | 512 | 0 | Padding bit count |
-| `x_shift` | 516 | 0 | Padding bit shift |
-| `unique` | 520 | 0 | Unique session ID generated when session is created |
+| `vram_offset` | 428 | 0 | Offset from state base to VRAM buffer |
+| `r_bits` | 432 | 0 | Red bit count |
+| `r_shift` | 436 | 0 | Red bit shift |
+| `g_bits` | 440 | 0 | Green bit count |
+| `g_shift` | 444 | 0 | Green bit shift |
+| `b_bits` | 448 | 0 | Blue bit count |
+| `b_shift` | 452 | 0 | Blue bit shift |
+| `a_bits` | 456 | 0 | Alpha bit count |
+| `a_shift` | 460 | 0 | Alpha bit shift |
+| `x_bits` | 464 | 0 | Padding bit count |
+| `x_shift` | 468 | 0 | Padding bit shift |
+| `unique` | 472 | 0 | Unique session ID |generated when session is created |
 
 **Total struct size: 1024 bytes.**
 
@@ -196,38 +180,6 @@ The host reads VRAM at `(uint8_t*)state + vram_offset`.
 |------|------|-------------|
 | `target_fps` | `uint32` | Target FPS (0 = no limit, default) |
 
-### Audio
-
-| Name | Type | Direction | Description |
-|------|------|-----------|-------------|
-| `audio_size` | `uint32` | ROM → Host | Buffer size in bytes |
-| `audio_sample_rate` | `uint32` | ROM → Host | Sample rate (Hz) |
-| `audio_bpp` | `uint32` | ROM → Host | Bytes per sample (1=u8, 2=s16, 4=f32) |
-| `audio_channels` | `uint32` | ROM → Host | Number of channels |
-| `audio_write` | `uint32` | ROM → Host | Write position |
-| `audio_read` | `uint32` | Host → ROM | Read position |
-| `audio_underrun` | `uint32` | Host → ROM | Underrun counter |
-| `audio_overrun` | `uint32` | Host → ROM | Overrun counter |
-| `audio_chunk_samples` | `uint32` | ROM → Host | Callback chunk size in samples (0 = Host default 512) |
-| `audio_volume` | `uint32` | ROM → Host | Master volume (0..255, 0 = muted / default 255) |
-| `audio_paused` | `uint32` | ROM → Host | Pause audio output (0 = active, 1 = paused) |
-| `audio_buffer_offset` | `uint32` | ROM → Host | Offset from state base to audio ring buffer |
-
-The audio buffer is allocated separately, like VRAM:
-
-```c
-static struct {
-    State s;
-    uint8_t vram[320 * 240 * 2];
-    uint8_t audio_buffer[16384];
-} rom;
-rom.s.audio_buffer_offset = (uint32_t)((uint8_t*)rom.audio_buffer - (uint8_t*)&rom.s);
-```
-
-`w_audio_bpp` is bytes per sample (not bits per pixel). The host opens
-the SDL audio device with the format from these fields and reopens it
-when any of them change.
-
 ## 4. Dirty Rectangles
 
 Instead of redrawing the entire screen every frame, the ROM specifies which regions changed.
@@ -271,36 +223,6 @@ The bit depths can be any valid power of 2: **1, 2, 4, 8, 16, 24, 32, 64**.
 Instead of predefined formats (like RGB565) or indexed color palettes, the Host decodes pixels using the `r_bits`/`r_shift`, `g_bits`/`g_shift`, `b_bits`/`b_shift`, and `a_bits`/`a_shift` fields.
 The fields indicate how many bits each channel occupies and how far left they are shifted in the pixel integer.
 If `r_bits`, `g_bits`, and `b_bits` are all `0`, but `a_bits > 0`, the format is treated as **Grayscale / Luminance**, where the Alpha channel is replicated into R, G, and B.
-
-## 6. Audio
-
-Ring buffer at `(uint8_t*)state + audio_buffer_offset`. Format determined by `audio_bpp`:
-- 1: Unsigned 8-bit PCM (128 = silence)
-- 2: Signed 16-bit PCM (little-endian, 0 = silence)
-- 4: 32-bit float (0.0 = silence)
-
-### Ring Buffer Rules
-
-The buffer uses `size - 1` usable bytes:
-- `audio_write == audio_read` → **EMPTY**
-- `(audio_write + 1) % size == audio_read` → **FULL**
-
-The Host protects this buffer with a mutex, so the ownership rules below
-are about avoiding stale-pointer bugs, not memory races.
-
-**ROM (producer) — owns `audio_write`:**
-1. Read `audio_read` to compute free space
-2. Write samples into the audio buffer
-3. Update `audio_write` ONCE at the end
-4. Don't re-read `audio_write` after you start writing (you already have the local copy)
-
-**Host (consumer) — owns `audio_read`:**
-1. Read `audio_write` ONCE at callback start
-2. Process samples
-3. Write `audio_read` ONCE at callback end
-4. Never write to `audio_write`
-
-See [ABI.md](ABI.md) for the diagnostic counters and wrap-around details.
 
 ## 7. Host Behavior
 

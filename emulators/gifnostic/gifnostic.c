@@ -245,13 +245,6 @@ uint8_t* wagnostic_get_vram(WagnosticContext* ctx) {
     return (uint8_t*)s + s->vram_offset;
 }
 
-uint8_t* wagnostic_get_audio_buffer(WagnosticContext* ctx) {
-    WagnosticState* s = wagnostic_get_state(ctx);
-    if (!s || s->audio_buffer_offset == 0) return NULL;
-    if (ctx->state_ptr + s->audio_buffer_offset >= ctx->mem_len) return NULL;
-    return (uint8_t*)s + s->audio_buffer_offset;
-}
-
 uint8_t* wagnostic_get_wasm_memory(WagnosticContext* ctx, uint32_t* out_len) {
     if (!ctx) {
         if (out_len) *out_len = 0;
@@ -497,18 +490,13 @@ void wagnostic_print_debug(WagnosticContext* ctx, FILE* stream) {
     fprintf(stream, "Screen Config: %ux%u (Scale: %u, BPP: %u)\n",
             s->width, s->height, s->scale, BPP);
     fprintf(stream, "Title:         '%s'\n", s->title);
-    fprintf(stream, "Offsets:       VRAM=0x%08X, Audio=0x%08X\n",
-            s->vram_offset, s->audio_buffer_offset);
+    fprintf(stream, "Offsets:       VRAM=0x%08X\n", s->vram_offset);
     fprintf(stream, "Bitfield Config: R(%u<<%u) G(%u<<%u) B(%u<<%u) A(%u<<%u) X(%u<<%u)\n",
             s->r_bits, s->r_shift, s->g_bits, s->g_shift,
             s->b_bits, s->b_shift, s->a_bits, s->a_shift,
             s->x_bits, s->x_shift);
     fprintf(stream, "Input State:   Mouse(%d, %d, btns=0x%X, wheel=%d) Gamepad=0x%X\n",
             s->mouse_x, s->mouse_y, s->mouse_buttons, s->mouse_wheel, s->gamepad_buttons);
-    fprintf(stream, "Audio Config:  Size=%u, Rate=%u, BPP=%u, Channels=%u, Volume=%u, Paused=%u\n",
-            s->audio_size, s->audio_sample_rate, s->audio_bpp, s->audio_channels, s->audio_volume, s->audio_paused);
-    fprintf(stream, "Audio Buffer:  Write=%u, Read=%u (Underrun=%u, Overrun=%u)\n",
-            s->audio_write, s->audio_read, s->audio_underrun, s->audio_overrun);
     fprintf(stream, "Unique ID:     0x%08X\n", s->unique);
     fprintf(stream, "=====================================\n");
 }

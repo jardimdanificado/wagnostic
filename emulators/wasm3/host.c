@@ -61,19 +61,14 @@ typedef struct {
     uint32_t gamepad_buttons;
     uint32_t ticks;
     uint32_t target_fps;
-    uint32_t audio_size, audio_sample_rate, audio_bpp, audio_channels;
-    uint32_t audio_write, audio_read;
-    uint32_t audio_underrun, audio_overrun;
-    uint32_t audio_chunk_samples, audio_volume, audio_paused;
     uint32_t vram_offset;
-    uint32_t audio_buffer_offset;
     uint32_t r_bits, r_shift;
     uint32_t g_bits, g_shift;
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
     int32_t unique;
-    uint8_t reserved[500];
+    uint8_t reserved[548];
 } WagnosticState;
 
 static int g_is_tar = 0;
@@ -151,14 +146,7 @@ static IM3Runtime g_runtime = NULL;
 static uint8_t *g_mem     = NULL;
 static uint32_t g_mem_len = 0;
 
-/* Latest state pointer (offset into WASM memory). Updated each frame.
- * The audio callback reads from this pointer. */
 static uint32_t g_state_ptr = 0;
-
-
-
-/* Audio buffer lock */
-static SDL_mutex *g_audio_mutex = NULL;
 
 /* ================================================================
  * Pointer helpers
@@ -173,11 +161,6 @@ static inline WagnosticState *get_state(void) {
 static inline uint8_t *get_vram(WagnosticState *s) {
     if (!s || s->vram_offset == 0) return NULL;
     return (uint8_t *)s + s->vram_offset;
-}
-
-static inline uint8_t *get_audio_buffer(WagnosticState *s) {
-    if (!s || s->audio_buffer_offset == 0) return NULL;
-    return (uint8_t *)s + s->audio_buffer_offset;
 }
 
 
@@ -728,90 +711,6 @@ static void convert_mouse_coords(int wx, int wy, int *rx, int *ry,
     if (*ry < 0) *ry = 0;
     if (*ry >= (int)H) *ry = (int)H - 1;
 }
-
-/* ================================================================
- * Audio callback
- * ================================================================ */
-
-static void host_audio_callback(void *userdata, Uint8 *stream_ptr, int len_bytes) {
-    (void)userdata;
-    float *stream = (float *)stream_ptr;
-    int nsamples  = len_bytes / (int)sizeof(float);
-
-    if (g_audio_mutex) SDL_LockMutex(g_audio_mutex);
-
-    WagnosticState *s = get_state();
-    uint8_t *abuf = get_audio_buffer(s);
-    uint32_t size  = s ? s->audio_size  : 0;
-    uint32_t bpp   = s ? s->audio_bpp   : 0;
-    uint32_t r_off = s ? s->audio_read  : 0;
-    uint32_t w_off = s ? s->audio_write : 0;
-
-    if (!abuf || size == 0 || bpp == 0 || bpp > 4 || (s && s->audio_paused)) {
-        memset(stream, 0, len_bytes);
-        if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
-        return;
-    }
-
-    if (r_off >= size) r_off = 0;
-    if (w_off >= size) w_off = 0;
-
-    uint32_t avail;
-    if (w_off >= r_off) avail = w_off - r_off;
-    else                avail = size - r_off + w_off;
-
-    uint32_t max_bytes = avail;
-    uint32_t stream_bytes = (uint32_t)nsamples * bpp;
-    if (max_bytes > stream_bytes) max_bytes = stream_bytes;
-    max_bytes = (max_bytes / bpp) * bpp;
-
-    uint32_t bytes_read = 0;
-    int stream_idx = 0;
-
-    while (bytes_read < max_bytes && stream_idx < nsamples) {
-        uint32_t chunk = max_bytes - bytes_read;
-        uint32_t pos = (r_off + bytes_read) % size;
-        uint32_t to_end = size - pos;
-        if (chunk > to_end) chunk = to_end;
-
-        if (bpp == 1) {
-            for (uint32_t b = 0; b < chunk && stream_idx < nsamples; b++) {
-                stream[stream_idx++] = ((float)abuf[pos + b] - 128.0f) / 128.0f;
-            }
-        } else if (bpp == 2) {
-            for (uint32_t b = 0; b + 1 < chunk && stream_idx < nsamples; b += 2) {
-                int16_t s16;
-                memcpy(&s16, abuf + pos + b, 2);
-                stream[stream_idx++] = (float)s16 / 32768.0f;
-            }
-        } else {
-            for (uint32_t b = 0; b + 3 < chunk && stream_idx < nsamples; b += 4) {
-                float sample;
-                memcpy(&sample, abuf + pos + b, 4);
-                stream[stream_idx++] = sample;
-            }
-        }
-        bytes_read += chunk;
-    }
-
-    int underrun = (stream_idx < nsamples);
-    for (int i = stream_idx; i < nsamples; i++) stream[i] = 0.0f;
-
-    if (s && s->audio_volume > 0 && s->audio_volume < 255) {
-        float vol = (float)s->audio_volume / 255.0f;
-        for (int i = 0; i < stream_idx; i++) stream[i] *= vol;
-    }
-
-    if (bytes_read > 0 && s) {
-        s->audio_read = (r_off + bytes_read) % size;
-    }
-    if (underrun && s) {
-        s->audio_underrun++;
-    }
-
-    if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
-}
-
 /* ================================================================
  * Refresh WASM memory pointer
  * ================================================================ */
@@ -877,26 +776,16 @@ int main(int argc, char **argv) {
     refresh_memory();
 
     /* ---- Initialize SDL ---- */
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) < 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) < 0) {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         m3_FreeRuntime(g_runtime); m3_FreeEnvironment(env); free(wasm_data);
         return 1;
     }
 
-
-    g_audio_mutex = SDL_CreateMutex();
-    if (!g_audio_mutex) {
-        fprintf(stderr, "SDL_CreateMutex failed: %s\n", SDL_GetError());
-        SDL_Quit(); m3_FreeRuntime(g_runtime); m3_FreeEnvironment(env); free(wasm_data);
-        return 1;
-    }
-
     /* ---- Call wupdate() once to get initial state pointer ---- */
     {
-        if (g_audio_mutex) SDL_LockMutex(g_audio_mutex);
         m3_CallV(f_wupdate);
         m3_GetResultsV(f_wupdate, &g_state_ptr);
-        if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
     }
     refresh_memory();
 
@@ -945,25 +834,6 @@ int main(int argc, char **argv) {
         (int)W, (int)H);
     SDL_SetTextureScaleMode(texture, SDL_ScaleModeNearest);
     SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-
-    /* ---- Audio device ---- */
-    SDL_AudioDeviceID audio_dev = 0;
-    uint32_t prev_audio_size = state ? state->audio_size : 0;
-    uint32_t prev_audio_rate = state ? state->audio_sample_rate : 0;
-    uint32_t prev_audio_bpp  = state ? state->audio_bpp : 0;
-    uint32_t prev_audio_channels = state ? state->audio_channels : 0;
-
-    if (prev_audio_size > 0) {
-        SDL_AudioSpec wanted;
-        SDL_zero(wanted);
-        wanted.freq     = prev_audio_rate ? prev_audio_rate : 44100;
-        wanted.format   = AUDIO_F32;
-        wanted.channels = prev_audio_channels ? prev_audio_channels : 1;
-        wanted.samples  = (state && state->audio_chunk_samples >= 128) ? state->audio_chunk_samples : 512;
-        wanted.callback = host_audio_callback;
-        audio_dev = SDL_OpenAudioDevice(NULL, 0, &wanted, NULL, 0);
-        if (audio_dev) SDL_PauseAudioDevice(audio_dev, 0);
-    }
 
     /* ---- Track previous config for change detection ---- */
     uint32_t prev_W = W, prev_H = H, prev_BPP = BPP, prev_SCALE = SCALE;
@@ -1073,10 +943,8 @@ int main(int argc, char **argv) {
         /* ---- Step 2: Call wupdate(), exit if return is 0 ---- */
         {
             int32_t keep = 0;
-            if (g_audio_mutex) SDL_LockMutex(g_audio_mutex);
             m3_CallV(f_wupdate);
             m3_GetResultsV(f_wupdate, &keep);
-            if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
             if (!keep) break;
             g_state_ptr = (uint32_t)keep;
         }
@@ -1121,40 +989,6 @@ int main(int argc, char **argv) {
             SDL_GetWindowSize(window, &win_w, &win_h);
             convert_mouse_coords(mouse_x, mouse_y, &mouse_x, &mouse_y,
                                  win_w, win_h, W, H);
-        }
-
-        /* ---- Detect audio config changes ---- */
-        if (state) {
-            uint32_t cur_size     = state->audio_size;
-            uint32_t cur_rate     = state->audio_sample_rate;
-            uint32_t cur_bpp      = state->audio_bpp;
-            uint32_t cur_channels = state->audio_channels;
-
-            if (cur_size != prev_audio_size || cur_rate != prev_audio_rate ||
-                cur_bpp != prev_audio_bpp || cur_channels != prev_audio_channels) {
-
-                if (audio_dev) {
-                    SDL_CloseAudioDevice(audio_dev);
-                    audio_dev = 0;
-                }
-
-                if (cur_size > 0 && cur_rate > 0 && cur_channels > 0) {
-                    SDL_AudioSpec wanted;
-                    SDL_zero(wanted);
-                    wanted.freq     = cur_rate;
-                    wanted.format   = AUDIO_F32;
-                    wanted.channels = cur_channels;
-                    wanted.samples  = (state && state->audio_chunk_samples >= 128) ? state->audio_chunk_samples : 512;
-                    wanted.callback = host_audio_callback;
-                    audio_dev = SDL_OpenAudioDevice(NULL, 0, &wanted, NULL, 0);
-                    if (audio_dev) SDL_PauseAudioDevice(audio_dev, 0);
-                }
-
-                prev_audio_size     = cur_size;
-                prev_audio_rate     = cur_rate;
-                prev_audio_bpp      = cur_bpp;
-                prev_audio_channels = cur_channels;
-            }
         }
 
         /* ---- Step 4: Render dirty rects ---- */
@@ -1228,12 +1062,9 @@ int main(int argc, char **argv) {
      * Cleanup
      * ================================================================ */
 
-    if (audio_dev) SDL_CloseAudioDevice(audio_dev);
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
-    if (g_audio_mutex) SDL_DestroyMutex(g_audio_mutex);
-    g_audio_mutex = NULL;
     SDL_Quit();
 
     m3_FreeRuntime(g_runtime);

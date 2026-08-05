@@ -1,9 +1,18 @@
-// mquickjs_wagner demo - using Wagner framework functions in JS!
+// mquickjs_wagner complete demo — Textures, Audio Files, Keyboard & Mouse Events!
 
 var angle = 0;
+var playerX = 160;
+var playerY = 180;
 var particles = [];
+var iconImg = null;
+var beepSnd = null;
 
 function setup() {
+    set_title("Wagner JS — Demo");
+
+    // Load PNG image asset
+    iconImg = load_image("icon.png");
+
     for (var i = 0; i < 20; i++) {
         particles.push({
             x: (i * 16 + 10) % 320,
@@ -15,29 +24,47 @@ function setup() {
 }
 
 function draw() {
-    // Clear background with dark blue
+    // 1. Keyboard Controls (WASD or Arrow Keys)
+    var speed = 3;
+    if (is_key_down(KEY_LEFT) || is_key_down(KEY_A)) playerX -= speed;
+    if (is_key_down(KEY_RIGHT) || is_key_down(KEY_D)) playerX += speed;
+    if (is_key_down(KEY_UP) || is_key_down(KEY_W)) playerY -= speed;
+    if (is_key_down(KEY_DOWN) || is_key_down(KEY_S)) playerY += speed;
+
+    // Boundary wrap
+    if (playerX < 0) playerX = 320;
+    if (playerX > 320) playerX = 0;
+    if (playerY < 0) playerY = 240;
+    if (playerY > 240) playerY = 0;
+
+    // Clear background
     fill(15, 15, 35);
     clear();
-    
-    // Draw animated rotating shapes using Wagner push/pop matrix transforms
+
+    // Draw animated rotating textured shape using Wagner push/pop matrix transforms
     push();
-    translate(160, 100);
+    translate(160, 80);
     rotate(angle);
-    
-    // Outer square using Wagner rect
-    fill(RED);
-    rect(-40, -40, 80, 80);
-    
-    // Inner rotating triangle using Wagner triangle_pts
+
+    if (iconImg) {
+        texture(iconImg);
+        rect(-32, -32, 64, 64);
+        no_texture();
+    } else {
+        fill(RED);
+        rect(-30, -30, 60, 60);
+    }
+
+    // Inner rotating triangle
     push();
     rotate(-angle * 2);
     fill(YELLOW);
-    triangle_pts(-25, 20, 25, 20, 0, -30);
+    triangle_pts(-20, 15, 20, 15, 0, -25);
     pop();
-    
+
     pop();
-    
-    // Update and draw particles using Wagner circle
+
+    // Update and draw background particles
     fill(CYAN);
     for (var i = 0; i < particles.length; i++) {
         var p = particles[i];
@@ -45,28 +72,32 @@ function draw() {
         if (p.y > 240) p.y = 0;
         circle(p.x, p.y, p.size);
     }
-    
-    // Draw text using Wagner text function
+
+    // Draw Keyboard-Controlled Player with PNG texture
+    push();
+    if (iconImg) {
+        image(iconImg, playerX - 16, playerY - 16, 32, 32);
+    } else {
+        translate(playerX, playerY);
+        fill(GREEN);
+        circle(0, 0, 14);
+    }
+    pop();
+
+    // Draw HUD text
     fill(WHITE);
-    text("WAGNER + MQUICKJS", 85, 12);
-    
-    var infoStr = "MOUSE X:" + wagnostic.mouse_x + " Y:" + wagnostic.mouse_y;
-    text(infoStr, 10, 220);
-    
-    // Draw mouse target cursor using Wagner circle and lines
+    text("WAGNER + MQUICKJS COMPLETE API", 45, 10);
+    text("POS X:" + Math.floor(playerX) + " Y:" + Math.floor(playerY), 10, 220);
+
+    // Draw mouse target cursor
     push();
     translate(wagnostic.mouse_x, wagnostic.mouse_y);
-    stroke(MAGENTA);
+    stroke(wagnostic.mouse_down ? RED : MAGENTA);
     no_fill();
-    circle(0, 0, 12);
-    line(-16, 0, 16, 0);
-    line(0, -16, 0, 16);
+    circle(0, 0, 10);
+    line(-12, 0, 12, 0);
+    line(0, -12, 0, 12);
     pop();
-    
-    // Sound feedback on mouse down
-    if (wagnostic.mouse_down) {
-        play_tone(440.0 + (wagnostic.mouse_x % 300), 0.05, 0.3);
-    }
-    
+
     angle += 0.04;
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-gen_assets.py — Embeds every file under assets/ into assets.h as C byte arrays.
+gen_assets.py — Embeds every file under assets/ into assets.h as null-terminated C byte arrays.
 """
 
 import os
@@ -36,17 +36,19 @@ lines.append("typedef struct { const char* path; const unsigned char* data; unsi
 for idx, (path, data) in enumerate(entries):
     var = f"asset_{idx}"
     rows = []
-    flat = [f"0x{b:02x}" for b in data]
+    # Always append 0x00 so text/scripts are safely null-terminated in memory
+    data_with_null = data + b'\x00'
+    flat = [f"0x{b:02x}" for b in data_with_null]
     for i in range(0, len(flat), 12):
         rows.append("  " + ", ".join(flat[i:i+12]))
     lines.append(f"static const unsigned char {var}[] = {{")
-    lines.append(",\n".join(rows) if rows else "  0x00")
+    lines.append(",\n".join(rows))
     lines.append("};")
 
 lines.append("static const WagnosticAsset WAGNOSTIC_ASSETS[] = {")
-for idx, (path, _) in enumerate(entries):
+for idx, (path, data) in enumerate(entries):
     safe = path.replace("\\", "/")
-    lines.append(f'    {{"{safe}", asset_{idx}, sizeof(asset_{idx})}},')
+    lines.append(f'    {{"{safe}", asset_{idx}, {len(data)}}},')
 lines.append("};")
 lines.append(f"static const int WAGNOSTIC_ASSET_COUNT = {len(entries)};")
 
