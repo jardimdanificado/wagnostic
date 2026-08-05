@@ -17,7 +17,9 @@ ROM_DIRS = \
 	bpp2_test \
 	bpp4_test \
 	exotic1_test \
-	exotic2_test
+	exotic2_test \
+	mquickjs_wagner
+
 
 .PHONY: all clean $(ROM_DIRS)
 
