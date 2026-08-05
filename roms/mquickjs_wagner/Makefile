@@ -29,10 +29,12 @@ CFLAGS = \
 	-w \
 	-isystem include \
 	-I$(MQJS) \
-	-I$(WAGNER_ROOT) \
-	-I$(WAGNER_ROOT)/lib/decoders \
+	-Idecoders \
 	-DWAGNER_CFG_BPP=32 \
-	-DWAGNER_NO_PNG_DECODE \
+	-DLODEPNG_NO_COMPILE_DISK \
+	-DLODEPNG_NO_COMPILE_ENCODER \
+	-DLODEPNG_NO_COMPILE_ANCILLARY_CHUNKS \
+	-DLODEPNG_NO_COMPILE_ERROR_TEXT \
 	-Dalloca=__builtin_alloca \
 	-DUINT_MAX=0xffffffff \
 	-I.
@@ -50,6 +52,7 @@ SRCS = \
 	$(MQJS)/cutils.c \
 	$(MQJS)/dtoa.c \
 	$(MQJS)/libm.c \
+	decoders/lodepng.c \
 	shim/libc_shim.c
 
 .PHONY: all run clean gen-assets patch-stdlib
