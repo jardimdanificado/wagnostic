@@ -10,6 +10,7 @@ typedef WagnosticAsset WagnerAsset;
 #define WAGNER_TITLE "mquickjs_wagner"
 
 /* --- Wagner Framework --- */
+#define STB_IMAGE_IMPLEMENTATION
 #include "wagner.h"
 
 /* --- MicroQuickJS --- */
@@ -58,6 +59,7 @@ JSValue js_no_texture(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv
 JSValue js_color_key(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue js_no_color_key(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue js_image(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue js_load_gif_anim(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 
 #include "mqjs_stdlib.h"
 
@@ -484,6 +486,29 @@ JSValue js_image(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
         }
     }
     return JS_UNDEFINED;
+}
+
+JSValue js_load_gif_anim(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    if (argc >= 1) {
+        JSCStringBuf sbuf;
+        const char *path = JS_ToCString(ctx, argv[0], &sbuf);
+        if (path) {
+            Gif g = load_gif_anim(path);
+            if (g.frames && g.frame_count > 0) {
+                JSValue arr = JS_NewArray(ctx, g.frame_count);
+                for (int i = 0; i < g.frame_count; i++) {
+                    if (js_image_count < MAX_JS_IMAGES) {
+                        int id = js_image_count++;
+                        js_images[id] = g.frames[i];
+                        JSValue img_obj = create_js_image_obj(ctx, id, g.frames[i].width, g.frames[i].height);
+                        JS_SetPropertyUint32(ctx, arr, (uint32_t)i, img_obj);
+                    }
+                }
+                return arr;
+            }
+        }
+    }
+    return JS_NULL;
 }
 
 /* Wagner Setup & Draw callbacks (invoked by wagner.h) */

@@ -48,6 +48,7 @@ wagner_funcs = """
     JS_CFUNC_DEF("color_key", 1, js_color_key),
     JS_CFUNC_DEF("no_color_key", 0, js_no_color_key),
     JS_CFUNC_DEF("image", 5, js_image),
+    JS_CFUNC_DEF("load_gif_anim", 1, js_load_gif_anim),
 """
 
 target = 'JS_CFUNC_DEF("clearTimeout", 1, js_clearTimeout),'

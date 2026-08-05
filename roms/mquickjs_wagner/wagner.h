@@ -333,6 +333,14 @@ typedef struct {
 typedef struct { void* pixels; int width; int height; int stride; uint8_t bpp; uint8_t r_bits, r_shift, g_bits, g_shift, b_bits, b_shift, a_bits, a_shift; } Canvas;
 typedef Canvas Image;
 
+typedef struct {
+    Image *frames;
+    int *delays;
+    int frame_count;
+    int width;
+    int height;
+} Gif;
+
 // ============================================
 // GLOBAL STATE (managed by WagnO)
 // ============================================
@@ -451,7 +459,7 @@ static inline float lerp(float a, float b, float t) {
 }
 
 
-static inline float sqrt(float x) {
+static inline float w_sqrt(float x) {
     // Newton's method approximation
     if (x <= 0) return 0;
     float guess = x / 2.0f;
@@ -468,7 +476,7 @@ static inline float dist_sq(float x1, float y1, float x2, float y2) {
 }
 
 static inline float dist(float x1, float y1, float x2, float y2) {
-    return sqrt(dist_sq(x1, y1, x2, y2));
+    return w_sqrt(dist_sq(x1, y1, x2, y2));
 }
 
 
@@ -485,7 +493,7 @@ static inline float max(float a, float b) {
 }
 
 // Trigonometric functions using Bhaskara I approximation
-static inline float sin(float x) {
+static inline float w_sin(float x) {
     // Normalize to [0, 2π] using division to avoid O(N) loop
     if (x < 0.0f || x >= TWO_PI) {
         int q = (int)(x / TWO_PI);
@@ -500,8 +508,8 @@ static inline float sin(float x) {
     return 16.0f * x * (PI - x) / (5.0f * PI * PI - 4.0f * x * (PI - x));
 }
 
-static inline float cos(float x) {
-    return sin(x + HALF_PI);
+static inline float w_cos(float x) {
+    return w_sin(x + HALF_PI);
 }
 
 static uint32_t _wagner_rng_seed = 12345;
@@ -555,7 +563,7 @@ static inline Vec2 vec2_mul(Vec2 v, float s) {
 }
 
 static inline float vec2_len(Vec2 v) {
-    return sqrt(v.x * v.x + v.y * v.y);
+    return w_sqrt(v.x * v.x + v.y * v.y);
 }
 
 static inline Vec2 vec2_normalize(Vec2 v) {
@@ -1012,8 +1020,8 @@ void translate(float x, float y) {
 }
 
 void rotate(float angle) {
-    float c = cos(angle);
-    float s = sin(angle);
+    float c = w_cos(angle);
+    float s = w_sin(angle);
     _wagner_mat_mul(_wagner_current_matrix(), c, s, -s, c, 0.0f, 0.0f);
 }
 
@@ -1242,7 +1250,7 @@ void circle(void) {
         float last_u = 1.0f, last_v = 0.5f;
         for (int i = 1; i <= 32; i++) {
             float ang = i * TWO_PI / 32.0f;
-            float px = cos(ang), py = sin(ang);
+            float px = w_cos(ang), py = w_sin(ang);
             float pu = px * 0.5f + 0.5f;
             float pv = py * 0.5f + 0.5f;
             _wagner_transform(&px, &py);
@@ -1260,7 +1268,7 @@ void circle(void) {
             if (wabs(rx - ry) < 0.001f) {
                 int r = (int)rx;
                 for (int y = -r; y <= r; y++) {
-                    int dx = (int)sqrt((float)(r * r - y * y));
+                    int dx = (int)w_sqrt((float)(r * r - y * y));
                     for (int x = -dx; x <= dx; x++) _wagner_set_pixel_raw(c, (int)fx + x, (int)fy + y, state->fill_color);
                 }
             } else {
@@ -1277,7 +1285,7 @@ void circle(void) {
             float last_x = 1.0f, last_y = 0.0f; _wagner_transform(&last_x, &last_y);
             for (int i = 1; i <= 32; i++) {
                 float ang = i * TWO_PI / 32.0f;
-                float px = cos(ang), py = sin(ang); _wagner_transform(&px, &py);
+                float px = w_cos(ang), py = w_sin(ang); _wagner_transform(&px, &py);
                 _wagner_triangle(c, (int)cx_f, (int)cy_f, (int)last_x, (int)last_y, (int)px, (int)py, state->fill_color);
                 last_x = px; last_y = py;
             }
@@ -1292,7 +1300,7 @@ void circle(void) {
             float last_x = 1.0f, last_y = 0.0f; _wagner_transform(&last_x, &last_y);
             for (int i = 1; i <= 32; i++) {
                 float ang = i * TWO_PI / 32.0f;
-                float px = cos(ang), py = sin(ang); _wagner_transform(&px, &py);
+                float px = w_cos(ang), py = w_sin(ang); _wagner_transform(&px, &py);
                 _wagner_line(c, (int)last_x, (int)last_y, (int)px, (int)py, state->stroke_color);
                 last_x = px; last_y = py;
             }
@@ -1481,6 +1489,62 @@ Canvas img_load(const uint8_t* data, size_t size) {
 }
 #endif
 
+#ifndef WAGNER_NO_GIF_DECODE
+#define STBI_NO_STDIO
+#define STBI_NO_JPEG
+#define STBI_NO_PNG
+#define STBI_NO_BMP
+#define STBI_NO_PSD
+#define STBI_NO_TGA
+#define STBI_NO_PIC
+#define STBI_NO_PNM
+#define STBI_NO_HDR
+#define STBI_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+Image gif_load(const uint8_t* data, size_t size) {
+    int w = 0, h = 0, comp = 0;
+    stbi_uc *pixels = stbi_load_from_memory(data, (int)size, &w, &h, &comp, 4);
+    if (!pixels) return (Image){0};
+    Image img = { .pixels = pixels, .width = w, .height = h, .stride = w, .bpp = 32,
+                  .r_bits = 8, .r_shift = 0,
+                  .g_bits = 8, .g_shift = 8,
+                  .b_bits = 8, .b_shift = 16,
+                  .a_bits = 8, .a_shift = 24 };
+    return img;
+}
+
+Gif gif_load_anim(const uint8_t* data, size_t size) {
+    Gif g = {0};
+    int w = 0, h = 0, z = 0, comp = 0;
+    int *delays = NULL;
+    stbi_uc *pixels = stbi_load_gif_from_memory(data, (int)size, &delays, &w, &h, &z, &comp, 4);
+    if (!pixels || z <= 0) return g;
+    
+    g.width = w;
+    g.height = h;
+    g.frame_count = z;
+    g.delays = delays;
+    g.frames = (Image*)malloc(sizeof(Image) * (size_t)z);
+    
+    size_t frame_bytes = (size_t)(w * h * 4);
+    for (int i = 0; i < z; i++) {
+        g.frames[i] = (Image){
+            .pixels = pixels + (i * frame_bytes),
+            .width = w,
+            .height = h,
+            .stride = w,
+            .bpp = 32,
+            .r_bits = 8, .r_shift = 0,
+            .g_bits = 8, .g_shift = 8,
+            .b_bits = 8, .b_shift = 16,
+            .a_bits = 8, .a_shift = 24
+        };
+    }
+    return g;
+}
+#endif
+
 // ============================================
 // ASSET LOADERS WITH CACHING
 // ============================================
@@ -1529,8 +1593,15 @@ Image load_image(const char* path) {
 
     const WagnerAsset* asset = _wagner_find_asset(path);
     if (asset) {
+        Image img = {0};
 #ifndef WAGNER_NO_PNG_DECODE
-        Image img = img_load((uint8_t*)asset->data, asset->size);
+        img = img_load((uint8_t*)asset->data, asset->size);
+#endif
+#ifndef WAGNER_NO_GIF_DECODE
+        if (!img.pixels) {
+            img = gif_load((uint8_t*)asset->data, asset->size);
+        }
+#endif
         if (img.pixels && _wagner_img_cache_count < _WAGNER_MAX_CACHE_ENTRIES) {
             _wagner_img_cache[_wagner_img_cache_count].path = path;
             _wagner_img_cache[_wagner_img_cache_count].image = img;
@@ -1538,9 +1609,19 @@ Image load_image(const char* path) {
             _wagner_img_cache_count++;
         }
         return img;
-#endif
     }
     return (Image){0};
+}
+
+Gif load_gif_anim(const char* path) {
+    if (!path) return (Gif){0};
+    const WagnerAsset* asset = _wagner_find_asset(path);
+    if (asset) {
+#ifndef WAGNER_NO_GIF_DECODE
+        return gif_load_anim((uint8_t*)asset->data, asset->size);
+#endif
+    }
+    return (Gif){0};
 }
 
 Data load_data(const char* path) {
