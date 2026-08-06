@@ -18,7 +18,6 @@ typedef struct { int x, y, w, h; } Rect;
 
 typedef struct {
     uint32_t width, height, scale;
-    char title[128];
     uint32_t dirty_rects;
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
@@ -34,7 +33,7 @@ typedef struct {
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
     int32_t unique;
-    uint8_t reserved[552];
+    uint8_t reserved[676];
 } State;
 
 static struct {
@@ -82,28 +81,27 @@ All other fields are optional. The host applies sensible defaults so a ROM with 
 | `width` | 0 | 320 | window width in pixels |
 | `height` | 4 | 240 | window height in pixels |
 | `scale` | 8 | 1 | window scale factor |
-| `title` | 12 | "Untitled" | window title (char[128]) |
-| `dirty_rects` | 140 | 0 | Pointer to {uint32 count; Rect rects[32];} |
-| `mouse_x` | 144 | 0 | Mouse X position (int32) |
-| `mouse_y` | 148 | 0 | Mouse Y position (int32) |
-| `mouse_buttons` | 152 | 0 | Mouse buttons (bit 0=L, bit 1=R) |
-| `mouse_wheel` | 156 | 0 | Mouse wheel delta (int32) |
-| `keys` | 160 | all 0 | Keyboard state (uint8[256], USB HID) |
-| `gamepad_buttons` | 416 | 0 | Gamepad button state |
-| `ticks` | 420 | 0 | Time in milliseconds |
-| `target_fps` | 424 | 0 | Target FPS (0 = no limit) |
-| `vram_offset` | 428 | 0 | Offset from state base to VRAM buffer |
-| `r_bits` | 432 | 0 | Red bit count |
-| `r_shift` | 436 | 0 | Red bit shift |
-| `g_bits` | 440 | 0 | Green bit count |
-| `g_shift` | 444 | 0 | Green bit shift |
-| `b_bits` | 448 | 0 | Blue bit count |
-| `b_shift` | 452 | 0 | Blue bit shift |
-| `a_bits` | 456 | 0 | Alpha bit count |
-| `a_shift` | 460 | 0 | Alpha bit shift |
-| `x_bits` | 464 | 0 | Padding bit count |
-| `x_shift` | 468 | 0 | Padding bit shift |
-| `unique` | 472 | 0 | Unique session ID |generated when session is created |
+| `dirty_rects` | 12 | 0 | Pointer to {uint32 count; Rect rects[32];} |
+| `mouse_x` | 16 | 0 | Mouse X position (int32) |
+| `mouse_y` | 20 | 0 | Mouse Y position (int32) |
+| `mouse_buttons` | 24 | 0 | Mouse buttons (bit 0=L, bit 1=R) |
+| `mouse_wheel` | 28 | 0 | Mouse wheel delta (int32) |
+| `keys` | 32 | all 0 | Keyboard state (uint8[256], USB HID) |
+| `gamepad_buttons` | 288 | 0 | Gamepad button state |
+| `ticks` | 292 | 0 | Time in milliseconds |
+| `target_fps` | 296 | 0 | Target FPS (0 = no limit) |
+| `vram_offset` | 300 | 0 | Offset from state base to VRAM buffer |
+| `r_bits` | 304 | 0 | Red bit count |
+| `r_shift` | 308 | 0 | Red bit shift |
+| `g_bits` | 312 | 0 | Green bit count |
+| `g_shift` | 316 | 0 | Green bit shift |
+| `b_bits` | 320 | 0 | Blue bit count |
+| `b_shift` | 324 | 0 | Blue bit shift |
+| `a_bits` | 328 | 0 | Alpha bit count |
+| `a_shift` | 332 | 0 | Alpha bit shift |
+| `x_bits` | 336 | 0 | Padding bit count |
+| `x_shift` | 340 | 0 | Padding bit shift |
+| `unique` | 344 | 0 | Unique session ID generated when session is created |
 
 **Total struct size: 1024 bytes.**
 
@@ -141,7 +139,6 @@ int wupdate() {
 | `width` | `uint32` | Screen width in pixels |
 | `height` | `uint32` | Screen height in pixels |
 | `scale` | `uint32` | Window scale factor |
-| `title` | `char[128]` | Window title |
 
 ### VRAM (ROM writes, Host reads)
 The VRAM buffer is **not** inside the state struct. The ROM allocates it separately and sets `vram_offset` to its distance from the state base:

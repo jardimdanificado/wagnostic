@@ -61,7 +61,6 @@ typedef struct {
     uint32_t width;
     uint32_t height;
     uint32_t scale;
-    char title[128];
 
     // --- Dirty Rectangles (ROM writes, Host reads) ---
     uint32_t dirty_rects;
@@ -93,7 +92,7 @@ typedef struct {
     uint32_t x_bits;
     uint32_t x_shift;
     int32_t  unique;
-    uint8_t  reserved[548];
+    uint8_t  reserved[676];
 } WagnosticState;
 
 typedef struct {
@@ -133,17 +132,10 @@ typedef struct {
 #define W_VRAM(s)       ((uint8_t*)(s) + (s)->vram_offset)
 
 static inline void w_setup(WagnosticState *s, const char* title, int width, int height, int bpp, int scale) {
+    (void)title;
     s->width = (uint32_t)width;
     s->height = (uint32_t)height;
     s->scale = (uint32_t)scale;
-    if (title) {
-        int i = 0;
-        while (title[i] && i < 127) {
-            s->title[i] = title[i];
-            i++;
-        }
-        s->title[i] = '\0';
-    }
     SET_BPP(s, bpp);
 }
 

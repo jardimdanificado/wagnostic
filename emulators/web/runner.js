@@ -10,7 +10,6 @@
   const DEFAULT_SCALE  = 1;
   const MAX_DIRTY_RECTS = 32;
   const RECT_STRIDE     = 16; // 4 x i32 per rect (x, y, w, h)
-  const TITLE_MAX       = 128;
   const KEYS_COUNT      = 256;
 
   // Gamepad button bitmasks
@@ -140,26 +139,26 @@
       w:               mem.getUint32(ptr + 0, true),
       h:               mem.getUint32(ptr + 4, true),
       scale:           mem.getUint32(ptr + 8, true),
-      dirtyRectsPtr:   mem.getUint32(ptr + 140, true),
-      mouseX:          mem.getInt32(ptr + 144, true),
-      mouseY:          mem.getInt32(ptr + 148, true),
-      mouseButtons:    mem.getUint32(ptr + 152, true),
-      mouseWheel:      mem.getInt32(ptr + 156, true),
-      gamepadButtons:  mem.getUint32(ptr + 416, true),
-      ticks:           mem.getUint32(ptr + 420, true),
-      targetFps:       mem.getUint32(ptr + 424, true),
-      vramOffset:      mem.getUint32(ptr + 428, true),
-      rBits:           mem.getUint32(ptr + 432, true),
-      rShift:          mem.getUint32(ptr + 436, true),
-      gBits:           mem.getUint32(ptr + 440, true),
-      gShift:          mem.getUint32(ptr + 444, true),
-      bBits:           mem.getUint32(ptr + 448, true),
-      bShift:          mem.getUint32(ptr + 452, true),
-      aBits:           mem.getUint32(ptr + 456, true),
-      aShift:          mem.getUint32(ptr + 460, true),
-      xBits:           mem.getUint32(ptr + 464, true),
-      xShift:          mem.getUint32(ptr + 468, true),
-      unique:          mem.getInt32(ptr + 472, true)
+      dirtyRectsPtr:   mem.getUint32(ptr + 12, true),
+      mouseX:          mem.getInt32(ptr + 16, true),
+      mouseY:          mem.getInt32(ptr + 20, true),
+      mouseButtons:    mem.getUint32(ptr + 24, true),
+      mouseWheel:      mem.getInt32(ptr + 28, true),
+      gamepadButtons:  mem.getUint32(ptr + 288, true),
+      ticks:           mem.getUint32(ptr + 292, true),
+      targetFps:       mem.getUint32(ptr + 296, true),
+      vramOffset:      mem.getUint32(ptr + 300, true),
+      rBits:           mem.getUint32(ptr + 304, true),
+      rShift:          mem.getUint32(ptr + 308, true),
+      gBits:           mem.getUint32(ptr + 312, true),
+      gShift:          mem.getUint32(ptr + 316, true),
+      bBits:           mem.getUint32(ptr + 320, true),
+      bShift:          mem.getUint32(ptr + 324, true),
+      aBits:           mem.getUint32(ptr + 328, true),
+      aShift:          mem.getUint32(ptr + 332, true),
+      xBits:           mem.getUint32(ptr + 336, true),
+      xShift:          mem.getUint32(ptr + 340, true),
+      unique:          mem.getInt32(ptr + 344, true)
     };
 
     // Derive BPP from channel info
@@ -180,15 +179,6 @@
         }
     }
     return s;
-  }
-
-  function readTitle() {
-    if (!statePtr) return '(untitled)';
-    // title starts at offset +12
-    const u8 = new Uint8Array(wasmMemory.buffer, statePtr + 12, TITLE_MAX);
-    let end = 0;
-    while (end < TITLE_MAX && u8[end] !== 0) end++;
-    return new TextDecoder().decode(u8.subarray(0, end));
   }
 
   // ── Canvas / Screen ────────────────────────────────────────────────────
@@ -777,7 +767,7 @@
       ctx.putImageData(rectData, cx, cy);
     }
     // Clear the dirty rects pointer
-    getMem().setUint32(statePtr + 140, 0, true);
+    getMem().setUint32(statePtr + 12, 0, true);
   }
 
 
@@ -787,28 +777,27 @@
     if (!statePtr) return;
     const mem = getMem();
     const ptr = statePtr;
-    mem.setInt32(ptr + 144, mouseX, true);
-    mem.setInt32(ptr + 148, mouseY, true);
-    mem.setUint32(ptr + 152, mouseButtons, true);
-    mem.setInt32(ptr + 156, mouseWheel, true);
+    mem.setInt32(ptr + 16, mouseX, true);
+    mem.setInt32(ptr + 20, mouseY, true);
+    mem.setUint32(ptr + 24, mouseButtons, true);
+    mem.setInt32(ptr + 28, mouseWheel, true);
 
-    const keysMem = new Uint8Array(wasmMemory.buffer, ptr + 160, KEYS_COUNT);
+    const keysMem = new Uint8Array(wasmMemory.buffer, ptr + 32, KEYS_COUNT);
     keysMem.set(keysDown);
 
-    mem.setUint32(ptr + 416, gamepadBtns, true);
-    mem.setUint32(ptr + 420, (performance.now() - startTime) | 0, true);
+    mem.setUint32(ptr + 288, gamepadBtns, true);
+    mem.setUint32(ptr + 292, (performance.now() - startTime) | 0, true);
   }
 
   function resetInput() {
     if (!statePtr) return;
     mouseWheel = 0;
-    getMem().setInt32(statePtr + 156, 0, true);
+    getMem().setInt32(statePtr + 28, 0, true);
   }
 
   // ── Keyboard ───────────────────────────────────────────────────────────
 
   function onKeyDown(e) {
-    resumeAudio();
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
     const hid = HID_SCANCODES[e.code];
     if (hid !== undefined) {
@@ -854,7 +843,6 @@
   }
 
   function onMouseDown(e) {
-    resumeAudio();
     if (e.button === 0) mouseButtons |= 1; // left
     if (e.button === 2) mouseButtons |= 2; // right
     e.preventDefault();
@@ -885,7 +873,6 @@
       if (bit === undefined) return;
 
       btn.addEventListener('mousedown', function (e) {
-        resumeAudio();
         gamepadBtns |= bit;
         e.preventDefault();
       });
@@ -898,7 +885,6 @@
       });
       // Touch support
       btn.addEventListener('touchstart', function (e) {
-        resumeAudio();
         gamepadBtns |= bit;
         e.preventDefault();
       });
@@ -1039,15 +1025,7 @@
       if (emptyState) emptyState.style.display = 'none';
       canvas.style.display = 'block';
 
-      if (g.audioSampleRate > 0 && g.audioBpp > 0 && g.audioChannels > 0) {
-        initAudio(g.audioSampleRate, g.audioChannels, g.audioChunkSamples);
-      }
-
-      if (audioCtx && audioCtx.state === 'suspended') {
-        audioCtx.resume().catch(function () {});
-      }
-
-      console.log('ROM loaded. Title:', readTitle());
+      console.log('ROM loaded.');
       
       running = true;
       lastFrameTime = 0;
@@ -1059,7 +1037,6 @@
 
   function loadRom(wasmUrl) {
     running = false;
-    stopAudio();
     startTime = performance.now();
 
     keysDown.fill(0);

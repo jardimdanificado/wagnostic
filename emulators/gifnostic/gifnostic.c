@@ -489,7 +489,6 @@ void wagnostic_print_debug(WagnosticContext* ctx, FILE* stream) {
     uint32_t BPP = compute_bpp(s);
     fprintf(stream, "Screen Config: %ux%u (Scale: %u, BPP: %u)\n",
             s->width, s->height, s->scale, BPP);
-    fprintf(stream, "Title:         '%s'\n", s->title);
     fprintf(stream, "Offsets:       VRAM=0x%08X\n", s->vram_offset);
     fprintf(stream, "Bitfield Config: R(%u<<%u) G(%u<<%u) B(%u<<%u) A(%u<<%u) X(%u<<%u)\n",
             s->r_bits, s->r_shift, s->g_bits, s->g_shift,

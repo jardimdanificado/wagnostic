@@ -7,7 +7,6 @@ typedef struct { int x, y, w, h; } Rect;
 
 typedef struct {
     uint32_t width, height, scale;
-    char title[128];
     uint32_t dirty_rects;
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
@@ -23,7 +22,7 @@ typedef struct {
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
     int32_t unique;
-    uint8_t reserved[548];
+    uint8_t reserved[676];
 } WagnosticState;
 
 _Static_assert(sizeof(WagnosticState) == 1024, "Size mismatch");

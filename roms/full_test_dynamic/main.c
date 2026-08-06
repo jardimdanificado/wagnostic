@@ -33,7 +33,6 @@ typedef struct { int x, y, w, h; } Rect;
 
 typedef struct {
     uint32_t width, height, scale;
-    char title[128];
     uint32_t dirty_rects;
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
@@ -49,7 +48,7 @@ typedef struct {
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
     int32_t unique;
-    uint8_t reserved[548];
+    uint8_t reserved[676];
 } State;
 
 static State state;
@@ -165,16 +164,7 @@ static void draw_mouse(int ox, int oy, int qw, int qh) {
     draw_number(ox + 45, oy + qh - 12, (int)state.mouse_wheel, 255, 255, 0);
 }
 
-static void update_title(void) {
-    char* t = state.title;
-    int i = 0;
-    const char* prefix = "Full Test - ";
-    while (*prefix) t[i++] = *prefix++;
-    if (current_bpp == 8) { t[i++]='8'; t[i++]='b'; t[i++]='p'; }
-    else if (current_bpp == 16) { t[i++]='1'; t[i++]='6'; t[i++]='b'; t[i++]='p'; }
-    else { t[i++]='3'; t[i++]='2'; t[i++]='b'; t[i++]='p'; }
-    t[i] = '\0';
-}
+
 
 static void allocate_vram(uint32_t w, uint32_t h) {
     uint32_t max_bpp_bytes = 4;
@@ -206,7 +196,6 @@ int wupdate() {
         state.height = 240;
         state.scale = 2;
         allocate_vram(state.width, state.height);
-        update_title();
         initialized = 1;
     }
 
@@ -218,7 +207,6 @@ int wupdate() {
         if (current_bpp == 8) current_bpp = 16;
         else if (current_bpp == 16) current_bpp = 32;
         else current_bpp = 8;
-        update_title();
     }
     sp_was = state.keys[44];
 

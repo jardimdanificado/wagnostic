@@ -33,7 +33,6 @@ typedef struct { int x, y, w, h; } Rect;
 
 typedef struct {
     uint32_t width, height, scale;
-    char title[128];
     uint32_t dirty_rects;
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
@@ -49,7 +48,7 @@ typedef struct {
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
     int32_t unique;
-    uint8_t reserved[548];
+    uint8_t reserved[676];
 } State;
 
 static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
@@ -168,16 +167,7 @@ static void draw_mouse(int ox, int oy, int qw, int qh) {
     draw_number(ox + 45, oy + qh - 12, (int)rom.s.mouse_wheel, 255, 255, 0);
 }
 
-static void update_title(void) {
-    char* t = rom.s.title;
-    int i = 0;
-    const char* prefix = "Full Test - ";
-    while (*prefix) t[i++] = *prefix++;
-    if (current_bpp == 8) { t[i++]='8'; t[i++]='b'; t[i++]='p'; }
-    else if (current_bpp == 16) { t[i++]='1'; t[i++]='6'; t[i++]='b'; t[i++]='p'; }
-    else { t[i++]='3'; t[i++]='2'; t[i++]='b'; t[i++]='p'; }
-    t[i] = '\0';
-}
+
 
 int wupdate() {
     if (!initialized) {
@@ -186,7 +176,6 @@ int wupdate() {
         
         rom.s.scale = 2;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
-        update_title();
         initialized = 1;
     }
 
@@ -198,7 +187,6 @@ int wupdate() {
         if (current_bpp == 8) current_bpp = 16;
         else if (current_bpp == 16) current_bpp = 32;
         else current_bpp = 8;
-        update_title();
     }
     sp_was = rom.s.keys[44];
 
@@ -210,9 +198,9 @@ int wupdate() {
     }
     r_was = rom.s.keys[21];
 
-    if (rom.s.keys[30] && !k1_was) { current_bpp = 8;  update_title(); }
-    if (rom.s.keys[31] && !k2_was) { current_bpp = 16;  update_title(); }
-    if (rom.s.keys[32] && !k3_was) { current_bpp = 32;  update_title(); }
+    if (rom.s.keys[30] && !k1_was) { current_bpp = 8; }
+    if (rom.s.keys[31] && !k2_was) { current_bpp = 16; }
+    if (rom.s.keys[32] && !k3_was) { current_bpp = 32; }
     k1_was = rom.s.keys[30]; k2_was = rom.s.keys[31]; k3_was = rom.s.keys[32];
 
     if (rom.s.keys[41]) return 0;

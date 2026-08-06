@@ -33,7 +33,6 @@ typedef struct { int x, y, w, h; } Rect;
 
 typedef struct {
     uint32_t width, height, scale;
-    char title[128];
     uint32_t dirty_rects;
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
@@ -49,7 +48,7 @@ typedef struct {
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
     int32_t unique;
-    uint8_t reserved[552];
+    uint8_t reserved[676];
 } State;
 
 static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
@@ -191,11 +190,7 @@ int wupdate() {
         
         rom.s.scale = 2;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
-        char* t = rom.s.title;
-        const char* src = "Input Test";
-        int i = 0;
-        while (src[i] && i < 127) { t[i] = src[i]; i++; }
-        t[i] = '\0';
+
         initialized = 1;
     }
 

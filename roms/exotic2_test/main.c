@@ -33,7 +33,6 @@ typedef struct { int x, y, w, h; } Rect;
 
 typedef struct {
     uint32_t width, height, scale;
-    char title[128];
     uint32_t dirty_rects;
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
@@ -49,7 +48,7 @@ typedef struct {
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
     int32_t unique;
-    uint8_t reserved[552];
+    uint8_t reserved[676];
 } WagnosticState;
 
 static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
@@ -90,11 +89,7 @@ WASM_EXPORT int wupdate() {
         rom.s.b_bits = 3; rom.s.b_shift = 1;
         rom.s.a_bits = 1; rom.s.a_shift = 0;
         
-        char* t = rom.s.title;
-        const char* src = "Exotic2 Test (R4 B3 A1)";
-        int i = 0;
-        while (src[i] && i < 127) { t[i] = src[i]; i++; }
-        t[i] = '\0';
+
         
         // Draw a test pattern
         for (int y = 0; y < 240; y++) {

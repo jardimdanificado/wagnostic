@@ -76,10 +76,7 @@ static void report_exception(JSContext *ctx, JSValue res) {
         JSValue exc = JS_GetException(ctx);
         JSCStringBuf buf;
         const char *str = JS_ToCString(ctx, exc, &buf);
-        if (str) {
-            strncpy(_wagner_rom.state.title, str, 127);
-            _wagner_rom.state.title[127] = '\0';
-        }
+        (void)str;
     }
 }
 
@@ -365,14 +362,7 @@ JSValue js_is_key_pressed(JSContext *ctx, JSValue *this_val, int argc, JSValue *
 }
 
 JSValue js_set_title(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
-    if (argc >= 1) {
-        JSCStringBuf sbuf;
-        const char *str = JS_ToCString(ctx, argv[0], &sbuf);
-        if (str) {
-            strncpy(_wagner_rom.state.title, str, 127);
-            _wagner_rom.state.title[127] = '\0';
-        }
-    }
+    (void)ctx; (void)this_val; (void)argc; (void)argv;
     return JS_UNDEFINED;
 }
 

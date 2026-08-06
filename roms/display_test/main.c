@@ -33,7 +33,6 @@ typedef struct { int x, y, w, h; } Rect;
 
 typedef struct {
     uint32_t width, height, scale;
-    char title[128];
     uint32_t dirty_rects;
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
@@ -49,7 +48,7 @@ typedef struct {
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
     int32_t unique;
-    uint8_t reserved[552];
+    uint8_t reserved[676];
 } State;
 
 static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
@@ -158,11 +157,7 @@ int wupdate() {
         
         rom.s.scale = 2;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
-        char* t = rom.s.title;
-        const char* src = "Display Test - 16bpp";
-        int i = 0;
-        while (src[i] && i < 127) { t[i] = src[i]; i++; }
-        t[i] = '\0';
+
         initialized = 1;
     }
 
@@ -183,26 +178,10 @@ int wupdate() {
         resize_state = (resize_state + 1) % 3;
         if (resize_state == 0) {
             rom.s.width = 320; rom.s.height = 240; rom.s.scale = 2;
-            char* t = rom.s.title;
-            t[0]='D'; t[1]='i'; t[2]='s'; t[3]='p'; t[4]='l'; t[5]='a';
-            t[6]='y'; t[7]=' '; t[8]='T'; t[9]='e'; t[10]='s'; t[11]='t';
-            t[12]=' '; t[13]='-'; t[14]=' ';
-            if (current_bpp==8) { t[15]='8'; t[16]='b'; t[17]='p'; t[18]='p'; }
-            else if (current_bpp==16) { t[15]='1'; t[16]='6'; t[17]='b'; t[18]='p'; t[19]='p'; }
-            else { t[15]='3'; t[16]='2'; t[17]='b'; t[18]='p'; t[19]='p'; }
-            t[20]='\0';
         } else if (resize_state == 1) {
             rom.s.width = 640; rom.s.height = 480; rom.s.scale = 1;
-            char* t = rom.s.title;
-            t[0]='R'; t[1]='e'; t[2]='s'; t[3]='i'; t[4]='z'; t[5]='e';
-            t[6]='d'; t[7]=' '; t[8]='6'; t[9]='4'; t[10]='0'; t[11]='x';
-            t[12]='4'; t[13]='8'; t[14]='0'; t[15]='\0';
         } else {
             rom.s.width = 160; rom.s.height = 120; rom.s.scale = 4;
-            char* t = rom.s.title;
-            t[0]='S'; t[1]='m'; t[2]='a'; t[3]='l'; t[4]='l'; t[5]=' ';
-            t[6]='1'; t[7]='6'; t[8]='0'; t[9]='x'; t[10]='1'; t[11]='2';
-            t[12]='0'; t[13]='\0';
         }
     }
     r_was_down = r_down;

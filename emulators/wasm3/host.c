@@ -52,7 +52,6 @@ static int32_t generate_unique_id(void) {
 
 typedef struct {
     uint32_t width, height, scale;
-    char title[128];
     uint32_t dirty_rects;
     int32_t mouse_x, mouse_y;
     uint32_t mouse_buttons;
@@ -68,7 +67,7 @@ typedef struct {
     uint32_t a_bits, a_shift;
     uint32_t x_bits, x_shift;
     int32_t unique;
-    uint8_t reserved[548];
+    uint8_t reserved[676];
 } WagnosticState;
 
 static int g_is_tar = 0;
@@ -799,17 +798,9 @@ int main(int argc, char **argv) {
     uint32_t W, H, BPP, SCALE;
     read_screen_config(state, &W, &H, &BPP, &SCALE);
 
-    char title[128];
-    if (state) {
-        strncpy(title, state->title, 127);
-        title[127] = '\0';
-    } else {
-        title[0] = '\0';
-    }
-
     /* ---- Create window ---- */
     SDL_Window *window = SDL_CreateWindow(
-        title[0] ? title : "Untitled",
+        "Wagnostic",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         (int)(W * SCALE), (int)(H * SCALE),
         SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
@@ -961,22 +952,8 @@ int main(int argc, char **argv) {
         int config_changed = (W != prev_W || H != prev_H ||
                               BPP != prev_BPP || SCALE != prev_SCALE);
 
-        char new_title[128];
-        if (state) {
-            strncpy(new_title, state->title, 127);
-            new_title[127] = '\0';
-        } else {
-            new_title[0] = '\0';
-        }
-        int title_changed = (strcmp(new_title, title) != 0);
-
-        if (config_changed || title_changed) {
+        if (config_changed) {
             SDL_SetWindowSize(window, (int)(W * SCALE), (int)(H * SCALE));
-            if (title_changed) {
-                SDL_SetWindowTitle(window, new_title[0] ? new_title : "Untitled");
-                strncpy(title, new_title, sizeof(title) - 1);
-                title[sizeof(title) - 1] = '\0';
-            }
             SDL_DestroyTexture(texture);
             texture = SDL_CreateTexture(renderer,
                 SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
