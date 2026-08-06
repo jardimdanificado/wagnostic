@@ -56,43 +56,22 @@ typedef struct {
 
 #define W_MAX_DIRTY_RECTS 32
 
+extern void* wextension(const char* name, void* ptr);
+
 typedef struct {
-    // --- Screen Configuration (ROM writes, Host reads) ---
-    uint32_t width;
-    uint32_t height;
-    uint32_t scale;
+    int32_t x, y;
+    uint32_t buttons;
+    int32_t wheel;
+} WagnosticMouseState;
 
-    // --- Dirty Rectangles (ROM writes, Host reads) ---
-    uint32_t dirty_rects;
-
-    // --- Input (Host writes, ROM reads) ---
-    int32_t mouse_x;
-    int32_t mouse_y;
-    uint32_t mouse_buttons;
-    int32_t mouse_wheel;
-    uint8_t keys[256];
-    uint32_t gamepad_buttons;
-
-    // --- Timing (Host writes, ROM reads) ---
-    uint32_t ticks;
-
-    // --- Framerate control (ROM writes, Host reads) ---
-    uint32_t target_fps;
-
-    // --- Buffer offsets (from state base address) ---
+typedef struct {
+    uint32_t width, height;
+    uint32_t r_bits, r_shift;
+    uint32_t g_bits, g_shift;
+    uint32_t b_bits, b_shift;
+    uint32_t a_bits, a_shift;
     uint32_t vram_offset;
-    uint32_t r_bits;
-    uint32_t r_shift;
-    uint32_t g_bits;
-    uint32_t g_shift;
-    uint32_t b_bits;
-    uint32_t b_shift;
-    uint32_t a_bits;
-    uint32_t a_shift;
-    uint32_t x_bits;
-    uint32_t x_shift;
-    int32_t  unique;
-    uint8_t  reserved[676];
+    uint32_t dirty_rects;
 } WagnosticState;
 
 typedef struct {
@@ -113,29 +92,25 @@ typedef struct {
         (s)->g_bits=8;(s)->g_shift=8; \
         (s)->b_bits=8;(s)->b_shift=16; \
         (s)->a_bits=8;(s)->a_shift=24; \
-        (s)->x_bits=0;(s)->x_shift=0; \
     } else if ((bpp_val) == 16) { \
         (s)->r_bits=5;(s)->r_shift=11; \
         (s)->g_bits=6;(s)->g_shift=5; \
         (s)->b_bits=5;(s)->b_shift=0; \
         (s)->a_bits=0;(s)->a_shift=0; \
-        (s)->x_bits=0;(s)->x_shift=0; \
     } else if ((bpp_val) == 8) { \
         (s)->r_bits=3;(s)->r_shift=5; \
         (s)->g_bits=3;(s)->g_shift=2; \
         (s)->b_bits=2;(s)->b_shift=0; \
         (s)->a_bits=0;(s)->a_shift=0; \
-        (s)->x_bits=0;(s)->x_shift=0; \
     } \
 } while(0)
 
 #define W_VRAM(s)       ((uint8_t*)(s) + (s)->vram_offset)
 
 static inline void w_setup(WagnosticState *s, const char* title, int width, int height, int bpp, int scale) {
-    (void)title;
+    (void)title; (void)scale;
     s->width = (uint32_t)width;
     s->height = (uint32_t)height;
-    s->scale = (uint32_t)scale;
     SET_BPP(s, bpp);
 }
 
@@ -228,6 +203,11 @@ static inline void w_redraw_rect(WagnosticState *s, WagnosticDirtyList *dl, int 
 // Wagnostic new API: ROM must provide a WagnosticState struct
 #define WAGNER_VRAM_SIZE (WAGNER_CFG_BPP >= 8 ? (WAGNER_CFG_W * WAGNER_CFG_H * (WAGNER_CFG_BPP == 24 ? 3 : (WAGNER_CFG_BPP / 8))) : ((WAGNER_CFG_W * WAGNER_CFG_H * WAGNER_CFG_BPP + 7) / 8))
 
+static uint8_t* _wagner_keys_ptr = NULL;
+static WagnosticMouseState* _wagner_mouse_ptr = NULL;
+static uint32_t* _wagner_gamepad_ptr = NULL;
+static uint32_t _wagner_frame_counter = 0;
+
 static struct {
     WagnosticState state;
     WagnosticDirtyList dirty_list;
@@ -237,15 +217,15 @@ static struct {
 #define w_width _wagner_rom.state.width
 #define w_height _wagner_rom.state.height
 #define w_bpp WAGNER_CFG_BPP
-#define w_scale _wagner_rom.state.scale
-#define w_mouse_x _wagner_rom.state.mouse_x
-#define w_mouse_y _wagner_rom.state.mouse_y
-#define w_mouse_buttons _wagner_rom.state.mouse_buttons
-#define w_keys _wagner_rom.state.keys
-#define w_ticks _wagner_rom.state.ticks
-#define w_target_fps _wagner_rom.state.target_fps
-#define w_gamepad_buttons _wagner_rom.state.gamepad_buttons
-#define w_unique _wagner_rom.state.unique
+#define w_scale 1
+#define w_mouse_x (_wagner_mouse_ptr ? _wagner_mouse_ptr->x : 0)
+#define w_mouse_y (_wagner_mouse_ptr ? _wagner_mouse_ptr->y : 0)
+#define w_mouse_buttons (_wagner_mouse_ptr ? _wagner_mouse_ptr->buttons : 0)
+#define w_keys _wagner_keys_ptr
+#define w_ticks _wagner_frame_counter
+#define w_target_fps 60
+#define w_gamepad_buttons (_wagner_gamepad_ptr ? *_wagner_gamepad_ptr : 0)
+#define w_unique 12345
 #define w_vram _wagner_rom.vram
 
 // No assets.h anymore. Using Wagnostic .tar TAR API for dynamic loading.
@@ -511,9 +491,6 @@ static inline void random_seed(uint32_t seed) {
 }
 
 static inline int random_int(int min_val, int max_val) {
-    if (_wagner_rng_seed == 12345 && _wagner_rom.state.unique != 0) {
-        _wagner_rng_seed = (uint32_t)_wagner_rom.state.unique;
-    }
     _wagner_rng_seed = _wagner_rng_seed * 1103515245 + 12345;
     return min_val + (int)((_wagner_rng_seed >> 16) % (uint32_t)(max_val - min_val + 1));
 }
@@ -661,7 +638,7 @@ typedef WagnerData Data;
 Data  load_data(const char* path);
 
 void set_fps(uint32_t fps);
-void set_fps(uint32_t fps) { w_target_fps = fps; }
+void set_fps(uint32_t fps) { (void)fps; }
 
 // ============================================
 // USER FUNCTIONS (implemented by user)
@@ -1692,8 +1669,13 @@ static inline void no_draw(void) { _wagner_skip_frame = 1; }
 
 int wupdate() {
     static int init = 0;
+    _wagner_frame_counter++;
     if (!init) {
         init = 1;
+        _wagner_keys_ptr = (uint8_t*)wextension("std:keyboard", NULL);
+        _wagner_mouse_ptr = (WagnosticMouseState*)wextension("std:mouse", NULL);
+        _wagner_gamepad_ptr = (uint32_t*)wextension("std:gamepad", NULL);
+
         wagner.width  = 320; wagner.height = 240;
         wagner.bpp    = 16;  wagner.scale  = 4;
         wagner.frame_count = 0; wagner.fps = 0;
@@ -1734,7 +1716,7 @@ int wupdate() {
     wagner.mouse_down = cur;
     wagner.mouse_button = cur ? 1 : 0;
     for (int i = 0; i < 256; i++) {
-        bool k = w_keys[i] != 0;
+        bool k = w_keys ? (w_keys[i] != 0) : false;
         wagner.keys_pressed[i] = k && !wagner.keys[i];
         wagner.keys_released[i] = !k && wagner.keys[i];
         wagner.keys[i] = k;
@@ -1742,17 +1724,7 @@ int wupdate() {
 
     static int preloaded = 0;
     if (!preloaded) {
-        if (w_ticks == 0 && w_unique == 0) {
-            // Initial host probe call to get state pointer; defer setup until host sets unique/ticks
-            return (int32_t)&_wagner_rom.state;
-        }
         preloaded = 1;
-        if (w_unique != 0) {
-            _wagner_rng_seed = (uint32_t)w_unique;
-        } else {
-            w_unique = (int32_t)(w_ticks + 1234567);
-            _wagner_rng_seed = (uint32_t)w_unique;
-        }
         if (preload) preload();
         if (setup) setup();
     }

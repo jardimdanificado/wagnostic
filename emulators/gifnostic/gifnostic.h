@@ -19,26 +19,16 @@ typedef struct {
 } WagnosticRect;
 
 typedef struct {
-    uint32_t width, height, scale;
-    uint32_t dirty_rects;
-    int32_t mouse_x, mouse_y;
-    uint32_t mouse_buttons;
-    int32_t mouse_wheel;
-    uint8_t keys[256];
-    uint32_t gamepad_buttons;
-    uint32_t ticks;
-    uint32_t target_fps;
-    uint32_t vram_offset;
+    uint32_t width, height;
     uint32_t r_bits, r_shift;
     uint32_t g_bits, g_shift;
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
-    uint32_t x_bits, x_shift;
-    int32_t unique;
-    uint8_t reserved[676];
+    uint32_t vram_offset;
+    uint32_t dirty_rects;
 } WagnosticState;
 
-static_assert(sizeof(WagnosticState) == 1024, "WagnosticState must be exactly 1024 bytes");
+static_assert(sizeof(WagnosticState) == 48, "WagnosticState must be exactly 48 bytes");
 
 /* Opaque context handle */
 typedef struct WagnosticContext WagnosticContext;

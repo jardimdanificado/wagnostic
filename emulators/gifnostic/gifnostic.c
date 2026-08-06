@@ -39,6 +39,9 @@ struct WagnosticContext {
     uint64_t frame_count;
     char title[256];
     uint32_t title_wasm_ptr;
+    uint32_t keyboard_wasm_ptr;
+    uint32_t mouse_wasm_ptr;
+    uint32_t gamepad_wasm_ptr;
 };
 
 static int32_t generate_unique_id(void) {
@@ -100,6 +103,42 @@ m3ApiRawFunction(host_wextension) {
         m3ApiReturn(ctx ? ctx->title_wasm_ptr : 0);
     }
 
+    if (strcmp(name, "std:keyboard") == 0) {
+        if (ctx) {
+            if (data_ptr != 0 && data_ptr < mem_len) {
+                ctx->keyboard_wasm_ptr = data_ptr;
+            } else if (ctx->keyboard_wasm_ptr == 0 && ctx->state_ptr != 0) {
+                ctx->keyboard_wasm_ptr = ctx->state_ptr + sizeof(WagnosticState);
+            }
+            m3ApiReturn(ctx->keyboard_wasm_ptr);
+        }
+        m3ApiReturn(0);
+    }
+
+    if (strcmp(name, "std:mouse") == 0) {
+        if (ctx) {
+            if (data_ptr != 0 && data_ptr < mem_len) {
+                ctx->mouse_wasm_ptr = data_ptr;
+            } else if (ctx->mouse_wasm_ptr == 0 && ctx->state_ptr != 0) {
+                ctx->mouse_wasm_ptr = ctx->state_ptr + sizeof(WagnosticState) + 256;
+            }
+            m3ApiReturn(ctx->mouse_wasm_ptr);
+        }
+        m3ApiReturn(0);
+    }
+
+    if (strcmp(name, "std:gamepad") == 0) {
+        if (ctx) {
+            if (data_ptr != 0 && data_ptr < mem_len) {
+                ctx->gamepad_wasm_ptr = data_ptr;
+            } else if (ctx->gamepad_wasm_ptr == 0 && ctx->state_ptr != 0) {
+                ctx->gamepad_wasm_ptr = ctx->state_ptr + sizeof(WagnosticState) + 256 + 16;
+            }
+            m3ApiReturn(ctx->gamepad_wasm_ptr);
+        }
+        m3ApiReturn(0);
+    }
+
     m3ApiReturn(0);
 }
 
@@ -115,7 +154,6 @@ static uint32_t compute_bpp(WagnosticState* s) {
     if (s->g_bits && s->g_shift + s->g_bits > max_bit) max_bit = s->g_shift + s->g_bits;
     if (s->b_bits && s->b_shift + s->b_bits > max_bit) max_bit = s->b_shift + s->b_bits;
     if (s->a_bits && s->a_shift + s->a_bits > max_bit) max_bit = s->a_shift + s->a_bits;
-    if (s->x_bits && s->x_shift + s->x_bits > max_bit) max_bit = s->x_shift + s->x_bits;
 
     if (max_bit <= 1) return 1;
     if (max_bit <= 2) return 2;
@@ -189,12 +227,6 @@ WagnosticContext* wagnostic_create(const uint8_t* wasm_bytes, size_t wasm_size, 
         m3_GetResultsV(ctx->f_wupdate, &ctx->state_ptr);
     }
     refresh_memory(ctx);
-
-    WagnosticState* state = wagnostic_get_state(ctx);
-    if (state && state->unique == 0) {
-        state->unique = ctx->session_unique;
-    }
-
     return ctx;
 }
 
@@ -237,16 +269,19 @@ void wagnostic_destroy(WagnosticContext* ctx) {
 int wagnostic_step(WagnosticContext* ctx) {
     if (!ctx || !ctx->f_wupdate) return 0;
 
-    WagnosticState* state = wagnostic_get_state(ctx);
-    if (state) {
-        memcpy(state->keys, ctx->keys, 256);
-        state->mouse_x = ctx->mouse_x;
-        state->mouse_y = ctx->mouse_y;
-        state->mouse_buttons = ctx->mouse_buttons;
-        state->mouse_wheel = ctx->mouse_wheel;
-        state->gamepad_buttons = ctx->gamepad_buttons;
-        state->ticks = ctx->ticks;
-        if (state->unique == 0) state->unique = ctx->session_unique;
+    refresh_memory(ctx);
+    if (ctx->mem) {
+        if (ctx->keyboard_wasm_ptr != 0 && ctx->keyboard_wasm_ptr + 256 <= ctx->mem_len) {
+            memcpy(ctx->mem + ctx->keyboard_wasm_ptr, ctx->keys, 256);
+        }
+        if (ctx->mouse_wasm_ptr != 0 && ctx->mouse_wasm_ptr + 16 <= ctx->mem_len) {
+            struct { int32_t x, y; uint32_t buttons; int32_t wheel; } m;
+            m.x = ctx->mouse_x; m.y = ctx->mouse_y; m.buttons = ctx->mouse_buttons; m.wheel = ctx->mouse_wheel;
+            memcpy(ctx->mem + ctx->mouse_wasm_ptr, &m, sizeof(m));
+        }
+        if (ctx->gamepad_wasm_ptr != 0 && ctx->gamepad_wasm_ptr + 4 <= ctx->mem_len) {
+            memcpy(ctx->mem + ctx->gamepad_wasm_ptr, &ctx->gamepad_buttons, 4);
+        }
     }
 
     M3Result call_res = m3_CallV(ctx->f_wupdate);
@@ -525,15 +560,13 @@ void wagnostic_print_debug(WagnosticContext* ctx, FILE* stream) {
     }
 
     uint32_t BPP = compute_bpp(s);
-    fprintf(stream, "Screen Config: %ux%u (Scale: %u, BPP: %u)\n",
-            s->width, s->height, s->scale, BPP);
+    fprintf(stream, "Screen Config: %ux%u (BPP: %u)\n",
+            s->width, s->height, BPP);
     fprintf(stream, "Offsets:       VRAM=0x%08X\n", s->vram_offset);
-    fprintf(stream, "Bitfield Config: R(%u<<%u) G(%u<<%u) B(%u<<%u) A(%u<<%u) X(%u<<%u)\n",
+    fprintf(stream, "Bitfield Config: R(%u<<%u) G(%u<<%u) B(%u<<%u) A(%u<<%u)\n",
             s->r_bits, s->r_shift, s->g_bits, s->g_shift,
-            s->b_bits, s->b_shift, s->a_bits, s->a_shift,
-            s->x_bits, s->x_shift);
-    fprintf(stream, "Input State:   Mouse(%d, %d, btns=0x%X, wheel=%d) Gamepad=0x%X\n",
-            s->mouse_x, s->mouse_y, s->mouse_buttons, s->mouse_wheel, s->gamepad_buttons);
-    fprintf(stream, "Unique ID:     0x%08X\n", s->unique);
+            s->b_bits, s->b_shift, s->a_bits, s->a_shift);
+    fprintf(stream, "Input Pointers: Keyboard=0x%08X Mouse=0x%08X Gamepad=0x%08X\n",
+            ctx->keyboard_wasm_ptr, ctx->mouse_wasm_ptr, ctx->gamepad_wasm_ptr);
     fprintf(stream, "=====================================\n");
 }

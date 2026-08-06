@@ -7,23 +7,13 @@ extern void* wextension(const char* name, void* ptr);
 typedef struct { int x, y, w, h; } Rect;
 
 typedef struct {
-    uint32_t width, height, scale;
-    uint32_t dirty_rects;
-    int32_t mouse_x, mouse_y;
-    uint32_t mouse_buttons;
-    int32_t mouse_wheel;
-    uint8_t keys[256];
-    uint32_t gamepad_buttons;
-    uint32_t ticks;
-    uint32_t target_fps;
-    uint32_t vram_offset;
+    uint32_t width, height;
     uint32_t r_bits, r_shift;
     uint32_t g_bits, g_shift;
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
-    uint32_t x_bits, x_shift;
-    int32_t unique;
-    uint8_t reserved[676];
+    uint32_t vram_offset;
+    uint32_t dirty_rects;
 } State;
 
 static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
@@ -52,7 +42,6 @@ int wupdate() {
     if (!initialized) {
         rom.s.width = 320;
         rom.s.height = 240;
-        rom.s.scale = 2;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
         rom.s.r_bits = 5; rom.s.r_shift = 11;
         rom.s.g_bits = 6; rom.s.g_shift = 5;
@@ -69,7 +58,14 @@ int wupdate() {
         get_buf[0] = '\0';
         void* res3 = wextension("title.get", get_buf);
 
-        test_passed = (res1 == NULL) && (res2 != NULL) && (res3 != NULL) && (strcmp(get_buf, my_title) == 0);
+        // Test 4: Peripheral std:* extensions
+        void* kbd_ptr = wextension("std:keyboard", NULL);
+        void* mouse_ptr = wextension("std:mouse", NULL);
+        void* gp_ptr = wextension("std:gamepad", NULL);
+
+        test_passed = (res1 == NULL) && (res2 != NULL) && (res3 != NULL) && 
+                      (strcmp(get_buf, my_title) == 0) &&
+                      (kbd_ptr != NULL) && (mouse_ptr != NULL) && (gp_ptr != NULL);
 
         initialized = 1;
     }

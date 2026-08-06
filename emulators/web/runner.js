@@ -90,6 +90,9 @@
   let mouseWheel   = 0;
   let keysDown     = new Uint8Array(KEYS_COUNT);
   let gamepadBtns  = 0;
+  let keyboardWasmPtr = 0;
+  let mouseWasmPtr = 0;
+  let gamepadWasmPtr = 0;
 
   // Pre-allocated render buffers
   let imageData = null;
@@ -136,36 +139,26 @@
     const ptr = statePtr;
 
     let s = {
-      w:               mem.getUint32(ptr + 0, true),
-      h:               mem.getUint32(ptr + 4, true),
-      scale:           mem.getUint32(ptr + 8, true),
-      dirtyRectsPtr:   mem.getUint32(ptr + 12, true),
-      mouseX:          mem.getInt32(ptr + 16, true),
-      mouseY:          mem.getInt32(ptr + 20, true),
-      mouseButtons:    mem.getUint32(ptr + 24, true),
-      mouseWheel:      mem.getInt32(ptr + 28, true),
-      gamepadButtons:  mem.getUint32(ptr + 288, true),
-      ticks:           mem.getUint32(ptr + 292, true),
-      targetFps:       mem.getUint32(ptr + 296, true),
-      vramOffset:      mem.getUint32(ptr + 300, true),
-      rBits:           mem.getUint32(ptr + 304, true),
-      rShift:          mem.getUint32(ptr + 308, true),
-      gBits:           mem.getUint32(ptr + 312, true),
-      gShift:          mem.getUint32(ptr + 316, true),
-      bBits:           mem.getUint32(ptr + 320, true),
-      bShift:          mem.getUint32(ptr + 324, true),
-      aBits:           mem.getUint32(ptr + 328, true),
-      aShift:          mem.getUint32(ptr + 332, true),
-      xBits:           mem.getUint32(ptr + 336, true),
-      xShift:          mem.getUint32(ptr + 340, true),
-      unique:          mem.getInt32(ptr + 344, true)
+      w:             mem.getUint32(ptr + 0, true),
+      h:             mem.getUint32(ptr + 4, true),
+      rBits:         mem.getUint32(ptr + 8, true),
+      rShift:        mem.getUint32(ptr + 12, true),
+      gBits:         mem.getUint32(ptr + 16, true),
+      gShift:        mem.getUint32(ptr + 20, true),
+      bBits:         mem.getUint32(ptr + 24, true),
+      bShift:        mem.getUint32(ptr + 28, true),
+      aBits:         mem.getUint32(ptr + 32, true),
+      aShift:        mem.getUint32(ptr + 36, true),
+      vramOffset:    mem.getUint32(ptr + 40, true),
+      dirtyRectsPtr: mem.getUint32(ptr + 44, true),
+      scale: 1,
     };
 
     // Derive BPP from channel info
     s.bpp = computeBpp(s);
 
     // If no channel bits set, fill in defaults based on computed BPP
-    if (!s.rBits && !s.gBits && !s.bBits && !s.aBits && !s.xBits) {
+    if (!s.rBits && !s.gBits && !s.bBits && !s.aBits) {
         if (s.bpp === 32) {
             s.aBits = 8; s.aShift = 24; s.bBits = 8; s.bShift = 16; s.gBits = 8; s.gShift = 8; s.rBits = 8; s.rShift = 0;
         } else if (s.bpp === 24) {
@@ -774,25 +767,24 @@
   // ── Input ──────────────────────────────────────────────────────────────
 
   function writeInputToGlobals() {
-    if (!statePtr) return;
-    const mem = getMem();
-    const ptr = statePtr;
-    mem.setInt32(ptr + 16, mouseX, true);
-    mem.setInt32(ptr + 20, mouseY, true);
-    mem.setUint32(ptr + 24, mouseButtons, true);
-    mem.setInt32(ptr + 28, mouseWheel, true);
-
-    const keysMem = new Uint8Array(wasmMemory.buffer, ptr + 32, KEYS_COUNT);
-    keysMem.set(keysDown);
-
-    mem.setUint32(ptr + 288, gamepadBtns, true);
-    mem.setUint32(ptr + 292, (performance.now() - startTime) | 0, true);
+    if (!wasmMemory || !wasmMemory.buffer) return;
+    if (keyboardWasmPtr && keyboardWasmPtr + 256 <= wasmMemory.buffer.byteLength) {
+      new Uint8Array(wasmMemory.buffer, keyboardWasmPtr, 256).set(keysDown);
+    }
+    if (mouseWasmPtr && mouseWasmPtr + 16 <= wasmMemory.buffer.byteLength) {
+      const view = new DataView(wasmMemory.buffer, mouseWasmPtr, 16);
+      view.setInt32(0, mouseX, true);
+      view.setInt32(4, mouseY, true);
+      view.setUint32(8, mouseButtons, true);
+      view.setInt32(12, mouseWheel, true);
+    }
+    if (gamepadWasmPtr && gamepadWasmPtr + 4 <= wasmMemory.buffer.byteLength) {
+      new DataView(wasmMemory.buffer, gamepadWasmPtr, 4).setUint32(0, gamepadBtns, true);
+    }
   }
 
   function resetInput() {
-    if (!statePtr) return;
     mouseWheel = 0;
-    getMem().setInt32(statePtr + 28, 0, true);
   }
 
   // ── Keyboard ───────────────────────────────────────────────────────────
@@ -1028,12 +1020,29 @@
             }
             return 0;
           }
-          if (name === 'title.get') {
+          if (name === 'std:keyboard') {
             if (dataPtr) {
-              writeWasmString(dataPtr, windowTitle);
-              return dataPtr;
+              keyboardWasmPtr = dataPtr;
+            } else if (!keyboardWasmPtr && statePtr) {
+              keyboardWasmPtr = statePtr + 48;
             }
-            return lastTitleWasmPtr;
+            return keyboardWasmPtr;
+          }
+          if (name === 'std:mouse') {
+            if (dataPtr) {
+              mouseWasmPtr = dataPtr;
+            } else if (!mouseWasmPtr && statePtr) {
+              mouseWasmPtr = statePtr + 48 + 256;
+            }
+            return mouseWasmPtr;
+          }
+          if (name === 'std:gamepad') {
+            if (dataPtr) {
+              gamepadWasmPtr = dataPtr;
+            } else if (!gamepadWasmPtr && statePtr) {
+              gamepadWasmPtr = statePtr + 48 + 256 + 16;
+            }
+            return gamepadWasmPtr;
           }
           return 0;
         }

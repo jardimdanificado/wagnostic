@@ -17,23 +17,13 @@ A ROM allocates a state struct in its linear memory and returns its address from
 typedef struct { int x, y, w, h; } Rect;
 
 typedef struct {
-    uint32_t width, height, scale;
-    uint32_t dirty_rects;
-    int32_t mouse_x, mouse_y;
-    uint32_t mouse_buttons;
-    int32_t mouse_wheel;
-    uint8_t keys[256];
-    uint32_t gamepad_buttons;
-    uint32_t ticks;
-    uint32_t target_fps;
-    uint32_t vram_offset;
+    uint32_t width, height;
     uint32_t r_bits, r_shift;
     uint32_t g_bits, g_shift;
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
-    uint32_t x_bits, x_shift;
-    int32_t unique;
-    uint8_t reserved[676];
+    uint32_t vram_offset;
+    uint32_t dirty_rects;
 } State;
 
 static struct {
@@ -49,9 +39,6 @@ int wupdate() {
     rom.s.b_bits = 5; rom.s.b_shift = 0;
     rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
 
-    uint16_t* vram = (uint16_t*)((uint8_t*)&rom.s + rom.s.vram_offset);
-    vram[rom.s.mouse_y * rom.s.width + rom.s.mouse_x] = 0xF800;
-
     static struct { uint32_t count; Rect rects[32]; } my_dirty;
     my_dirty.count = 1;
     my_dirty.rects[0] = (Rect){0, 0, 320, 240};
@@ -66,7 +53,7 @@ A Wagnostic ROM is a WebAssembly binary that exports a single function:
 
 - `wupdate()` — called once per frame, **returns a pointer** (`i32` offset into WASM linear memory) to a `WagnosticState` struct.
 
-The Host reads/writes that struct directly. No fixed memory offsets — the ROM decides where the state lives. Large buffers (VRAM, audio) are placed immediately after the struct and referenced via `vram_offset` / `audio_buffer_offset`.
+The Host reads/writes that struct directly. No fixed memory offsets — the ROM decides where the state lives. Large buffers (VRAM) are placed immediately after the struct and referenced via `vram_offset`.
 
 ## 2. ROM Requirements
 
@@ -74,36 +61,24 @@ The Host reads/writes that struct directly. No fixed memory offsets — the ROM 
 - `wupdate()` — called once per frame, returns 0 to quit, or a non-zero pointer to the state struct
 
 ### State struct
-All other fields are optional. The host applies sensible defaults so a ROM with just `wupdate()` runs immediately:
+The host applies sensible defaults so a ROM with just `wupdate()` runs immediately:
 
 | Field | Offset | Default | Notes |
 |-------|--------|---------|-------|
 | `width` | 0 | 320 | window width in pixels |
 | `height` | 4 | 240 | window height in pixels |
-| `scale` | 8 | 1 | window scale factor |
-| `dirty_rects` | 12 | 0 | Pointer to {uint32 count; Rect rects[32];} |
-| `mouse_x` | 16 | 0 | Mouse X position (int32) |
-| `mouse_y` | 20 | 0 | Mouse Y position (int32) |
-| `mouse_buttons` | 24 | 0 | Mouse buttons (bit 0=L, bit 1=R) |
-| `mouse_wheel` | 28 | 0 | Mouse wheel delta (int32) |
-| `keys` | 32 | all 0 | Keyboard state (uint8[256], USB HID) |
-| `gamepad_buttons` | 288 | 0 | Gamepad button state |
-| `ticks` | 292 | 0 | Time in milliseconds |
-| `target_fps` | 296 | 0 | Target FPS (0 = no limit) |
-| `vram_offset` | 300 | 0 | Offset from state base to VRAM buffer |
-| `r_bits` | 304 | 0 | Red bit count |
-| `r_shift` | 308 | 0 | Red bit shift |
-| `g_bits` | 312 | 0 | Green bit count |
-| `g_shift` | 316 | 0 | Green bit shift |
-| `b_bits` | 320 | 0 | Blue bit count |
-| `b_shift` | 324 | 0 | Blue bit shift |
-| `a_bits` | 328 | 0 | Alpha bit count |
-| `a_shift` | 332 | 0 | Alpha bit shift |
-| `x_bits` | 336 | 0 | Padding bit count |
-| `x_shift` | 340 | 0 | Padding bit shift |
-| `unique` | 344 | 0 | Unique session ID generated when session is created |
+| `r_bits` | 8 | 0 | Red bit count |
+| `r_shift` | 12 | 0 | Red bit shift |
+| `g_bits` | 16 | 0 | Green bit count |
+| `g_shift` | 20 | 0 | Green bit shift |
+| `b_bits` | 24 | 0 | Blue bit count |
+| `b_shift` | 28 | 0 | Blue bit shift |
+| `a_bits` | 32 | 0 | Alpha bit count |
+| `a_shift` | 36 | 0 | Alpha bit shift |
+| `vram_offset` | 40 | 0 | Offset from state base to VRAM buffer |
+| `dirty_rects` | 44 | 0 | Pointer to {uint32 count; Rect rects[32];} |
 
-**Total struct size: 1024 bytes.**
+**Total struct size: 48 bytes.**
 
 The minimal viable ROM:
 
@@ -131,108 +106,39 @@ int wupdate() {
 }
 ```
 
-## 3. State Struct Fields
+## 3. Modular Peripherals (`std:*`)
 
-### Screen Configuration (ROM writes, Host reads)
-| Name | Type | Description |
-|------|------|-------------|
-| `width` | `uint32` | Screen width in pixels |
-| `height` | `uint32` | Screen height in pixels |
-| `scale` | `uint32` | Window scale factor |
-
-### VRAM (ROM writes, Host reads)
-The VRAM buffer is **not** inside the state struct. The ROM allocates it separately and sets `vram_offset` to its distance from the state base:
+Input peripherals are requested modularly via `wextension("std:*", NULL)`:
 
 ```c
-static struct { State s; uint8_t vram[320 * 240 * 4]; } rom;
-rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
-```
+extern void* wextension(const char* name, void* ptr);
 
-The host reads VRAM at `(uint8_t*)state + vram_offset`.
-
-### Dirty Rectangles (ROM writes, Host reads)
-| Name | Type | Description |
-|------|------|-------------|
-| `dirty_rects` | `uint32` | Pointer (WASM offset) to a `{ uint32 count; Rect rects[32]; }` struct |
-
-**Rect struct:** `{ int x, y, w, h; }` — 16 bytes each
-
-### Input (Host writes, ROM reads)
-| Name | Type | Description |
-|------|------|-------------|
-| `mouse_x` | `int32` | Mouse X position |
-| `mouse_y` | `int32` | Mouse Y position |
-| `mouse_buttons` | `uint32` | Mouse buttons (bit 0=L, bit 1=R) |
-| `mouse_wheel` | `int32` | Mouse wheel delta |
-| `keys` | `uint8[256]` | Keyboard state (USB HID scancodes) |
-| `gamepad_buttons` | `uint32` | Gamepad button state |
-
-### Timing (Host writes, ROM reads)
-| Name | Type | Description |
-|------|------|-------------|
-| `ticks` | `uint32` | Time in milliseconds |
-
-### Framerate Control (ROM writes, Host reads)
-| Name | Type | Description |
-|------|------|-------------|
-| `target_fps` | `uint32` | Target FPS (0 = no limit, default) |
-
-## 4. Dirty Rectangles
-
-Instead of redrawing the entire screen every frame, the ROM specifies which regions changed.
-
-### How it works
-
-1. ROM allocates a `{ uint32_t count; Rect rects[32]; }` struct
-2. ROM draws to its VRAM buffer
-3. ROM sets `count` and fills `rects` in the struct
-4. ROM sets `state.dirty_rects` to the pointer (address) of that struct
-5. Host reads the pointer and renders only the dirty regions
-
-### Values
-
-- `state.dirty_rects = 0` or `count = 0` → nothing changed, host skips rendering
-- `count = N` (1-32) → host renders N dirty rectangles
-- Set `count = 1` and `rects[0]` for full-screen redraw
-
-### Example
-
-```c
-static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
+static uint8_t* keys = NULL;
 
 int wupdate() {
-    // Move player
-    player_x += 1;
-
-    // Mark old and new positions as dirty
-    my_dirty_list.count = 2;
-    my_dirty_list.rects[0] = (Rect){old_x, player_y, 20, 24};
-    my_dirty_list.rects[1] = (Rect){player_x, player_y, 20, 24};
-    state.dirty_rects = (uint32_t)&my_dirty_list;
-    return (int)&state;
+    if (!keys) {
+        keys = (uint8_t*)wextension("std:keyboard", NULL);
+    }
+    if (keys && keys[0x1D]) {
+        // Z key pressed
+    }
+    return (int)&s;
 }
 ```
 
-## 5. Video Formats
+- `std:keyboard`: Returns `uint8_t*` (256-byte HID scancodes)
+- `std:mouse`: Returns pointer to `{ int32_t x, y; uint32_t buttons; int32_t wheel; }`
+- `std:gamepad`: Returns `uint32_t*` (digital gamepad button mask)
 
-Wagnostic uses **Dynamic Bitfield Pixel Formats**.
-The bit depths can be any valid power of 2: **1, 2, 4, 8, 16, 24, 32, 64**.
-Instead of predefined formats (like RGB565) or indexed color palettes, the Host decodes pixels using the `r_bits`/`r_shift`, `g_bits`/`g_shift`, `b_bits`/`b_shift`, and `a_bits`/`a_shift` fields.
-The fields indicate how many bits each channel occupies and how far left they are shifted in the pixel integer.
-If `r_bits`, `g_bits`, and `b_bits` are all `0`, but `a_bits > 0`, the format is treated as **Grayscale / Luminance**, where the Alpha channel is replicated into R, G, and B.
-
-## 7. Host Behavior
+## 4. Host Behavior
 
 The Host:
 1. Calls `wupdate()` once to get the initial state pointer
-2. Each frame: writes input into the state struct
-3. Calls `wupdate()`, exits if return value is 0
-4. Reads config from the state struct and detects changes
-5. Reads `dirty_count` and renders dirty regions
-6. Resets `mouse_wheel` to 0
-7. If `target_fps > 0`, the host adjusts the frame loop to call `wupdate()` at the target rate (using `SDL_Delay` or `setTimeout`). Setting `target_fps = 0` removes the limit.
+2. Calls `wupdate()` each frame, exits if return value is 0
+3. Reads config from the state struct and renders dirty regions
+4. Updates mapped peripheral buffers directly in WASM memory
 
-## 8. Language Agnosticism
+## 5. Language Agnosticism
 
 Because the ABI uses a single struct pointer instead of named globals, **any language that compiles to WebAssembly** can be used:
 
@@ -242,4 +148,4 @@ Because the ABI uses a single struct pointer instead of named globals, **any lan
 | **Rust** | `return &state as *const _ as i32;` |
 | **Go (TinyGo)** | `return int(uintptr(unsafe.Pointer(&state)))` |
 
-The only requirement is that `wupdate()` returns the offset of a 1024-byte struct matching the layout above.
+The only requirement is that `wupdate()` returns the offset of a 48-byte struct matching the layout above.

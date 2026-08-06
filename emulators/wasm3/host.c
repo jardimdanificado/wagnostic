@@ -51,24 +51,18 @@ static int32_t generate_unique_id(void) {
 
 
 typedef struct {
-    uint32_t width, height, scale;
-    uint32_t dirty_rects;
-    int32_t mouse_x, mouse_y;
-    uint32_t mouse_buttons;
-    int32_t mouse_wheel;
-    uint8_t keys[256];
-    uint32_t gamepad_buttons;
-    uint32_t ticks;
-    uint32_t target_fps;
-    uint32_t vram_offset;
+    uint32_t width, height;
     uint32_t r_bits, r_shift;
     uint32_t g_bits, g_shift;
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
-    uint32_t x_bits, x_shift;
-    int32_t unique;
-    uint8_t reserved[676];
+    uint32_t vram_offset;
+    uint32_t dirty_rects;
 } WagnosticState;
+
+static uint32_t g_keyboard_wasm_ptr = 0;
+static uint32_t g_mouse_wasm_ptr = 0;
+static uint32_t g_gamepad_wasm_ptr = 0;
 
 static int g_is_tar = 0;
 static char g_rom_path[1024] = {0};
@@ -120,7 +114,6 @@ static inline uint32_t compute_bpp(WagnosticState* s) {
     if (s->g_bits && s->g_shift + s->g_bits > max_bit) max_bit = s->g_shift + s->g_bits;
     if (s->b_bits && s->b_shift + s->b_bits > max_bit) max_bit = s->b_shift + s->b_bits;
     if (s->a_bits && s->a_shift + s->a_bits > max_bit) max_bit = s->a_shift + s->a_bits;
-    if (s->x_bits && s->x_shift + s->x_bits > max_bit) max_bit = s->x_shift + s->x_bits;
     
     // Round up to nearest standard size
     if (max_bit <= 1) return 1;
@@ -133,7 +126,7 @@ static inline uint32_t compute_bpp(WagnosticState* s) {
     return 64;
 }
 
-static_assert(sizeof(WagnosticState) == 1024, "WagnosticState size mismatch — check struct layout");
+static_assert(sizeof(WagnosticState) == 48, "WagnosticState size mismatch — check struct layout");
 
 /* ================================================================
  * Globals
@@ -174,11 +167,10 @@ static void read_screen_config(WagnosticState *s,
     *W     = s ? s->width  : 0;
     *H     = s ? s->height : 0;
     *BPP = compute_bpp(s);
-    *SCALE = s ? s->scale  : 0;
+    *SCALE = 1;
     if (*W == 0)     *W = 320;
     if (*H == 0)     *H = 240;
     if (*BPP == 0)   *BPP = 32;
-    if (*SCALE == 0) *SCALE = 1;
 }
 
 /* ================================================================
@@ -245,7 +237,7 @@ static WagnosticPixelFormat detect_pixel_format(WagnosticState *s, uint32_t BPP,
     uint32_t b_s = s ? s->b_shift : 0;
     uint32_t a_b = s ? s->a_bits : 0;
     uint32_t a_s = s ? s->a_shift : 0;
-    uint32_t x_b = s ? s->x_bits : 0;
+    uint32_t x_b = 0;
 
     if (!r_b && !g_b && !b_b && !a_b && !x_b) {
         if (BPP == 32) { r_b = 8; r_s = 16; g_b = 8; g_s = 8; b_b = 8; b_s = 0; a_b = 8; a_s = 24; }
@@ -757,6 +749,33 @@ m3ApiRawFunction(host_wextension) {
         m3ApiReturn(g_title_wasm_ptr);
     }
 
+    if (strcmp(name, "std:keyboard") == 0) {
+        if (data_ptr != 0 && data_ptr < g_mem_len) {
+            g_keyboard_wasm_ptr = data_ptr;
+        } else if (g_keyboard_wasm_ptr == 0 && g_state_ptr != 0) {
+            g_keyboard_wasm_ptr = g_state_ptr + sizeof(WagnosticState);
+        }
+        m3ApiReturn(g_keyboard_wasm_ptr);
+    }
+
+    if (strcmp(name, "std:mouse") == 0) {
+        if (data_ptr != 0 && data_ptr < g_mem_len) {
+            g_mouse_wasm_ptr = data_ptr;
+        } else if (g_mouse_wasm_ptr == 0 && g_state_ptr != 0) {
+            g_mouse_wasm_ptr = g_state_ptr + sizeof(WagnosticState) + 256;
+        }
+        m3ApiReturn(g_mouse_wasm_ptr);
+    }
+
+    if (strcmp(name, "std:gamepad") == 0) {
+        if (data_ptr != 0 && data_ptr < g_mem_len) {
+            g_gamepad_wasm_ptr = data_ptr;
+        } else if (g_gamepad_wasm_ptr == 0 && g_state_ptr != 0) {
+            g_gamepad_wasm_ptr = g_state_ptr + sizeof(WagnosticState) + 256 + 16;
+        }
+        m3ApiReturn(g_gamepad_wasm_ptr);
+    }
+
     m3ApiReturn(0);
 }
 
@@ -832,11 +851,7 @@ int main(int argc, char **argv) {
     }
     refresh_memory();
 
-    int32_t session_unique = generate_unique_id();
     WagnosticState *state = get_state();
-    if (state) {
-        state->unique = session_unique;
-    }
 
     /* ---- Read initial config ---- */
     uint32_t W, H, BPP, SCALE;
@@ -963,17 +978,20 @@ int main(int argc, char **argv) {
             }
         }
 
-        /* ---- Step 1: Write input to state struct ---- */
-        state = get_state();
-        if (state) {
-            memcpy(state->keys, keys_state, 256);
-            state->mouse_x = mouse_x;
-            state->mouse_y = mouse_y;
-            state->mouse_buttons = mouse_buttons;
-            state->mouse_wheel = mouse_wheel;
-            state->gamepad_buttons = gamepad_buttons;
-            state->ticks = SDL_GetTicks();
-            if (state->unique == 0) state->unique = session_unique;
+        /* ---- Step 1: Write input to mapped peripheral buffers ---- */
+        refresh_memory();
+        if (g_mem) {
+            if (g_keyboard_wasm_ptr != 0 && g_keyboard_wasm_ptr + 256 <= g_mem_len) {
+                memcpy(g_mem + g_keyboard_wasm_ptr, keys_state, 256);
+            }
+            if (g_mouse_wasm_ptr != 0 && g_mouse_wasm_ptr + 16 <= g_mem_len) {
+                struct { int32_t x, y; uint32_t buttons; int32_t wheel; } m;
+                m.x = mouse_x; m.y = mouse_y; m.buttons = mouse_buttons; m.wheel = mouse_wheel;
+                memcpy(g_mem + g_mouse_wasm_ptr, &m, sizeof(m));
+            }
+            if (g_gamepad_wasm_ptr != 0 && g_gamepad_wasm_ptr + 4 <= g_mem_len) {
+                memcpy(g_mem + g_gamepad_wasm_ptr, &gamepad_buttons, 4);
+            }
         }
 
         /* ---- Step 2: Call wupdate(), exit if return is 0 ---- */
@@ -1064,20 +1082,15 @@ int main(int argc, char **argv) {
         }
 
         /* ---- Step 5: Reset mouse wheel ---- */
-        if (state) state->mouse_wheel = 0;
         mouse_wheel = 0;
 
-        /* ---- Yield / FPS limit ---- */
-        if (state && state->target_fps > 0) {
-            static uint32_t frame_start = 0;
-            uint32_t now = SDL_GetTicks();
-            uint32_t elapsed = now - frame_start;
-            int32_t delay = (1000 / state->target_fps) - (int32_t)elapsed;
-            if (delay > 0) SDL_Delay((uint32_t)delay);
-            frame_start = SDL_GetTicks();
-        } else {
-            SDL_Delay(1);
-        }
+        /* ---- Yield / FPS limit (60 FPS default) ---- */
+        static uint32_t frame_start = 0;
+        uint32_t now = SDL_GetTicks();
+        uint32_t elapsed = now - frame_start;
+        int32_t delay = (1000 / 60) - (int32_t)elapsed;
+        if (delay > 0) SDL_Delay((uint32_t)delay);
+        frame_start = SDL_GetTicks();
     }
 
     /* ================================================================

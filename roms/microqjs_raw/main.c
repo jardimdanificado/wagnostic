@@ -2,30 +2,28 @@
 #include <string.h>
 #include <stdlib.h>
 
+extern void* wextension(const char* name, void* ptr);
+
 /* --- Wagnostic ABI --- */
 typedef struct { int x, y, w, h; } Rect;
 
 typedef struct {
-    uint32_t width, height, scale;
-    uint32_t dirty_rects;
-    int32_t mouse_x, mouse_y;
-    uint32_t mouse_buttons;
-    int32_t mouse_wheel;
-    uint8_t keys[256];
-    uint32_t gamepad_buttons;
-    uint32_t ticks;
-    uint32_t target_fps;
-    uint32_t vram_offset;
+    uint32_t width, height;
     uint32_t r_bits, r_shift;
     uint32_t g_bits, g_shift;
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
-    uint32_t x_bits, x_shift;
-    int32_t unique;
-    uint8_t reserved[676];
+    uint32_t vram_offset;
+    uint32_t dirty_rects;
 } WagnosticState;
 
-_Static_assert(sizeof(WagnosticState) == 1024, "Size mismatch");
+typedef struct {
+    int32_t x, y;
+    uint32_t buttons;
+    int32_t wheel;
+} MouseState;
+
+_Static_assert(sizeof(WagnosticState) == 48, "Size mismatch");
 
 #define WIDTH 320
 #define HEIGHT 240
@@ -58,6 +56,8 @@ static uint8_t js_heap[512 * 1024];
 static JSContext *ctx = NULL;
 static JSValue js_frame_func = JS_UNDEFINED;
 static JSValue js_wagnostic_obj = JS_UNDEFINED;
+static MouseState* mouse = NULL;
+static uint32_t ticks = 0;
 
 /* Native function: set_pixel(x, y, r, g, b) */
 JSValue js_set_pixel(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
@@ -82,11 +82,11 @@ JSValue js_set_pixel(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 
 /* Wagnostic ABI Entry */
 int wupdate() {
+    ticks++;
     // Frame 0 Initialization
     if (rom.s.width == 0) {
         rom.s.width = WIDTH;
         rom.s.height = HEIGHT;
-        rom.s.scale = 3;
         
         // Host format: RGBA8888
         rom.s.r_bits = 8; rom.s.r_shift = 0;
@@ -95,6 +95,8 @@ int wupdate() {
         rom.s.a_bits = 8; rom.s.a_shift = 24;
         
         rom.s.vram_offset = sizeof(WagnosticState);
+
+        mouse = (MouseState*)wextension("std:mouse", NULL);
 
         // Init JS
         ctx = JS_NewContext(js_heap, sizeof(js_heap), &js_stdlib);
@@ -145,9 +147,9 @@ int wupdate() {
         JSValue wagnostic_obj = JS_GetPropertyStr(ctx, global, "wagnostic");
         
         // Update input & ticks to JS
-        JS_SetPropertyStr(ctx, wagnostic_obj, "mouse_x", JS_NewInt32(ctx, rom.s.mouse_x));
-        JS_SetPropertyStr(ctx, wagnostic_obj, "mouse_y", JS_NewInt32(ctx, rom.s.mouse_y));
-        JS_SetPropertyStr(ctx, wagnostic_obj, "ticks", JS_NewInt32(ctx, rom.s.ticks));
+        JS_SetPropertyStr(ctx, wagnostic_obj, "mouse_x", JS_NewInt32(ctx, mouse ? mouse->x : 0));
+        JS_SetPropertyStr(ctx, wagnostic_obj, "mouse_y", JS_NewInt32(ctx, mouse ? mouse->y : 0));
+        JS_SetPropertyStr(ctx, wagnostic_obj, "ticks", JS_NewInt32(ctx, ticks));
         
         // Call frame()
         JSValue js_frame = JS_GetPropertyStr(ctx, global, "frame");

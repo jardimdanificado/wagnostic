@@ -1,7 +1,10 @@
 typedef struct { int x, y, w, h; } Rect;
-// full_test — Comprehensive test of ALL ABI features
+// full_test_static — Test of static VRAM allocation
 
 #include <stdint.h>
+#include <stddef.h>
+
+extern void* wextension(const char* name, void* ptr);
 
 /* SET_BPP(s, bpp) — sets channel bits/shifts for standard pixel formats.
  * The host derives BPP from these fields; there is no separate bpp field. */
@@ -11,45 +14,34 @@ typedef struct { int x, y, w, h; } Rect;
         (s)->g_bits=8;(s)->g_shift=8; \
         (s)->b_bits=8;(s)->b_shift=16; \
         (s)->a_bits=8;(s)->a_shift=24; \
-        (s)->x_bits=0;(s)->x_shift=0; \
     } else if ((bpp_val) == 16) { \
         (s)->r_bits=5;(s)->r_shift=11; \
         (s)->g_bits=6;(s)->g_shift=5; \
         (s)->b_bits=5;(s)->b_shift=0; \
         (s)->a_bits=0;(s)->a_shift=0; \
-        (s)->x_bits=0;(s)->x_shift=0; \
     } else if ((bpp_val) == 8) { \
         (s)->r_bits=3;(s)->r_shift=5; \
         (s)->g_bits=3;(s)->g_shift=2; \
         (s)->b_bits=2;(s)->b_shift=0; \
         (s)->a_bits=0;(s)->a_shift=0; \
-        (s)->x_bits=0;(s)->x_shift=0; \
     } \
 } while(0)
 
-
-
-
-
 typedef struct {
-    uint32_t width, height, scale;
-    uint32_t dirty_rects;
-    int32_t mouse_x, mouse_y;
-    uint32_t mouse_buttons;
-    int32_t mouse_wheel;
-    uint8_t keys[256];
-    uint32_t gamepad_buttons;
-    uint32_t ticks;
-    uint32_t target_fps;
-    uint32_t vram_offset;
+    uint32_t width, height;
     uint32_t r_bits, r_shift;
     uint32_t g_bits, g_shift;
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
-    uint32_t x_bits, x_shift;
-    int32_t unique;
-    uint8_t reserved[676];
+    uint32_t vram_offset;
+    uint32_t dirty_rects;
 } State;
+
+typedef struct {
+    int32_t x, y;
+    uint32_t buttons;
+    int32_t wheel;
+} MouseState;
 
 static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
 
@@ -62,6 +54,8 @@ static int current_bpp = 16;
 static int frame_count = 0;
 static int resize_state = 0;
 static int initialized = 0;
+static uint8_t* keys = NULL;
+static MouseState* mouse = NULL;
 
 static void set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b) {
     if (x < 0 || x >= (int)rom.s.width || y < 0 || y >= (int)rom.s.height) return;
@@ -123,9 +117,10 @@ static void draw_keyboard(int ox, int oy, int qw, int qh) {
         if (key_idx >= 256) break;
         int cx = i % cols, cy = i / cols;
         int px = ox + 4 + cx * cell_w, py = oy + 12 + cy * cell_h;
-        uint8_t cr = rom.s.keys[key_idx] ? 0 : 50;
-        uint8_t cg = rom.s.keys[key_idx] ? 200 : 50;
-        uint8_t cb = rom.s.keys[key_idx] ? 80 : 60;
+        int is_pressed = keys && keys[key_idx];
+        uint8_t cr = is_pressed ? 0 : 50;
+        uint8_t cg = is_pressed ? 200 : 50;
+        uint8_t cb = is_pressed ? 80 : 60;
         fill_rect(px, py, cell_w - 1, cell_h - 1, cr, cg, cb);
     }
 }
@@ -149,7 +144,11 @@ static void draw_dirty_anim(int ox, int oy, int qw, int qh) {
 }
 
 static void draw_mouse(int ox, int oy, int qw, int qh) {
-    int mx = rom.s.mouse_x, my = rom.s.mouse_y;
+    int mx = mouse ? mouse->x : 0;
+    int my = mouse ? mouse->y : 0;
+    uint32_t mbtns = mouse ? mouse->buttons : 0;
+    int mwheel = mouse ? mouse->wheel : 0;
+
     int cx = ox + (mx * qw) / (int)rom.s.width;
     int cy = oy + (my * qh) / (int)rom.s.height;
 
@@ -158,24 +157,24 @@ static void draw_mouse(int ox, int oy, int qw, int qh) {
 
     fill_rect(cx - 2, cy - 2, 5, 5, 255, 255, 255);
 
-    uint8_t lb = (rom.s.mouse_buttons & 1) ? 255 : 80;
+    uint8_t lb = (mbtns & 1) ? 255 : 80;
     fill_rect(ox + 2, oy + qh - 12, 15, 10, lb, 30, 30);
 
-    uint8_t rb = (rom.s.mouse_buttons & 2) ? 100 : 80;
+    uint8_t rb = (mbtns & 2) ? 100 : 80;
     fill_rect(ox + 22, oy + qh - 12, 15, 10, 30, 30, rb);
 
-    draw_number(ox + 45, oy + qh - 12, (int)rom.s.mouse_wheel, 255, 255, 0);
+    draw_number(ox + 45, oy + qh - 12, mwheel, 255, 255, 0);
 }
-
-
 
 int wupdate() {
     if (!initialized) {
         rom.s.width = 320;
         rom.s.height = 240;
-        
-        rom.s.scale = 2;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
+
+        keys = (uint8_t*)wextension("std:keyboard", NULL);
+        mouse = (MouseState*)wextension("std:mouse", NULL);
+
         initialized = 1;
     }
 
@@ -183,27 +182,33 @@ int wupdate() {
 
     static int sp_was = 0, r_was = 0, k1_was = 0, k2_was = 0, k3_was = 0;
 
-    if (rom.s.keys[44] && !sp_was) {
+    int key_sp = keys ? keys[44] : 0;
+    if (key_sp && !sp_was) {
         if (current_bpp == 8) current_bpp = 16;
         else if (current_bpp == 16) current_bpp = 32;
         else current_bpp = 8;
     }
-    sp_was = rom.s.keys[44];
+    sp_was = key_sp;
 
-    if (rom.s.keys[21] && !r_was) {
+    int key_r = keys ? keys[21] : 0;
+    if (key_r && !r_was) {
         resize_state = (resize_state + 1) % 3;
-        if (resize_state == 0) { rom.s.width = 320; rom.s.height = 240; rom.s.scale = 2; }
-        else if (resize_state == 1) { rom.s.width = 640; rom.s.height = 480; rom.s.scale = 1; }
-        else { rom.s.width = 160; rom.s.height = 120; rom.s.scale = 4; }
+        if (resize_state == 0) { rom.s.width = 320; rom.s.height = 240; }
+        else if (resize_state == 1) { rom.s.width = 640; rom.s.height = 480; }
+        else { rom.s.width = 160; rom.s.height = 120; }
     }
-    r_was = rom.s.keys[21];
+    r_was = key_r;
 
-    if (rom.s.keys[30] && !k1_was) { current_bpp = 8; }
-    if (rom.s.keys[31] && !k2_was) { current_bpp = 16; }
-    if (rom.s.keys[32] && !k3_was) { current_bpp = 32; }
-    k1_was = rom.s.keys[30]; k2_was = rom.s.keys[31]; k3_was = rom.s.keys[32];
+    int k1 = keys ? keys[30] : 0;
+    int k2 = keys ? keys[31] : 0;
+    int k3 = keys ? keys[32] : 0;
 
-    if (rom.s.keys[41]) return 0;
+    if (k1 && !k1_was) { current_bpp = 8; }
+    if (k2 && !k2_was) { current_bpp = 16; }
+    if (k3 && !k3_was) { current_bpp = 32; }
+    k1_was = k1; k2_was = k2; k3_was = k3;
+
+    if (keys && keys[41]) return 0;
 
     int W = (int)rom.s.width, H = (int)rom.s.height;
     clear(15, 15, 20);

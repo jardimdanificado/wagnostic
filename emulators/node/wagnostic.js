@@ -12,28 +12,17 @@ const path = require('path');
 const sdl = require('@kmamal/sdl');
 
 // ── ABI Offsets & Constants (ABI.md) ────────────────────
-const STRUCT_SIZE = 1024;
+const STRUCT_SIZE = 48;
 
 const OFFSETS = {
   width: 0,                // uint32
   height: 4,               // uint32
-  scale: 8,                // uint32
-  dirty_rects: 12,         // uint32 (pointer)
-  mouse_x: 16,             // int32
-  mouse_y: 20,             // int32
-  mouse_buttons: 24,       // uint32 (bitmask: 1=left, 2=right, 4=middle)
-  mouse_wheel: 28,         // int32
-  keys: 32,                // uint8[256] array
-  gamepad_buttons: 288,    // uint32
-  ticks: 292,              // uint32
-  target_fps: 296,         // uint32
-  vram_offset: 300,        // uint32
-  r_bits: 304, r_shift: 308, // uint32
-  g_bits: 312, g_shift: 316, // uint32
-  b_bits: 320, b_shift: 324, // uint32
-  a_bits: 328, a_shift: 332, // uint32
-  x_bits: 336, x_shift: 340, // uint32
-  unique: 344,             // int32
+  r_bits: 8, r_shift: 12,  // uint32
+  g_bits: 16, g_shift: 20, // uint32
+  b_bits: 24, b_shift: 28, // uint32
+  a_bits: 32, a_shift: 36, // uint32
+  vram_offset: 40,         // uint32
+  dirty_rects: 44,         // uint32 (pointer)
 };
 
 // Gamepad Bitmasks
@@ -52,21 +41,17 @@ class WagnosticState {
     this.buffer = buffer;
     this.statePtr = statePtr;
     this.view = new DataView(buffer, statePtr, STRUCT_SIZE);
-    this.uint8 = new Uint8Array(buffer, statePtr, STRUCT_SIZE);
   }
 
   updateBuffer(buffer) {
     this.buffer = buffer;
     this.view = new DataView(buffer, this.statePtr, STRUCT_SIZE);
-    this.uint8 = new Uint8Array(buffer, this.statePtr, STRUCT_SIZE);
   }
 
   get width() { return this.view.getUint32(OFFSETS.width, true); }
   get height() { return this.view.getUint32(OFFSETS.height, true); }
-  get scale() { return this.view.getUint32(OFFSETS.scale, true); }
 
   get dirtyRectsPtr() { return this.view.getUint32(OFFSETS.dirty_rects, true); }
-  get targetFps() { return this.view.getUint32(OFFSETS.target_fps, true) || 60; }
   get vramOffset() { return this.view.getUint32(OFFSETS.vram_offset, true); }
 
   get rBits() { return this.view.getUint32(OFFSETS.r_bits, true); }
@@ -77,35 +62,6 @@ class WagnosticState {
   get bShift() { return this.view.getUint32(OFFSETS.b_shift, true); }
   get aBits() { return this.view.getUint32(OFFSETS.a_bits, true); }
   get aShift() { return this.view.getUint32(OFFSETS.a_shift, true); }
-
-  // Inputs
-  setMousePos(x, y) {
-    this.view.setInt32(OFFSETS.mouse_x, x, true);
-    this.view.setInt32(OFFSETS.mouse_y, y, true);
-  }
-
-  setMouseButtons(buttons) {
-    this.view.setUint32(OFFSETS.mouse_buttons, buttons, true);
-  }
-
-  addMouseWheel(delta) {
-    const cur = this.view.getInt32(OFFSETS.mouse_wheel, true);
-    this.view.setInt32(OFFSETS.mouse_wheel, cur + delta, true);
-  }
-
-  setKeyState(scancode, pressed) {
-    if (scancode >= 0 && scancode < 256) {
-      this.uint8[OFFSETS.keys + scancode] = pressed ? 1 : 0;
-    }
-  }
-
-  setGamepadButtons(mask) {
-    this.view.setUint32(OFFSETS.gamepad_buttons, mask, true);
-  }
-
-  setTicks(ticks) {
-    this.view.setUint32(OFFSETS.ticks, ticks, true);
-  }
 }
 
 // ── Parse Arguments ──────────────────────────────────────
@@ -247,6 +203,8 @@ async function main() {
     process.exit(1);
   }
 
+  const wasmBytes = fs.readFileSync(absoluteRomPath);
+
   let currentTitle = 'Wagnostic Host (Node.js)';
   let lastTitleWasmPtr = 0;
 
@@ -290,6 +248,30 @@ async function main() {
           }
           return lastTitleWasmPtr;
         }
+        if (name === 'std:keyboard') {
+          if (dataPtr) {
+            keyboardWasmPtr = dataPtr;
+          } else if (!keyboardWasmPtr && statePtr) {
+            keyboardWasmPtr = statePtr + STRUCT_SIZE;
+          }
+          return keyboardWasmPtr;
+        }
+        if (name === 'std:mouse') {
+          if (dataPtr) {
+            mouseWasmPtr = dataPtr;
+          } else if (!mouseWasmPtr && statePtr) {
+            mouseWasmPtr = statePtr + STRUCT_SIZE + 256;
+          }
+          return mouseWasmPtr;
+        }
+        if (name === 'std:gamepad') {
+          if (dataPtr) {
+            gamepadWasmPtr = dataPtr;
+          } else if (!gamepadWasmPtr && statePtr) {
+            gamepadWasmPtr = statePtr + STRUCT_SIZE + 256 + 16;
+          }
+          return gamepadWasmPtr;
+        }
         return 0;
       },
       abort: () => console.error('WASM Aborted'),
@@ -332,16 +314,27 @@ async function main() {
 
   let isRunning = true;
   let statePtr = 0;
+  let keyboardWasmPtr = 0;
+  let mouseWasmPtr = 0;
+  let gamepadWasmPtr = 0;
   let conversionBuffer = null;
+
+  const keyBuffer = new Uint8Array(256);
+  let mouseX = 0, mouseY = 0;
   let mouseButtonsMask = 0;
+  let mouseWheelDelta = 0;
   let gamepadMask = 0;
 
   function exitCleanly() {
     isRunning = false;
-    if (window && !window.destroyed) {
+    if (window && !windowDestroyed(window)) {
       try { window.destroy(); } catch (e) {}
     }
     process.exit(0);
+  }
+
+  function windowDestroyed(win) {
+    return !win || win.destroyed;
   }
 
   function getMem() {
@@ -365,7 +358,6 @@ async function main() {
     }
   }
 
-  let ticks = 0;
   let lastFrameTime = process.hrtime.bigint();
   let targetFps = forcedFps || 60;
   let frameIntervalNs = BigInt(Math.floor(1e9 / targetFps));
@@ -381,6 +373,21 @@ async function main() {
       return;
     }
     lastFrameTime = now;
+
+    // Update mapped peripheral memory buffers directly
+    if (keyboardWasmPtr && keyboardWasmPtr + 256 <= memory.buffer.byteLength) {
+      new Uint8Array(memory.buffer, keyboardWasmPtr, 256).set(keyBuffer);
+    }
+    if (mouseWasmPtr && mouseWasmPtr + 16 <= memory.buffer.byteLength) {
+      const view = new DataView(memory.buffer, mouseWasmPtr, 16);
+      view.setInt32(0, mouseX, true);
+      view.setInt32(4, mouseY, true);
+      view.setUint32(8, mouseButtonsMask, true);
+      view.setInt32(12, mouseWheelDelta, true);
+    }
+    if (gamepadWasmPtr && gamepadWasmPtr + 4 <= memory.buffer.byteLength) {
+      new DataView(memory.buffer, gamepadWasmPtr, 4).setUint32(0, gamepadMask, true);
+    }
 
     let ret = 0;
     try {
@@ -398,19 +405,11 @@ async function main() {
 
     statePtr = ret;
     state = new WagnosticState(memory.buffer, statePtr);
-
-    ticks++;
-    state.setTicks(ticks);
-
-    const romFps = state.targetFps;
-    if (!forcedFps && romFps && romFps !== targetFps) {
-      targetFps = romFps;
-      frameIntervalNs = BigInt(Math.floor(1e9 / targetFps));
-    }
+    mouseWheelDelta = 0;
 
     const width = state.width || 320;
     const height = state.height || 240;
-    const scale = forcedScale || state.scale || 1;
+    const scale = forcedScale || 1;
 
     if (!window || currentWidth !== width || currentHeight !== height || currentScale !== scale) {
       if (window && !window.destroyed) {
@@ -440,47 +439,36 @@ async function main() {
       });
 
       window.on('keyDown', (e) => {
-        if (!state) return;
         const scancode = e.scancode;
-        state.setKeyState(scancode, true);
+        if (scancode >= 0 && scancode < 256) keyBuffer[scancode] = 1;
         updateGamepadKey(scancode, true);
-        state.setGamepadButtons(gamepadMask);
       });
 
       window.on('keyUp', (e) => {
-        if (!state) return;
         const scancode = e.scancode;
-        state.setKeyState(scancode, false);
+        if (scancode >= 0 && scancode < 256) keyBuffer[scancode] = 0;
         updateGamepadKey(scancode, false);
-        state.setGamepadButtons(gamepadMask);
       });
 
       window.on('mouseMove', (e) => {
-        if (!state) return;
-        const mx = Math.floor(e.x / currentScale);
-        const my = Math.floor(e.y / currentScale);
-        state.setMousePos(mx, my);
+        mouseX = Math.floor(e.x / currentScale);
+        mouseY = Math.floor(e.y / currentScale);
       });
 
       window.on('mouseButtonDown', (e) => {
-        if (!state) return;
         if (e.button === 1) mouseButtonsMask |= 1;
         if (e.button === 3) mouseButtonsMask |= 2;
         if (e.button === 2) mouseButtonsMask |= 4;
-        state.setMouseButtons(mouseButtonsMask);
       });
 
       window.on('mouseButtonUp', (e) => {
-        if (!state) return;
         if (e.button === 1) mouseButtonsMask &= ~1;
         if (e.button === 3) mouseButtonsMask &= ~2;
         if (e.button === 2) mouseButtonsMask &= ~4;
-        state.setMouseButtons(mouseButtonsMask);
       });
 
       window.on('mouseWheel', (e) => {
-        if (!state) return;
-        state.addMouseWheel(e.dy || 0);
+        mouseWheelDelta += (e.dy || 0);
       });
     }
 

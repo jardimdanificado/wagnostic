@@ -1,53 +1,24 @@
 typedef struct { int x, y, w, h; } Rect;
 #include <stdint.h>
+#include <stddef.h>
 
-/* SET_BPP(s, bpp) — sets channel bits/shifts for standard pixel formats.
- * The host derives BPP from these fields; there is no separate bpp field. */
-#define SET_BPP(s, bpp_val) do { \
-    if ((bpp_val) == 32) { \
-        (s)->r_bits=8;(s)->r_shift=0; \
-        (s)->g_bits=8;(s)->g_shift=8; \
-        (s)->b_bits=8;(s)->b_shift=16; \
-        (s)->a_bits=8;(s)->a_shift=24; \
-        (s)->x_bits=0;(s)->x_shift=0; \
-    } else if ((bpp_val) == 16) { \
-        (s)->r_bits=5;(s)->r_shift=11; \
-        (s)->g_bits=6;(s)->g_shift=5; \
-        (s)->b_bits=5;(s)->b_shift=0; \
-        (s)->a_bits=0;(s)->a_shift=0; \
-        (s)->x_bits=0;(s)->x_shift=0; \
-    } else if ((bpp_val) == 8) { \
-        (s)->r_bits=3;(s)->r_shift=5; \
-        (s)->g_bits=3;(s)->g_shift=2; \
-        (s)->b_bits=2;(s)->b_shift=0; \
-        (s)->a_bits=0;(s)->a_shift=0; \
-        (s)->x_bits=0;(s)->x_shift=0; \
-    } \
-} while(0)
-
-
-
-
+extern void* wextension(const char* name, void* ptr);
 
 typedef struct {
-    uint32_t width, height, scale;
-    uint32_t dirty_rects;
-    int32_t mouse_x, mouse_y;
-    uint32_t mouse_buttons;
-    int32_t mouse_wheel;
-    uint8_t keys[256];
-    uint32_t gamepad_buttons;
-    uint32_t ticks;
-    uint32_t target_fps;
-    uint32_t vram_offset;
+    uint32_t width, height;
     uint32_t r_bits, r_shift;
     uint32_t g_bits, g_shift;
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
-    uint32_t x_bits, x_shift;
-    int32_t unique;
-    uint8_t reserved[676];
+    uint32_t vram_offset;
+    uint32_t dirty_rects;
 } State;
+
+typedef struct {
+    int32_t x, y;
+    uint32_t buttons;
+    int32_t wheel;
+} MouseState;
 
 static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
 
@@ -64,6 +35,7 @@ static void redraw() {
     my_dirty_list.count = 1;
     my_dirty_list.rects[0] = (Rect){0, 0, (int)rom.s.width, (int)rom.s.height};
 }
+
 static void draw_rect(int x, int y, int w, int h, uint16_t color) {
     for (int iy = y; iy < y + h; iy++) {
         if (iy < 0 || iy >= 240) continue;
@@ -75,14 +47,20 @@ static void draw_rect(int x, int y, int w, int h, uint16_t color) {
 }
 
 static int initialized = 0;
+static uint8_t* keys = NULL;
+static MouseState* mouse = NULL;
 
 int wupdate() {
     if (!initialized) {
         rom.s.width = 320;
         rom.s.height = 240;
-        
-        rom.s.scale = 4;
+        rom.s.r_bits = 5; rom.s.r_shift = 11;
+        rom.s.g_bits = 6; rom.s.g_shift = 5;
+        rom.s.b_bits = 5; rom.s.b_shift = 0;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
+
+        keys = (uint8_t*)wextension("std:keyboard", NULL);
+        mouse = (MouseState*)wextension("std:mouse", NULL);
 
         initialized = 1;
     }
@@ -97,15 +75,18 @@ int wupdate() {
         int cx = i % cols, cy = i / cols;
         int px = margin_x + cx * cell_w, py = margin_y + cy * cell_h;
         uint16_t col = W_RGB565(119, 119, 119);
-        if (rom.s.keys[i]) col = W_RGB565(0, 204, 85);
+        if (keys && keys[i]) col = W_RGB565(0, 204, 85);
         draw_rect(px, py, cell_w - 1, cell_h - 1, col);
     }
 
-    draw_rect(rom.s.mouse_x - 2, rom.s.mouse_y - 2, 5, 5, W_RGB565(255, 255, 255));
-    if (rom.s.mouse_buttons & 1) draw_rect(rom.s.mouse_x - 4, rom.s.mouse_y - 4, 9, 9, W_RGB565(255, 0, 0));
+    int mx = mouse ? mouse->x : 0;
+    int my = mouse ? mouse->y : 0;
+    uint32_t mbtns = mouse ? mouse->buttons : 0;
+
+    draw_rect(mx - 2, my - 2, 5, 5, W_RGB565(255, 255, 255));
+    if (mbtns & 1) draw_rect(mx - 4, my - 4, 9, 9, W_RGB565(255, 0, 0));
 
     redraw();
-    SET_BPP(&rom.s, 16);
     rom.s.dirty_rects = (uint32_t)&my_dirty_list;
     return (int)&rom.s;
 }

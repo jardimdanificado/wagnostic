@@ -386,7 +386,6 @@ JSValue js_set_scale(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
         int s = 0;
         JS_ToInt32(ctx, &s, argv[0]);
         if (s > 0 && s <= 8) {
-            _wagner_rom.state.scale = (uint32_t)s;
             wagner.scale = s;
         }
     }
@@ -518,7 +517,7 @@ void setup() {
     JS_SetPropertyStr(ctx, js_wagnostic_obj, "mouse_down", JS_NewBool(wagner.mouse_down));
     JS_SetPropertyStr(ctx, js_wagnostic_obj, "mouse_pressed", JS_NewBool(wagner.mouse_pressed));
     JS_SetPropertyStr(ctx, js_wagnostic_obj, "mouse_released", JS_NewBool(wagner.mouse_released));
-    JS_SetPropertyStr(ctx, js_wagnostic_obj, "mouse_wheel", JS_NewInt32(ctx, (int)_wagner_rom.state.mouse_wheel));
+    JS_SetPropertyStr(ctx, js_wagnostic_obj, "mouse_wheel", JS_NewInt32(ctx, _wagner_mouse_ptr ? _wagner_mouse_ptr->wheel : 0));
     JS_SetPropertyStr(ctx, global, "wagnostic", js_wagnostic_obj);
     JS_SetPropertyStr(ctx, global, "wagner", js_wagnostic_obj);
 
@@ -590,7 +589,7 @@ void draw() {
     JS_SetPropertyStr(ctx, wag_obj, "mouse_down", JS_NewBool(wagner.mouse_down));
     JS_SetPropertyStr(ctx, wag_obj, "mouse_pressed", JS_NewBool(wagner.mouse_pressed));
     JS_SetPropertyStr(ctx, wag_obj, "mouse_released", JS_NewBool(wagner.mouse_released));
-    JS_SetPropertyStr(ctx, wag_obj, "mouse_wheel", JS_NewInt32(ctx, (int)_wagner_rom.state.mouse_wheel));
+    JS_SetPropertyStr(ctx, wag_obj, "mouse_wheel", JS_NewInt32(ctx, _wagner_mouse_ptr ? _wagner_mouse_ptr->wheel : 0));
     JS_SetPropertyStr(ctx, wag_obj, "fps", JS_NewInt32(ctx, wagner.fps));
     JS_SetPropertyStr(ctx, wag_obj, "frame_count", JS_NewInt32(ctx, wagner.frame_count));
     

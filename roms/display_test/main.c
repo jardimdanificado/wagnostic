@@ -2,6 +2,9 @@ typedef struct { int x, y, w, h; } Rect;
 // display_test — Tests all video modes and dirty rectangles
 
 #include <stdint.h>
+#include <stddef.h>
+
+extern void* wextension(const char* name, void* ptr);
 
 /* SET_BPP(s, bpp) — sets channel bits/shifts for standard pixel formats.
  * The host derives BPP from these fields; there is no separate bpp field. */
@@ -11,44 +14,27 @@ typedef struct { int x, y, w, h; } Rect;
         (s)->g_bits=8;(s)->g_shift=8; \
         (s)->b_bits=8;(s)->b_shift=16; \
         (s)->a_bits=8;(s)->a_shift=24; \
-        (s)->x_bits=0;(s)->x_shift=0; \
     } else if ((bpp_val) == 16) { \
         (s)->r_bits=5;(s)->r_shift=11; \
         (s)->g_bits=6;(s)->g_shift=5; \
         (s)->b_bits=5;(s)->b_shift=0; \
         (s)->a_bits=0;(s)->a_shift=0; \
-        (s)->x_bits=0;(s)->x_shift=0; \
     } else if ((bpp_val) == 8) { \
         (s)->r_bits=3;(s)->r_shift=5; \
         (s)->g_bits=3;(s)->g_shift=2; \
         (s)->b_bits=2;(s)->b_shift=0; \
         (s)->a_bits=0;(s)->a_shift=0; \
-        (s)->x_bits=0;(s)->x_shift=0; \
     } \
 } while(0)
 
-
-
-
-
 typedef struct {
-    uint32_t width, height, scale;
-    uint32_t dirty_rects;
-    int32_t mouse_x, mouse_y;
-    uint32_t mouse_buttons;
-    int32_t mouse_wheel;
-    uint8_t keys[256];
-    uint32_t gamepad_buttons;
-    uint32_t ticks;
-    uint32_t target_fps;
-    uint32_t vram_offset;
+    uint32_t width, height;
     uint32_t r_bits, r_shift;
     uint32_t g_bits, g_shift;
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
-    uint32_t x_bits, x_shift;
-    int32_t unique;
-    uint8_t reserved[676];
+    uint32_t vram_offset;
+    uint32_t dirty_rects;
 } State;
 
 static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
@@ -63,6 +49,7 @@ static int dirty_mode = 0;
 static int frame_phase = 0;
 static int resize_state = 0;
 static int initialized = 0;
+static uint8_t* keys = NULL;
 
 static void set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b) {
     if (x < 0 || x >= (int)rom.s.width || y < 0 || y >= (int)rom.s.height) return;
@@ -154,9 +141,9 @@ int wupdate() {
     if (!initialized) {
         rom.s.width = 320;
         rom.s.height = 240;
-        
-        rom.s.scale = 2;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
+
+        keys = (uint8_t*)wextension("std:keyboard", NULL);
 
         initialized = 1;
     }
@@ -167,37 +154,36 @@ int wupdate() {
     static int r_was_down = 0;
     static int key1_was_down = 0, key2_was_down = 0, key3_was_down = 0;
 
-    int space_down = rom.s.keys[44];
+    int space_down = keys ? keys[44] : 0;
     if (space_down && !space_was_down) {
         dirty_mode = (dirty_mode + 1) % 3;
     }
     space_was_down = space_down;
 
-    int r_down = rom.s.keys[21];
+    int r_down = keys ? keys[21] : 0;
     if (r_down && !r_was_down) {
         resize_state = (resize_state + 1) % 3;
         if (resize_state == 0) {
-            rom.s.width = 320; rom.s.height = 240; rom.s.scale = 2;
+            rom.s.width = 320; rom.s.height = 240;
         } else if (resize_state == 1) {
-            rom.s.width = 640; rom.s.height = 480; rom.s.scale = 1;
+            rom.s.width = 640; rom.s.height = 480;
         } else {
-            rom.s.width = 160; rom.s.height = 120; rom.s.scale = 4;
+            rom.s.width = 160; rom.s.height = 120;
         }
     }
     r_was_down = r_down;
 
-    int k1 = rom.s.keys[30];
+    int k1 = keys ? keys[30] : 0;
     if (k1 && !key1_was_down) current_bpp = 8;
     key1_was_down = k1;
 
-    int k2 = rom.s.keys[31];
+    int k2 = keys ? keys[31] : 0;
     if (k2 && !key2_was_down) current_bpp = 16;
     key2_was_down = k2;
 
-    int k3 = rom.s.keys[32];
+    int k3 = keys ? keys[32] : 0;
     if (k3 && !key3_was_down) current_bpp = 32;
     key3_was_down = k3;
-
 
     clear_screen(32, 32, 32);
     draw_color_bars();
