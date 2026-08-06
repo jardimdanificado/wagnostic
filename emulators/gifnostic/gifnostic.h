@@ -15,20 +15,15 @@ extern "C" {
  * ================================================================ */
 
 typedef struct {
-    int32_t x, y, w, h;
-} WagnosticRect;
-
-typedef struct {
     uint32_t width, height;
     uint32_t r_bits, r_shift;
     uint32_t g_bits, g_shift;
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t vram_offset;
-    uint32_t dirty_rects;
 } WagnosticState;
 
-static_assert(sizeof(WagnosticState) == 48, "WagnosticState must be exactly 48 bytes");
+static_assert(sizeof(WagnosticState) == 44, "WagnosticState must be exactly 44 bytes");
 
 /* Opaque context handle */
 typedef struct WagnosticContext WagnosticContext;

@@ -14,7 +14,6 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t vram_offset;
-    uint32_t dirty_rects;
 } WagnosticState;
 
 typedef struct {
@@ -23,7 +22,7 @@ typedef struct {
     int32_t wheel;
 } MouseState;
 
-_Static_assert(sizeof(WagnosticState) == 48, "Size mismatch");
+_Static_assert(sizeof(WagnosticState) == 44, "Size mismatch");
 
 #define WIDTH 320
 #define HEIGHT 240
@@ -56,6 +55,7 @@ static uint8_t js_heap[512 * 1024];
 static JSContext *ctx = NULL;
 static JSValue js_frame_func = JS_UNDEFINED;
 static JSValue js_wagnostic_obj = JS_UNDEFINED;
+static MouseState mouse_buf;
 static MouseState* mouse = NULL;
 static uint32_t ticks = 0;
 
@@ -96,7 +96,7 @@ int wupdate() {
         
         rom.s.vram_offset = sizeof(WagnosticState);
 
-        mouse = (MouseState*)wextension("std:mouse", NULL);
+        mouse = (MouseState*)wextension("std:mouse", &mouse_buf);
 
         // Init JS
         ctx = JS_NewContext(js_heap, sizeof(js_heap), &js_stdlib);
@@ -165,12 +165,6 @@ int wupdate() {
             }
         }
     }
-    
-    // Mark screen as dirty
-    static struct { uint32_t count; Rect rects[32]; } my_dirty;
-    my_dirty.count = 1;
-    my_dirty.rects[0] = (Rect){0, 0, WIDTH, HEIGHT};
-    rom.s.dirty_rects = (uint32_t)&my_dirty;
     
     return (int)&rom.s;
 }

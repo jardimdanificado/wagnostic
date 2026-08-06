@@ -34,7 +34,6 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t vram_offset;
-    uint32_t dirty_rects;
 } State;
 
 typedef struct {
@@ -45,12 +44,13 @@ typedef struct {
 
 static State state;
 static uint8_t* vram = 0;
-static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
 
 static int current_bpp = 16;
 static int frame_count = 0;
 static int resize_state = 0;
 static int initialized = 0;
+static uint8_t keys_buf[256];
+static MouseState mouse_buf;
 static uint8_t* keys = NULL;
 static MouseState* mouse = NULL;
 
@@ -188,8 +188,8 @@ int wupdate() {
         state.height = 240;
         allocate_vram(state.width, state.height);
 
-        keys = (uint8_t*)wextension("std:keyboard", NULL);
-        mouse = (MouseState*)wextension("std:mouse", NULL);
+        keys = (uint8_t*)wextension("std:keyboard", keys_buf);
+        mouse = (MouseState*)wextension("std:mouse", &mouse_buf);
 
         initialized = 1;
     }
@@ -237,11 +237,6 @@ int wupdate() {
     draw_dirty_anim(W/2 + 1, 0, W/2 - 1, H/2);
     draw_mouse(0, H/2 + 1, W/2, H/2 - 1);
 
-    my_dirty_list.count = 3;
-    my_dirty_list.rects[0] = (Rect){0, 0, W/2, H/2};
-    my_dirty_list.rects[1] = (Rect){W/2, 0, W - W/2, H/2};
-    my_dirty_list.rects[2] = (Rect){0, H/2, W/2, H - H/2};
     SET_BPP(&state, current_bpp);
-    state.dirty_rects = (uint32_t)&my_dirty_list;
     return (int)&state;
 }

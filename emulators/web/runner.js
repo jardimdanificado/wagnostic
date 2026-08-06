@@ -150,7 +150,6 @@
       aBits:         mem.getUint32(ptr + 32, true),
       aShift:        mem.getUint32(ptr + 36, true),
       vramOffset:    mem.getUint32(ptr + 40, true),
-      dirtyRectsPtr: mem.getUint32(ptr + 44, true),
       scale: 1,
     };
 
@@ -710,59 +709,6 @@
     ctx.putImageData(imageData, 0, 0);
   }
 
-  function renderDirtyRects(state, w, h, bpp, vramPtr, dirtyRectsWasmPtr) {
-    // dirtyRectsWasmPtr points to: { uint32 count; Rect rects[32]; }
-    // where Rect = { int32 x, y, w, h; } (16 bytes each)
-    if (!dirtyRectsWasmPtr) return;
-    const mem = getMem();
-    const dirtyCount = mem.getUint32(dirtyRectsWasmPtr, true);
-    if (dirtyCount === 0) return;
-
-    const isGrayscale = (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits > 0) || 
-                        (state.rBits === 0 && state.gBits === 0 && state.bBits === 0 && state.aBits === 0 && bpp < 8);
-    let ab = state.aBits > 0 ? state.aBits : (bpp < 8 ? bpp : 0);
-    // Rects start at offset +4 in the dirty list struct
-    const rectsBase = dirtyRectsWasmPtr + 4;
-    const count = Math.min(dirtyCount, MAX_DIRTY_RECTS);
-
-    const isFullScreen = count === 1 &&
-      mem.getInt32(rectsBase + 0, true) === 0 &&
-      mem.getInt32(rectsBase + 4, true) === 0 &&
-      mem.getInt32(rectsBase + 8, true) === w &&
-      mem.getInt32(rectsBase + 12, true) === h;
-
-    if (isFullScreen) {
-      renderFullFrame(state, w, h, bpp, vramPtr);
-      // Clear the pointer so we don't render again next frame
-      getMem().setUint32(statePtr + 140, 0, true);
-      return;
-    }
-
-    for (let r = 0; r < count; r++) {
-      const off = rectsBase + r * RECT_STRIDE;
-      const rx = mem.getInt32(off + 0, true);
-      const ry = mem.getInt32(off + 4, true);
-      const rw = mem.getInt32(off + 8, true);
-      const rh = mem.getInt32(off + 12, true);
-
-      let cx = rx, cy = ry, cw = rw, ch = rh;
-      if (cx < 0) { cw += cx; cx = 0; }
-      if (cy < 0) { ch += cy; cy = 0; }
-      if (cx + cw > w) cw = w - cx;
-      if (cy + ch > h) ch = h - cy;
-      if (cw <= 0 || ch <= 0) continue;
-
-      const rectData = ctx.createImageData(cw, ch);
-      const pixels = rectData.data;
-      const u32 = new Uint32Array(pixels.buffer);
-
-      unpackPixelsToImageData(w, h, bpp, vramPtr, pixels, u32, cx, cy, cw, ch, state.rBits, state.rShift, state.gBits, state.gShift, state.bBits, state.bShift, ab, state.aShift, isGrayscale);
-      ctx.putImageData(rectData, cx, cy);
-    }
-    // Clear the dirty rects pointer
-    getMem().setUint32(statePtr + 12, 0, true);
-  }
-
 
   // ── Input ──────────────────────────────────────────────────────────────
 
@@ -903,6 +849,9 @@
     }
     lastFrameTime = now;
 
+    webDirtyRects.length = 0;
+    webFullRedraw = false;
+
     // 1. Write input to globals
     writeInputToGlobals();
 
@@ -933,10 +882,8 @@
       resizeCanvas(w, h, scale);
     }
 
-    // 4. Render dirty rects (via pointer)
-    if (g.dirtyRectsPtr) {
-      renderDirtyRects(g, w, h, bpp, statePtr + g.vramOffset, g.dirtyRectsPtr);
-    }
+    // 4. Render frame
+    renderFullFrame(g, w, h, bpp, statePtr + g.vramOffset);
 
     // 5. Reset mouse wheel
     resetInput();
@@ -977,6 +924,10 @@
   }
 
   function loadRomFromBuffer(buf) {
+    keyboardWasmPtr = 0;
+    mouseWasmPtr = 0;
+    gamepadWasmPtr = 0;
+    statePtr = 0;
     let wasmBuffer = buf;
     tarBuffer = null;
     
@@ -1040,7 +991,7 @@
             if (dataPtr) {
               gamepadWasmPtr = dataPtr;
             } else if (!gamepadWasmPtr && statePtr) {
-              gamepadWasmPtr = statePtr + 48 + 256 + 16;
+              gamepadWasmPtr = statePtr + 44 + 256 + 16;
             }
             return gamepadWasmPtr;
           }

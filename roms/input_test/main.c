@@ -34,7 +34,6 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t vram_offset;
-    uint32_t dirty_rects;
 } State;
 
 typedef struct {
@@ -43,14 +42,15 @@ typedef struct {
     int32_t wheel;
 } MouseState;
 
-static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
-
 static struct {
     State s;
     uint8_t vram[320 * 240 * 2];
 } rom;
 
 static uint16_t* fb = (uint16_t*)rom.vram;
+static uint8_t keys_buf[256];
+static MouseState mouse_buf;
+static uint32_t gamepad_buf;
 static uint8_t* keys = NULL;
 static MouseState* mouse = NULL;
 static uint32_t* gamepad = NULL;
@@ -194,9 +194,9 @@ int wupdate() {
         rom.s.b_bits = 5; rom.s.b_shift = 0;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
 
-        keys = (uint8_t*)wextension("std:keyboard", NULL);
-        mouse = (MouseState*)wextension("std:mouse", NULL);
-        gamepad = (uint32_t*)wextension("std:gamepad", NULL);
+        keys = (uint8_t*)wextension("std:keyboard", keys_buf);
+        mouse = (MouseState*)wextension("std:mouse", &mouse_buf);
+        gamepad = (uint32_t*)wextension("std:gamepad", &gamepad_buf);
 
         initialized = 1;
     }
@@ -209,8 +209,5 @@ int wupdate() {
 
     if (keys && keys[41]) return 0;
 
-    my_dirty_list.count = 1;
-    my_dirty_list.rects[0] = (Rect){0, 0, 320, 240};
-    rom.s.dirty_rects = (uint32_t)&my_dirty_list;
     return (int)&rom.s;
 }

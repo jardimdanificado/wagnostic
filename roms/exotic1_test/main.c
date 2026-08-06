@@ -1,4 +1,3 @@
-typedef struct { int x, y, w, h; } Rect;
 #include <stdint.h>
 
 #define WASM_EXPORT __attribute__((visibility("default")))
@@ -10,10 +9,7 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t vram_offset;
-    uint32_t dirty_rects;
 } WagnosticState;
-
-static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
 
 static struct {
     WagnosticState s;
@@ -25,12 +21,6 @@ static int initialized = 0;
 static void set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     if (x < 0 || x >= (int)rom.s.width || y < 0 || y >= (int)rom.s.height) return;
     int idx = y * (int)rom.s.width + x;
-    
-    // R5 G1 B5 A5
-    // R in bits 11..15 (5 bits)
-    // G in bit 10      (1 bit)
-    // B in bits 5..9   (5 bits)
-    // A in bits 0..4   (5 bits)
     
     uint16_t r_val = (r >> 3) & 0x1F;
     uint16_t g_val = (g >> 7) & 0x01;
@@ -51,14 +41,11 @@ WASM_EXPORT int wupdate() {
         rom.s.b_bits = 5; rom.s.b_shift = 5;
         rom.s.a_bits = 5; rom.s.a_shift = 0;
         
-        // Draw a test pattern
         for (int y = 0; y < 240; y++) {
             for (int x = 0; x < 320; x++) {
                 uint8_t r = (x * 255) / 320;
                 uint8_t b = (y * 255) / 240;
-                // Since G only has 1 bit, we will make it alternate columns to be visible
                 uint8_t g = (x / 20) % 2 == 0 ? 255 : 0;
-                // Alpha fade out to the right
                 uint8_t a = 255 - ((x * 255) / 320);
                 
                 set_pixel(x, y, r, g, b, a);
@@ -68,8 +55,5 @@ WASM_EXPORT int wupdate() {
         initialized = 1;
     }
 
-    my_dirty_list.count = 1;
-    my_dirty_list.rects[0] = (Rect){0, 0, 320, 240};
-    rom.s.dirty_rects = (uint32_t)&my_dirty_list;
     return (int)&rom.s;
 }

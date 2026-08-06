@@ -12,7 +12,7 @@ const path = require('path');
 const sdl = require('@kmamal/sdl');
 
 // ── ABI Offsets & Constants (ABI.md) ────────────────────
-const STRUCT_SIZE = 48;
+const STRUCT_SIZE = 44;
 
 const OFFSETS = {
   width: 0,                // uint32
@@ -22,7 +22,6 @@ const OFFSETS = {
   b_bits: 24, b_shift: 28, // uint32
   a_bits: 32, a_shift: 36, // uint32
   vram_offset: 40,         // uint32
-  dirty_rects: 44,         // uint32 (pointer)
 };
 
 // Gamepad Bitmasks
@@ -51,7 +50,6 @@ class WagnosticState {
   get width() { return this.view.getUint32(OFFSETS.width, true); }
   get height() { return this.view.getUint32(OFFSETS.height, true); }
 
-  get dirtyRectsPtr() { return this.view.getUint32(OFFSETS.dirty_rects, true); }
   get vramOffset() { return this.view.getUint32(OFFSETS.vram_offset, true); }
 
   get rBits() { return this.view.getUint32(OFFSETS.r_bits, true); }

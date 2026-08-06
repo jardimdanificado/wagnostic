@@ -1,5 +1,4 @@
-typedef struct { int x, y, w, h; } Rect;
-// display_test — Tests all video modes and dirty rectangles
+// display_test — Tests all video modes
 
 #include <stdint.h>
 #include <stddef.h>
@@ -34,10 +33,7 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t vram_offset;
-    uint32_t dirty_rects;
 } State;
-
-static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
 
 static struct {
     State s;
@@ -45,10 +41,10 @@ static struct {
 } rom;
 
 static int current_bpp = 16;
-static int dirty_mode = 0;
 static int frame_phase = 0;
 static int resize_state = 0;
 static int initialized = 0;
+static uint8_t keys_buf[256];
 static uint8_t* keys = NULL;
 
 static void set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b) {
@@ -111,30 +107,8 @@ static void draw_status(void) {
     else
         fill_rect(5, h - 25, 20, 20, 255, 255, 255);
 
-    uint8_t dr = (dirty_mode == 0) ? 255 : 0;
-    uint8_t dg = (dirty_mode == 1) ? 255 : 0;
-    uint8_t db = (dirty_mode == 2) ? 255 : 0;
-    fill_rect(35, h - 25, 10, 10, dr, dg, db);
+    fill_rect(35, h - 25, 10, 10, 255, 255, 255);
     fill_rect(50, h - 25, 10, 10, 200, 200, 200);
-}
-
-static void redraw_full(void) {
-    my_dirty_list.count = 1;
-    my_dirty_list.rects[0] = (Rect){0, 0, (int)rom.s.width, (int)rom.s.height};
-}
-
-static void redraw_subrect(int rx, int ry, int rw, int rh) {
-    my_dirty_list.count = 1;
-    my_dirty_list.rects[0] = (Rect){rx, ry, rw, rh};
-}
-
-static void redraw_multi(void) {
-    int w = (int)rom.s.width, h = (int)rom.s.height;
-    my_dirty_list.count = 4;
-    my_dirty_list.rects[0] = (Rect){0, 0, w/2, h/2};
-    my_dirty_list.rects[1] = (Rect){w/2, 0, w - w/2, h/2};
-    my_dirty_list.rects[2] = (Rect){0, h/2, w/2, h - h/2};
-    my_dirty_list.rects[3] = (Rect){w/2, h/2, w - w/2, h - h/2};
 }
 
 int wupdate() {
@@ -143,22 +117,15 @@ int wupdate() {
         rom.s.height = 240;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
 
-        keys = (uint8_t*)wextension("std:keyboard", NULL);
+        keys = (uint8_t*)wextension("std:keyboard", keys_buf);
 
         initialized = 1;
     }
 
     frame_phase++;
 
-    static int space_was_down = 0;
     static int r_was_down = 0;
     static int key1_was_down = 0, key2_was_down = 0, key3_was_down = 0;
-
-    int space_down = keys ? keys[44] : 0;
-    if (space_down && !space_was_down) {
-        dirty_mode = (dirty_mode + 1) % 3;
-    }
-    space_was_down = space_down;
 
     int r_down = keys ? keys[21] : 0;
     if (r_down && !r_was_down) {
@@ -193,15 +160,6 @@ int wupdate() {
     int ax = (frame_phase * 3) % (int)rom.s.width;
     fill_rect(ax, 10, 20, 20, 255, 200, 0);
 
-    if (dirty_mode == 0) {
-        redraw_full();
-    } else if (dirty_mode == 1) {
-        redraw_subrect(0, 0, (int)rom.s.width, (int)rom.s.height);
-    } else {
-        redraw_multi();
-    }
-
     SET_BPP(&rom.s, current_bpp);
-    rom.s.dirty_rects = (uint32_t)&my_dirty_list;
     return (int)&rom.s;
 }

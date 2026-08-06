@@ -1,4 +1,3 @@
-typedef struct { int x, y, w, h; } Rect;
 #include <stdint.h>
 
 typedef struct {
@@ -8,20 +7,12 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t vram_offset;
-    uint32_t dirty_rects;
 } State;
-
-static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
 
 static struct {
     State s;
     uint8_t vram[320 * 240 * 1];
 } rom;
-
-static void redraw() {
-    my_dirty_list.count = 1;
-    my_dirty_list.rects[0] = (Rect){0, 0, (int)rom.s.width, (int)rom.s.height};
-}
 
 static int initialized = 0;
 static uint32_t ticks = 0;
@@ -51,7 +42,5 @@ int wupdate() {
     for (int i = 0; i < 320 * 240; i++)
         fb[i] = color;
 
-    redraw();
-    rom.s.dirty_rects = (uint32_t)&my_dirty_list;
     return (int)&rom.s;
 }

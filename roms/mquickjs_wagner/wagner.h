@@ -71,7 +71,6 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t vram_offset;
-    uint32_t dirty_rects;
 } WagnosticState;
 
 typedef struct {
@@ -115,28 +114,19 @@ static inline void w_setup(WagnosticState *s, const char* title, int width, int 
 }
 
 static inline void w_redraw(WagnosticState *s, WagnosticDirtyList *dl) {
-    dl->count = 1;
-    dl->rects[0].x = 0;
-    dl->rects[0].y = 0;
-    dl->rects[0].w = (int)s->width;
-    dl->rects[0].h = (int)s->height;
-    s->dirty_rects = (uint32_t)dl;
+    (void)dl;
+    Rect r = { 0, 0, (int)s->width, (int)s->height };
+    wextension("std:dirty", &r);
 }
 
 static inline void w_no_redraw(WagnosticState *s, WagnosticDirtyList *dl) {
-    dl->count = 0;
-    s->dirty_rects = 0;
+    (void)s; (void)dl;
 }
 
 static inline void w_redraw_rect(WagnosticState *s, WagnosticDirtyList *dl, int x, int y, int w, int h) {
-    if (dl->count < W_MAX_DIRTY_RECTS) {
-        dl->rects[dl->count].x = x;
-        dl->rects[dl->count].y = y;
-        dl->rects[dl->count].w = w;
-        dl->rects[dl->count].h = h;
-        dl->count++;
-    }
-    s->dirty_rects = (uint32_t)dl;
+    (void)s; (void)dl;
+    Rect r = { x, y, w, h };
+    wextension("std:dirty", &r);
 }
 
 #define W_KEY_DOWN(s, scancode) ((s)->keys[scancode] != 0)

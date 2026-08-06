@@ -57,8 +57,9 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t vram_offset;
-    uint32_t dirty_rects;
 } WagnosticState;
+
+static_assert(sizeof(WagnosticState) == 44, "WagnosticState size mismatch — check struct layout");
 
 static uint32_t g_keyboard_wasm_ptr = 0;
 static uint32_t g_mouse_wasm_ptr = 0;
@@ -126,7 +127,7 @@ static inline uint32_t compute_bpp(WagnosticState* s) {
     return 64;
 }
 
-static_assert(sizeof(WagnosticState) == 48, "WagnosticState size mismatch — check struct layout");
+static_assert(sizeof(WagnosticState) == 44, "WagnosticState size mismatch — check struct layout");
 
 /* ================================================================
  * Globals
@@ -1031,42 +1032,12 @@ int main(int argc, char **argv) {
                                  win_w, win_h, W, H);
         }
 
-        /* ---- Step 4: Render dirty rects ---- */
+        /* ---- Step 4: Render frame ---- */
         if (state) {
             uint8_t *vram = get_vram(state);
 
-            uint32_t dirty_count = 0;
-            int32_t* rects = NULL;
-            if (state->dirty_rects) {
-                dirty_count = *(uint32_t*)(g_mem + state->dirty_rects);
-                rects = (int32_t*)(g_mem + state->dirty_rects + 4);
-            }
-
-            if (vram && dirty_count > 0) {
-                if (dirty_count == 1) {
-                    int rx = rects[0];
-                    int ry = rects[1];
-                    int rw = rects[2];
-                    int rh = rects[3];
-                    if (rx == 0 && ry == 0 &&
-                        (uint32_t)rw == W && (uint32_t)rh == H) {
-                        render_fullscreen(texture, vram, state, W, H, BPP);
-                    } else {
-                        render_rect_to_texture(texture, vram, state,
-                            rx, ry, rw, rh, W, H, BPP);
-                    }
-                } else {
-                    uint32_t count = dirty_count;
-                    if (count > 32) count = 32;
-                    for (uint32_t i = 0; i < count; i++) {
-                        int rx = rects[i*4];
-                        int ry = rects[i*4+1];
-                        int rw = rects[i*4+2];
-                        int rh = rects[i*4+3];
-                        render_rect_to_texture(texture, vram, state,
-                            rx, ry, rw, rh, W, H, BPP);
-                    }
-                }
+            if (vram) {
+                render_fullscreen(texture, vram, state, W, H, BPP);
 
                 int win_w, win_h;
                 SDL_GetWindowSize(window, &win_w, &win_h);
@@ -1076,8 +1047,6 @@ int main(int argc, char **argv) {
                 SDL_RenderClear(renderer);
                 SDL_RenderCopy(renderer, texture, NULL, &dst);
                 SDL_RenderPresent(renderer);
-
-                state->dirty_rects = 0;
             }
         }
 

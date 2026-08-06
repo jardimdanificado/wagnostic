@@ -76,9 +76,8 @@ The host applies sensible defaults so a ROM with just `wupdate()` runs immediate
 | `a_bits` | 32 | 0 | Alpha bit count |
 | `a_shift` | 36 | 0 | Alpha bit shift |
 | `vram_offset` | 40 | 0 | Offset from state base to VRAM buffer |
-| `dirty_rects` | 44 | 0 | Pointer to {uint32 count; Rect rects[32];} |
 
-**Total struct size: 48 bytes.**
+**Total struct size: 44 bytes.**
 
 The minimal viable ROM:
 
@@ -98,10 +97,6 @@ int wupdate() {
         s.vram_offset = sizeof(State);
     }
     // draw into vram ...
-    static struct { uint32_t count; Rect rects[32]; } my_dirty;
-    my_dirty.count = 1;
-    my_dirty.rects[0] = (Rect){0, 0, 320, 240};
-    s.dirty_rects = (uint32_t)&my_dirty;
     return (int)&s;
 }
 ```

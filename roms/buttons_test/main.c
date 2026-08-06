@@ -1,4 +1,3 @@
-typedef struct { int x, y, w, h; } Rect;
 #include <stdint.h>
 #include <stddef.h>
 
@@ -11,7 +10,6 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t vram_offset;
-    uint32_t dirty_rects;
 } State;
 
 typedef struct {
@@ -19,8 +17,6 @@ typedef struct {
     uint32_t buttons;
     int32_t wheel;
 } MouseState;
-
-static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
 
 static struct {
     State s;
@@ -30,11 +26,6 @@ static struct {
 static uint16_t* _fb = (uint16_t*)rom.vram;
 
 #define W_RGB565(r, g, b) (uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3))
-
-static void redraw() {
-    my_dirty_list.count = 1;
-    my_dirty_list.rects[0] = (Rect){0, 0, (int)rom.s.width, (int)rom.s.height};
-}
 
 static void draw_rect(int x, int y, int w, int h, uint16_t color) {
     for (int iy = y; iy < y + h; iy++) {
@@ -47,6 +38,8 @@ static void draw_rect(int x, int y, int w, int h, uint16_t color) {
 }
 
 static int initialized = 0;
+static uint8_t keys_buf[256];
+static MouseState mouse_buf;
 static uint8_t* keys = NULL;
 static MouseState* mouse = NULL;
 
@@ -59,8 +52,8 @@ int wupdate() {
         rom.s.b_bits = 5; rom.s.b_shift = 0;
         rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
 
-        keys = (uint8_t*)wextension("std:keyboard", NULL);
-        mouse = (MouseState*)wextension("std:mouse", NULL);
+        keys = (uint8_t*)wextension("std:keyboard", keys_buf);
+        mouse = (MouseState*)wextension("std:mouse", &mouse_buf);
 
         initialized = 1;
     }
@@ -86,7 +79,5 @@ int wupdate() {
     draw_rect(mx - 2, my - 2, 5, 5, W_RGB565(255, 255, 255));
     if (mbtns & 1) draw_rect(mx - 4, my - 4, 9, 9, W_RGB565(255, 0, 0));
 
-    redraw();
-    rom.s.dirty_rects = (uint32_t)&my_dirty_list;
     return (int)&rom.s;
 }

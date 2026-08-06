@@ -4,8 +4,6 @@
 // Import Wagnostic extension dispatcher
 extern void* wextension(const char* name, void* ptr);
 
-typedef struct { int x, y, w, h; } Rect;
-
 typedef struct {
     uint32_t width, height;
     uint32_t r_bits, r_shift;
@@ -13,10 +11,7 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t vram_offset;
-    uint32_t dirty_rects;
 } State;
-
-static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
 
 static struct {
     State s;
@@ -42,11 +37,11 @@ int wupdate() {
     if (!initialized) {
         rom.s.width = 320;
         rom.s.height = 240;
-        rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
         rom.s.r_bits = 5; rom.s.r_shift = 11;
         rom.s.g_bits = 6; rom.s.g_shift = 5;
         rom.s.b_bits = 5; rom.s.b_shift = 0;
-        
+        rom.s.vram_offset = (uint32_t)((uint8_t*)rom.vram - (uint8_t*)&rom.s);
+
         // Test 1: Unknown extension returns NULL
         void* res1 = wextension("unknown:custom_feature", NULL);
         
@@ -59,9 +54,12 @@ int wupdate() {
         void* res3 = wextension("title.get", get_buf);
 
         // Test 4: Peripheral std:* extensions
-        void* kbd_ptr = wextension("std:keyboard", NULL);
-        void* mouse_ptr = wextension("std:mouse", NULL);
-        void* gp_ptr = wextension("std:gamepad", NULL);
+        static uint8_t kbd_buf[256];
+        static struct { int32_t x, y; uint32_t b; int32_t w; } m_buf;
+        static uint32_t gp_buf;
+        void* kbd_ptr = wextension("std:keyboard", kbd_buf);
+        void* mouse_ptr = wextension("std:mouse", &m_buf);
+        void* gp_ptr = wextension("std:gamepad", &gp_buf);
 
         test_passed = (res1 == NULL) && (res2 != NULL) && (res3 != NULL) && 
                       (strcmp(get_buf, my_title) == 0) &&
@@ -74,10 +72,6 @@ int wupdate() {
     for (int i = 0; i < 320 * 240; i++) {
         fb[i] = color;
     }
-
-    my_dirty_list.count = 1;
-    my_dirty_list.rects[0] = (Rect){0, 0, 320, 240};
-    rom.s.dirty_rects = (uint32_t)&my_dirty_list;
 
     return (int)&rom.s;
 }

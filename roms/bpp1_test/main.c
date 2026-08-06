@@ -1,4 +1,3 @@
-typedef struct { int x, y, w, h; } Rect;
 // bpp1_test - 1bpp (Monochrome) example
 #include <stdint.h>
 
@@ -9,10 +8,7 @@ typedef struct {
     uint32_t b_bits, b_shift;
     uint32_t a_bits, a_shift;
     uint32_t vram_offset;
-    uint32_t dirty_rects;
 } State;
-
-static struct { uint32_t count; Rect rects[32]; } my_dirty_list;
 
 static struct {
     State s;
@@ -60,8 +56,5 @@ int wupdate() {
         }
     }
     
-    my_dirty_list.count = 1;
-    my_dirty_list.rects[0] = (Rect){0, 0, 320, 240};
-    rom.s.dirty_rects = (uint32_t)&my_dirty_list;
     return (int)&rom.s;
 }
