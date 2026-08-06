@@ -90,3 +90,22 @@ static_assert(sizeof(WagnosticState) == 1024, "Size mismatch");
 ```
 
 If a compiler inserts unexpected padding, the build fails immediately.
+
+## Host Extensions (`wextension`)
+
+Custom hosts can expose non-standard host functionality to ROMs through a single imported dispatcher function:
+
+```c
+void* wextension(const char* name, void* ptr);
+```
+
+WASM import signature: `(import "env" "wextension" (func (param i32 i32) (result i32)))`.
+
+### Semantics:
+- `name`: Null-terminated string identifying the extension name/command.
+- `ptr`: Untyped raw pointer (`void*` / offset in WASM linear memory) passed from ROM to host, or `NULL`.
+- **Return Value**:
+  - `NULL` (`0`): Returned if the requested extension is not supported by the host, or if the extension executed without returning data.
+  - `void*` (non-zero offset): Pointer to return/response data.
+- Reference hosts provide a default stub for `env.wextension` returning `0` (`NULL`), guaranteeing backward compatibility.
+

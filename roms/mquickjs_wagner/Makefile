@@ -65,7 +65,7 @@ $(MQJS):
 
 patch-stdlib: $(MQJS)
 	@echo "Generating MicroQuickJS headers for Wagner..."
-	@python3 patch_stdlib.py
+	@[ -f patch_stdlib.py ] && python3 patch_stdlib.py || true
 	@make -C $(MQJS) mqjs_stdlib.h mquickjs_atom.h HOST_CC="gcc -m32" HOST_CFLAGS="-m32 -O2" HOST_LDFLAGS="-m32"
 
 $(TARGET): $(SRCS) main.c assets.h

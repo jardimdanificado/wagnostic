@@ -247,11 +247,51 @@ async function main() {
     process.exit(1);
   }
 
-  const wasmBytes = fs.readFileSync(absoluteRomPath);
+  let currentTitle = 'Wagnostic Host (Node.js)';
+  let lastTitleWasmPtr = 0;
+
+  function readWasmString(ptr) {
+    if (!ptr || !memory) return '';
+    const bytes = new Uint8Array(memory.buffer, ptr);
+    let len = 0;
+    while (len < 1024 && bytes[len] !== 0) len++;
+    return new TextDecoder().decode(bytes.subarray(0, len));
+  }
+
+  function writeWasmString(ptr, str) {
+    if (!ptr || !memory) return;
+    const encoder = new TextEncoder();
+    const encoded = encoder.encode(str);
+    const bytes = new Uint8Array(memory.buffer, ptr, encoded.length + 1);
+    bytes.set(encoded);
+    bytes[encoded.length] = 0;
+  }
 
   const importObject = {
     env: {
       memory: new WebAssembly.Memory({ initial: 16 }),
+      wextension: (namePtr, dataPtr) => {
+        const name = readWasmString(namePtr);
+        if (name === 'title.set') {
+          if (dataPtr) {
+            currentTitle = readWasmString(dataPtr);
+            lastTitleWasmPtr = dataPtr;
+            if (window && !window.destroyed) {
+              try { window.setTitle(currentTitle); } catch (e) {}
+            }
+            return dataPtr;
+          }
+          return 0;
+        }
+        if (name === 'title.get') {
+          if (dataPtr) {
+            writeWasmString(dataPtr, currentTitle);
+            return dataPtr;
+          }
+          return lastTitleWasmPtr;
+        }
+        return 0;
+      },
       abort: () => console.error('WASM Aborted'),
     },
     wasi_snapshot_preview1: {
@@ -289,7 +329,6 @@ async function main() {
   let currentWidth = 0;
   let currentHeight = 0;
   let currentScale = 1;
-  let currentTitle = '';
 
   let isRunning = true;
   let statePtr = 0;

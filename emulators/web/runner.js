@@ -995,7 +995,50 @@
       wasmBuffer = mainWasm.buffer.slice(mainWasm.byteOffset, mainWasm.byteOffset + mainWasm.byteLength);
     }
 
-    const wasmImports = {};
+    let windowTitle = 'Wagnostic';
+    let lastTitleWasmPtr = 0;
+
+    function readWasmString(ptr) {
+      if (!ptr || !wasmMemory) return '';
+      const bytes = new Uint8Array(wasmMemory.buffer, ptr);
+      let len = 0;
+      while (len < 1024 && bytes[len] !== 0) len++;
+      return new TextDecoder().decode(bytes.subarray(0, len));
+    }
+
+    function writeWasmString(ptr, str) {
+      if (!ptr || !wasmMemory) return;
+      const encoder = new TextEncoder();
+      const encoded = encoder.encode(str);
+      const bytes = new Uint8Array(wasmMemory.buffer, ptr, encoded.length + 1);
+      bytes.set(encoded);
+      bytes[encoded.length] = 0;
+    }
+
+    const wasmImports = {
+      env: {
+        wextension: function(namePtr, dataPtr) {
+          const name = readWasmString(namePtr);
+          if (name === 'title.set') {
+            if (dataPtr) {
+              windowTitle = readWasmString(dataPtr);
+              lastTitleWasmPtr = dataPtr;
+              document.title = windowTitle;
+              return dataPtr;
+            }
+            return 0;
+          }
+          if (name === 'title.get') {
+            if (dataPtr) {
+              writeWasmString(dataPtr, windowTitle);
+              return dataPtr;
+            }
+            return lastTitleWasmPtr;
+          }
+          return 0;
+        }
+      }
+    };
 
     WebAssembly.instantiate(wasmBuffer, wasmImports).then(function (result) {
       wasmInstance = result.instance;

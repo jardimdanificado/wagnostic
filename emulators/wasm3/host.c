@@ -718,6 +718,48 @@ static void refresh_memory(void) {
     g_mem = m3_GetMemory(g_runtime, &g_mem_len, 0);
 }
 
+static SDL_Window *g_window = NULL;
+static char g_window_title[256] = "Wagnostic";
+static uint32_t g_title_wasm_ptr = 0;
+
+m3ApiRawFunction(host_wextension) {
+    m3ApiReturnType(uint32_t);
+    m3ApiGetArg(uint32_t, name_ptr);
+    m3ApiGetArg(uint32_t, data_ptr);
+
+    refresh_memory();
+    if (!g_mem || name_ptr >= g_mem_len) {
+        m3ApiReturn(0);
+    }
+
+    const char* name = (const char*)(g_mem + name_ptr);
+
+    if (strcmp(name, "title.set") == 0) {
+        if (data_ptr < g_mem_len) {
+            const char* new_title = (const char*)(g_mem + data_ptr);
+            strncpy(g_window_title, new_title, sizeof(g_window_title) - 1);
+            g_window_title[sizeof(g_window_title) - 1] = '\0';
+            g_title_wasm_ptr = data_ptr;
+            if (g_window) {
+                SDL_SetWindowTitle(g_window, g_window_title);
+            }
+            m3ApiReturn(data_ptr);
+        }
+        m3ApiReturn(0);
+    }
+
+    if (strcmp(name, "title.get") == 0) {
+        if (data_ptr != 0 && data_ptr < g_mem_len) {
+            char* dest = (char*)(g_mem + data_ptr);
+            strncpy(dest, g_window_title, g_mem_len - data_ptr);
+            m3ApiReturn(data_ptr);
+        }
+        m3ApiReturn(g_title_wasm_ptr);
+    }
+
+    m3ApiReturn(0);
+}
+
 /* ================================================================
  * main
  * ================================================================ */
@@ -762,6 +804,8 @@ int main(int argc, char **argv) {
     result = m3_LoadModule(g_runtime, g_module);
     if (result) { fprintf(stderr, "Load error: %s\n", result); m3_FreeRuntime(g_runtime); m3_FreeEnvironment(env); free(wasm_data); return 1; }
 
+    m3_LinkRawFunction(g_module, "env", "wextension", "i(**)", &host_wextension);
+
     /* ---- Find wupdate ---- */
     IM3Function f_wupdate = NULL;
     result = m3_FindFunction(&f_wupdate, g_runtime, "wupdate");
@@ -800,7 +844,7 @@ int main(int argc, char **argv) {
 
     /* ---- Create window ---- */
     SDL_Window *window = SDL_CreateWindow(
-        "Wagnostic",
+        g_window_title,
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         (int)(W * SCALE), (int)(H * SCALE),
         SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
@@ -809,6 +853,7 @@ int main(int argc, char **argv) {
         SDL_Quit(); m3_FreeRuntime(g_runtime); m3_FreeEnvironment(env); free(wasm_data);
         return 1;
     }
+    g_window = window;
 
     SDL_Renderer *renderer = SDL_CreateRenderer(window, -1,
         SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);

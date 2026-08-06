@@ -37,15 +37,14 @@ struct WagnosticContext {
     uint32_t ticks;
     int32_t session_unique;
     uint64_t frame_count;
+    char title[256];
+    uint32_t title_wasm_ptr;
 };
 
 static int32_t generate_unique_id(void) {
     uint64_t t = (uint64_t)time(NULL);
     uint64_t pc = 0;
 #if defined(_WIN32)
-    LARGE_INTEGER count;
-    QueryPerformanceCounter(&count);
-    pc = (uint64_t)count.QuadPart;
     uint32_t pid = (uint32_t)GetCurrentProcessId();
 #elif defined(__unix__) || defined(__APPLE__) || defined(__linux__)
     struct timespec ts;
@@ -66,7 +65,43 @@ static int32_t generate_unique_id(void) {
     return res ? res : 1;
 }
 
+m3ApiRawFunction(host_wextension) {
+    m3ApiReturnType(uint32_t);
+    m3ApiGetArg(uint32_t, name_ptr);
+    m3ApiGetArg(uint32_t, data_ptr);
 
+    uint32_t mem_len = 0;
+    uint8_t* mem = m3_GetMemory(runtime, &mem_len, 0);
+    if (!mem || name_ptr >= mem_len) m3ApiReturn(0);
+
+    const char* name = (const char*)(mem + name_ptr);
+    WagnosticContext* ctx = (WagnosticContext*)m3_GetUserData(runtime);
+
+    if (strcmp(name, "title.set") == 0) {
+        if (data_ptr < mem_len) {
+            const char* new_title = (const char*)(mem + data_ptr);
+            if (ctx) {
+                strncpy(ctx->title, new_title, sizeof(ctx->title) - 1);
+                ctx->title[sizeof(ctx->title) - 1] = '\0';
+                ctx->title_wasm_ptr = data_ptr;
+            }
+            m3ApiReturn(data_ptr);
+        }
+        m3ApiReturn(0);
+    }
+
+    if (strcmp(name, "title.get") == 0) {
+        if (data_ptr != 0 && data_ptr < mem_len) {
+            if (ctx) {
+                strncpy((char*)(mem + data_ptr), ctx->title, mem_len - data_ptr);
+            }
+            m3ApiReturn(data_ptr);
+        }
+        m3ApiReturn(ctx ? ctx->title_wasm_ptr : 0);
+    }
+
+    m3ApiReturn(0);
+}
 
 static void refresh_memory(WagnosticContext* ctx) {
     if (!ctx || !ctx->runtime) return;
@@ -116,7 +151,8 @@ WagnosticContext* wagnostic_create(const uint8_t* wasm_bytes, size_t wasm_size, 
         return NULL;
     }
 
-    ctx->runtime = m3_NewRuntime(ctx->env, stack_size_bytes, NULL);
+    strncpy(ctx->title, "Wagnostic (Gifnostic)", sizeof(ctx->title) - 1);
+    ctx->runtime = m3_NewRuntime(ctx->env, stack_size_bytes, ctx);
     if (!ctx->runtime) {
         wagnostic_destroy(ctx);
         return NULL;
@@ -135,6 +171,8 @@ WagnosticContext* wagnostic_create(const uint8_t* wasm_bytes, size_t wasm_size, 
         wagnostic_destroy(ctx);
         return NULL;
     }
+
+    m3_LinkRawFunction(ctx->module, "env", "wextension", "i(**)", &host_wextension);
 
     res = m3_FindFunction(&ctx->f_wupdate, ctx->runtime, "wupdate");
     if (res || !ctx->f_wupdate) {
