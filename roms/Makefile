@@ -52,21 +52,89 @@ test:
 
 test-wasm3: all
 	@echo "Launching all ROMs simultaneously with WASM3 host ($(WASM3_BIN))..."
-	@for rom in *.wasm; do \
-		echo "Starting $$rom..."; \
-		$(WASM3_BIN) $$rom & \
-	done
+	@rm -rf /tmp/wagnostic_test_logs && mkdir -p /tmp/wagnostic_test_logs
+	@pids=""; \
+	for rom in *.wasm; do \
+		($(WASM3_BIN) $$rom > /tmp/wagnostic_test_logs/$$rom.log 2>&1; echo $$? > /tmp/wagnostic_test_logs/$$rom.code) & \
+		pids="$$pids $$!"; \
+	done; \
+	sleep 1; \
+	failed=0; \
+	echo ""; \
+	echo "===================================================="; \
+	echo " WASM3 INITIALIZATION MONITOR"; \
+	echo "===================================================="; \
+	for rom in *.wasm; do \
+		if [ -f /tmp/wagnostic_test_logs/$$rom.code ]; then \
+			code=$$(cat /tmp/wagnostic_test_logs/$$rom.code); \
+			if [ "$$code" != "0" ]; then \
+				printf "  [\033[31mFAILED\033[0m] %s (Crashed on startup with code %s)\n" "$$rom" "$$code"; \
+				cat /tmp/wagnostic_test_logs/$$rom.log; \
+				failed=$$((failed + 1)); \
+			fi; \
+		else \
+			printf "  [\033[32m RUNNING \033[0m] %s\n" "$$rom"; \
+		fi; \
+	done; \
+	echo "===================================================="; \
+	if [ $$failed -gt 0 ]; then exit 1; fi
 
 test-node: all
 	@echo "Launching all ROMs simultaneously with Node.js host ($(NODE_HOST))..."
-	@for rom in *.wasm; do \
-		echo "Starting $$rom..."; \
-		node $(NODE_HOST) $$rom & \
-	done
+	@rm -rf /tmp/wagnostic_test_logs && mkdir -p /tmp/wagnostic_test_logs
+	@pids=""; \
+	for rom in *.wasm; do \
+		(node $(NODE_HOST) $$rom > /tmp/wagnostic_test_logs/$$rom.log 2>&1; echo $$? > /tmp/wagnostic_test_logs/$$rom.code) & \
+		pids="$$pids $$!"; \
+	done; \
+	sleep 1; \
+	failed=0; \
+	echo ""; \
+	echo "===================================================="; \
+	echo " NODE.JS INITIALIZATION MONITOR"; \
+	echo "===================================================="; \
+	for rom in *.wasm; do \
+		if [ -f /tmp/wagnostic_test_logs/$$rom.code ]; then \
+			code=$$(cat /tmp/wagnostic_test_logs/$$rom.code); \
+			if [ "$$code" != "0" ]; then \
+				printf "  [\033[31mFAILED\033[0m] %s (Crashed on startup with code %s)\n" "$$rom" "$$code"; \
+				cat /tmp/wagnostic_test_logs/$$rom.log; \
+				failed=$$((failed + 1)); \
+			fi; \
+		else \
+			printf "  [\033[32m RUNNING \033[0m] %s\n" "$$rom"; \
+		fi; \
+	done; \
+	echo "===================================================="; \
+	if [ $$failed -gt 0 ]; then exit 1; fi
 
 test-gifnostic: all
 	@echo "Running all ROMs simultaneously with Gifnostic headless host ($(GIFNOSTIC_BIN))..."
-	@for rom in *.wasm; do \
-		echo "Testing $$rom..."; \
-		$(GIFNOSTIC_BIN) -n 30 -d $$rom & \
-	done
+	@rm -rf /tmp/wagnostic_test_logs && mkdir -p /tmp/wagnostic_test_logs
+	@pids=""; \
+	for rom in *.wasm; do \
+		($(GIFNOSTIC_BIN) -n 30 $$rom > /tmp/wagnostic_test_logs/$$rom.log 2>&1; echo $$? > /tmp/wagnostic_test_logs/$$rom.code) & \
+		pids="$$pids $$!"; \
+	done; \
+	for pid in $$pids; do wait $$pid 2>/dev/null; done; \
+	echo ""; \
+	echo "===================================================="; \
+	echo " GIFNOSTIC MASS TEST RESULTS"; \
+	echo "===================================================="; \
+	failed=0; total=0; \
+	for rom in *.wasm; do \
+		total=$$((total + 1)); \
+		code=$$(cat /tmp/wagnostic_test_logs/$$rom.code 2>/dev/null || echo 1); \
+		if [ "$$code" = "0" ]; then \
+			printf "  [\033[32m  OK  \033[0m] %s\n" "$$rom"; \
+		else \
+			printf "  [\033[31mFAILED\033[0m] %s (Exit Code: %s)\n" "$$rom" "$$code"; \
+			cat /tmp/wagnostic_test_logs/$$rom.log; \
+			failed=$$((failed + 1)); \
+		fi; \
+	done; \
+	echo "===================================================="; \
+	echo " Total: $$total | Passed: $$((total - failed)) | Failed: $$failed"; \
+	echo "===================================================="; \
+	rm -rf /tmp/wagnostic_test_logs; \
+	if [ $$failed -gt 0 ]; then exit 1; fi
