@@ -37,6 +37,7 @@ class CommStdioExtension {
     this.stdinInitialized = true;
 
     if (typeof process !== 'undefined' && process.stdin) {
+      if (process.stdin.unref) process.stdin.unref();
       process.stdin.on('data', (chunk) => {
         const bytes = new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength);
         this.stdinQueue.push(bytes);

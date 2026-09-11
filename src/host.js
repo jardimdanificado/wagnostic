@@ -13,6 +13,7 @@ const { WWorker } = require('./worker');
 
 class Piolho {
   constructor(options = {}) {
+    this.name = options.name || 'host';
     this.intervalMs = options.intervalMs || (options.tickRate ? 1000 / options.tickRate : (options.fps ? 1000 / options.fps : 1000 / 30));
     this.extensions = options.extensions || new ExtensionRegistry();
 

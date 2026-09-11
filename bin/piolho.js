@@ -30,6 +30,23 @@ const BUILTIN_EXTENSIONS = {
   'logger': loggerExtension
 };
 
+function formatPayload(data) {
+  if (!data || data.length === 0) return '(0 bytes)';
+  let isText = true;
+  for (let i = 0; i < Math.min(data.length, 64); i++) {
+    const b = data[i];
+    if ((b < 32 && b !== 9 && b !== 10 && b !== 13) || b > 126) {
+      isText = false;
+      break;
+    }
+  }
+  if (isText) {
+    return JSON.stringify(new TextDecoder().decode(data));
+  }
+  const hex = Array.from(data.slice(0, 16)).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+  return `[${hex}${data.length > 16 ? '...' : ''}]`;
+}
+
 function printHelp() {
   console.log(`
 Piolho 2.0 — Universal WASM Host & Rendezvous IPC Coordinator
@@ -47,9 +64,7 @@ Options:
   -h, --help               Display this help message
 
 Notes:
-  - Communication extensions (comm:tcp, comm:pipe, comm:ws, comm:udp, comm:workers) are always enabled.
-  - Standard extensions (clock, logger, etc.) are strictly opt-in via -e/--ext.
-  - When -E <path> is specified, requesting 'abc' will search for path/abc.js.
+  - All rendezvous IPC messages (tell/hear) are printed to stdout.
   - Instance name defaults to file basename if not specified as 'path.wasm:name'.
 
 Examples:
@@ -126,6 +141,13 @@ async function main() {
   }
 
   const host = new Piolho(hostOptions);
+
+  // Print all rendezvous IPC messages (sent and received)
+  host.ipc.onMessage = ({ sender, target, size, data, op }) => {
+    const preview = formatPayload(data);
+    const arrow = op === 'hear' ? '<-' : '->';
+    console.log(`[IPC ${op.toUpperCase()}] ${sender} ${arrow} ${target} (${size} bytes) ${preview}`);
+  };
 
   // Hardcoded communication extensions (auto-checked against environment)
   host.use(commTcpExtension)

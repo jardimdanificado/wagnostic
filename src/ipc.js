@@ -18,6 +18,13 @@ const ERROR_STATE     = -6;
 class IpcEngine {
   constructor() {
     this.pendingOps = []; // { worker, caller, target, dataPtr, size, opType ('HEAR'|'TELL'), data: Uint8Array }
+    this.onMessage = null; // ({ sender, target, size, data, op }) => void
+  }
+
+  logMessage(sender, target, size, data, op) {
+    if (typeof this.onMessage === 'function') {
+      this.onMessage({ sender, target, size, data, op });
+    }
   }
 
   ask(callerWorker, targetName, dataPtr, size, timeout, workerMap) {
@@ -33,7 +40,9 @@ class IpcEngine {
 
     // Check if there is already a matching TELL waiting for this HEAR
     const matchIdx = this.pendingOps.findIndex(
-      op => op.opType === 'TELL' && (isAny || op.caller === targetName) && (!op.target || op.target === callerWorker.name)
+      op => op.opType === 'TELL' &&
+            (isAny || op.caller === targetName) &&
+            (!op.target || op.target === callerWorker.name)
     );
 
     if (matchIdx !== -1) {
@@ -43,6 +52,7 @@ class IpcEngine {
       if (match.size > 0 && match.data) {
         new Uint8Array(callerWorker.memory.buffer, dataPtr, match.size).set(match.data);
       }
+      this.logMessage(match.caller, callerWorker.name, match.size, match.data, 'hear');
       return OK;
     }
 
@@ -72,22 +82,30 @@ class IpcEngine {
       if (size > 0) {
         dataCopy.set(new Uint8Array(callerWorker.memory.buffer, dataPtr, size));
       }
+      this.logMessage(callerWorker.name, targetName, size, dataCopy, 'tell');
       targetPeer.sendTell(callerWorker.name, dataCopy);
       return OK;
     }
 
     // Check if there is already a matching HEAR waiting for this TELL
     const matchIdx = this.pendingOps.findIndex(
-      op => op.opType === 'HEAR' && (!op.target || op.target === callerWorker.name) && op.caller === targetName
+      op => op.opType === 'HEAR' &&
+            (!op.target || op.target === callerWorker.name) &&
+            op.caller === targetName
     );
 
     if (matchIdx !== -1) {
       const match = this.pendingOps.splice(matchIdx, 1)[0];
       if (size > match.size) return ERROR_SIZE;
+      let dataCopy = null;
       if (size > 0) {
+        dataCopy = new Uint8Array(size);
         const src = new Uint8Array(callerWorker.memory.buffer, dataPtr, size);
+        dataCopy.set(src);
         new Uint8Array(match.worker.memory.buffer, match.dataPtr, size).set(src);
       }
+      match.worker.lastIpcSender = callerWorker.name;
+      this.logMessage(callerWorker.name, match.caller, size, dataCopy, 'tell');
       return OK;
     }
 
@@ -98,6 +116,8 @@ class IpcEngine {
     if (size > 0) {
       dataCopy.set(new Uint8Array(callerWorker.memory.buffer, dataPtr, size));
     }
+
+    this.logMessage(callerWorker.name, targetName, size, dataCopy, 'tell');
 
     this.pendingOps.push({
       worker: callerWorker,
@@ -117,9 +137,13 @@ class IpcEngine {
   receiveRemoteTell(senderName, targetName, payloadBytes) {
     const dataCopy = payloadBytes instanceof Uint8Array ? payloadBytes : new Uint8Array(payloadBytes);
 
+    this.logMessage(senderName, targetName || '*', dataCopy.length, dataCopy, 'recv');
+
     // Check if there is a HEAR waiting for this message
     const matchIdx = this.pendingOps.findIndex(
-      op => op.opType === 'HEAR' && (!op.target || op.target === senderName) && (!targetName || op.caller === targetName)
+      op => op.opType === 'HEAR' &&
+            (!op.target || op.target === senderName) &&
+            (!targetName || op.caller === targetName)
     );
 
     if (matchIdx !== -1) {

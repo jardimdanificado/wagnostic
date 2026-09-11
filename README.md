@@ -1,20 +1,21 @@
 # Piolho
 
-Minimalist, modular, platform-agnostic WebAssembly multi-instance runtime and rendezvous communication coordinator.
+Minimalist, platform-agnostic WebAssembly multi-instance runtime and synchronous rendezvous communication coordinator.
 
-- **[ABI.md](ABI.md)**: Binary ABI specification.
+- **[ABI.md](ABI.md)**: Binary ABI specification (`update`, `ask`, `tell`, `hear`).
+
 ---
 
 ## 1. Quick Start (Library Usage)
 
-Piolho is a zero-dependency WebAssembly runtime library for Node.js, `tjs` (txiki.js), Bun, and Deno:
+Piolho is a zero-dependency WebAssembly runtime for Node.js, `tjs` (txiki.js), Bun, and Deno:
 
 ```javascript
 const { Piolho, clockExtension, loggerExtension } = require('piolho');
 
 async function main() {
-  const host = new Piolho(); // 0 extensions by default
-  host.use(clockExtension).use(loggerExtension); // opt-in extensions
+  const host = new Piolho();
+  host.use(clockExtension).use(loggerExtension);
 
   await host.loadRom('roms/ipc_producer.wasm', 'producer');
   await host.loadRom('roms/ipc_consumer.wasm', 'consumer');
