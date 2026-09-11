@@ -25,7 +25,7 @@ ROM_DIRS = \
 
 
 WAGNOSTIC_BIN ?= $(firstword $(wildcard ../build/wagnostic ../wagnostic wagnostic))
-NODE_HOST ?= ../runners/node/wagnostic.js
+NODE_HOST ?= ../bin/wagnostic.js
 
 RUNNER ?= native
 

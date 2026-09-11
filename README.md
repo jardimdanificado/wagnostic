@@ -10,32 +10,31 @@ Minimalist, modular, platform-agnostic WebAssembly multimedia runtime.
 
 ## Quick Start
 
-### 1. Native Runner (100% libc / POSIX C + wasm3)
-Zero windowing dependencies (pure ANSI TrueColor terminal renderer + GIF export):
+### 1. Universal Host (Node.js & txiki.js — Zero External Dependencies)
+The primary and most portable host ecosystem. Works out of the box with Node.js, `tjs` (txiki.js), Bun, or Deno:
+```bash
+# Run with Node.js (via root CLI or npm start):
+node bin/wagnostic.js roms/display_test.wasm
+
+# Run with txiki.js:
+tjs bin/wagnostic.js roms/display_test.wasm
+
+# Multi-ROM Parallel Path Tracer with 4 Workers & GIF Export:
+node bin/wagnostic.js roms/pathtracer_master.wasm:master \
+                      roms/pathtracer_worker.wasm:worker0 \
+                      roms/pathtracer_worker.wasm:worker1 \
+                      roms/pathtracer_worker.wasm:worker2 \
+                      roms/pathtracer_worker.wasm:worker3 -g render.gif -n 30
+```
+
+### 2. Native C Host (100% libc / POSIX C + wasm3)
+Native C host for bare environments without JavaScript runtime:
 ```bash
 # Build native runner:
 mkdir -p build && cd build && cmake .. && cmake --build .
-# Or via runners/native/Makefile:
-make -C runners/native
 
-# Interactive Terminal Execution:
-./build/wagnostic ../roms/display_test.wasm
-
-# Headless Execution & GIF Export:
-./build/wagnostic -g output.gif -n 60 ../roms/display_test.wasm
-```
-
-### 2. Node.js & Txiki.js Runner (Zero npm dependencies)
-Works out of the box with Node.js or `tjs` (txiki.js):
-```bash
-# Interactive Terminal Run:
-node runners/node/wagnostic.js roms/display_test.wasm
-
-# With Txiki:
-tjs run runners/node/wagnostic.js roms/display_test.wasm
-
-# Headless GIF Export:
-node runners/node/wagnostic.js -g output.gif -n 60 roms/display_test.wasm
+# Run native host:
+./build/wagnostic roms/display_test.wasm -g output.gif -n 30
 ```
 
 ---
@@ -89,14 +88,16 @@ For full memory layouts, struct fields, and specifications, see **[STD.md](STD.m
 
 ---
 
-## Runners & Templates
+## Runners & Architecture
  
-1. **Official Runners (`runners/`)**:
-   - **`runners/native/`**: 100% `libc` / POSIX C runner with wasm3. Renders directly in terminal with 24-bit ANSI TrueColor half-blocks (`▀`) and headless GIF encoder (`-g file.gif`). Zero SDL2 / OpenGL dependencies!
-   - **`runners/node/`**: Universal zero-dependency JavaScript runner compatible with both **Node.js** and **txiki.js (`tjs`)**. ANSI TrueColor terminal renderer + pure JS GIF encoder.
-2. **Bare Reference Templates (`examples/`)**:
-   - **`examples/bare_runner.js`**: Pure JavaScript host (~60 lines) with custom extension dispatch.
-   - **`examples/bare_runner.c`**: Pure C host using wasm3 (~90 lines).
+1. **Universal Host (`bin/wagnostic.js`, `src/`)**:
+   - Universal zero-dependency JavaScript host compatible with **Node.js**, **txiki.js (`tjs`)**, **Bun**, and **Deno**.
+   - Modular Extension Registry (`ExtensionRegistry`), Multi-ROM Rendezvous IPC, and pure JS GIF encoder.
+2. **Native C Host (`runners/native/`, `build/wagnostic`)**:
+   - 100% `libc` / POSIX C runner with wasm3. Multi-threaded OS worker pool with zero external runtime dependencies.
+3. **Bare Reference Templates (`examples/`)**:
+   - **`examples/bare_runner.js`**: Minimal standalone JavaScript host (~60 lines).
+   - **`examples/bare_runner.c`**: Minimal standalone C host using wasm3 (~90 lines).
  
 ---
  

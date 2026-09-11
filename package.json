@@ -1,0 +1,25 @@
+{
+  "name": "wagnostic",
+  "version": "2.0.0",
+  "description": "Universal WASM Host & Multi-ROM Rendezvous IPC Runtime",
+  "main": "src/index.js",
+  "bin": {
+    "wagnostic": "bin/wagnostic.js"
+  },
+  "scripts": {
+    "start": "node bin/wagnostic.js",
+    "test": "make -C roms test-node"
+  },
+  "keywords": [
+    "wagnostic",
+    "wasm",
+    "webassembly",
+    "host",
+    "runtime",
+    "ipc",
+    "txiki",
+    "node"
+  ],
+  "author": "",
+  "license": "MIT"
+}

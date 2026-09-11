@@ -121,9 +121,9 @@ The official standard library of extensions is specified in **[STD.md](STD.md)**
 
 ---
 
-## 6. Official Runners & Minimal Templates
-
-- **`runners/native/`**: 100% `libc` / POSIX C runner with wasm3. Renders ANSI TrueColor half-blocks (`▀`) in terminal with headless GIF export. Zero external windowing dependencies.
-- **`runners/node/`**: Universal zero-dependency JavaScript runner compatible with **Node.js** and **txiki.js (`tjs`)**.
+## 6. Official Hosts & Minimal Templates
+ 
+- **Universal Host (`bin/wagnostic.js`, `src/`)**: Universal zero-dependency JavaScript host compatible with **Node.js**, **txiki.js (`tjs`)**, **Bun**, and **Deno**.
+- **Native Host (`runners/native/`)**: 100% `libc` / POSIX C runner with wasm3. Multi-threaded OS worker pool with headless GIF export. Zero external windowing dependencies.
 - **`examples/bare_runner.c`**: Minimal standalone C host (~90 lines).
 - **`examples/bare_runner.js`**: Minimal standalone JavaScript host (~60 lines).
