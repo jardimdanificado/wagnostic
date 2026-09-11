@@ -17,7 +17,7 @@ const ERROR_STATE     = -6;
 
 class IpcEngine {
   constructor() {
-    this.pendingOps = []; // { worker, caller, target, dataPtr, size, opType ('HEAR'|'TELL'), data: Uint8Array }
+    this.hearWaiters = []; // { worker, caller, target, dataPtr, size }
     this.onMessage = null; // ({ sender, target, size, data, op }) => void
   }
 
@@ -32,103 +32,77 @@ class IpcEngine {
   }
 
   hear(callerWorker, targetName, dataPtr, size, timeout, workerMap) {
-    const isAny = !targetName;
+    const isAny = !targetName || targetName.length === 0;
     if (!isAny) {
       if (targetName === callerWorker.name) return ERROR_PARAM;
       if (!workerMap.has(targetName)) return ERROR_TARGET;
     }
 
-    // Check if there is already a matching TELL waiting for this HEAR
-    const matchIdx = this.pendingOps.findIndex(
-      op => op.opType === 'TELL' &&
-            (isAny || op.caller === targetName) &&
-            (!op.target || op.target === callerWorker.name)
-    );
-
-    if (matchIdx !== -1) {
-      const match = this.pendingOps.splice(matchIdx, 1)[0];
-      if (match.size > size) return ERROR_SIZE;
-      callerWorker.lastIpcSender = match.caller;
-      if (match.size > 0 && match.data) {
-        new Uint8Array(callerWorker.memory.buffer, dataPtr, match.size).set(match.data);
-      }
-      this.logMessage(match.caller, callerWorker.name, match.size, match.data, 'hear');
-      return OK;
-    }
-
     if (timeout === 0) return TIMEOUT;
 
-    // Register waiter
-    this.pendingOps.push({
+    // Update existing waiter or register new listener waiter
+    const existingIdx = this.hearWaiters.findIndex(w => w.worker === callerWorker);
+    const waiter = {
       worker: callerWorker,
       caller: callerWorker.name,
       target: isAny ? '' : targetName,
       dataPtr,
-      size,
-      opType: 'HEAR'
-    });
+      size
+    };
+
+    if (existingIdx !== -1) {
+      this.hearWaiters[existingIdx] = waiter;
+    } else {
+      this.hearWaiters.push(waiter);
+    }
+
     return OK;
   }
 
   tell(callerWorker, targetName, dataPtr, size, timeout, workerMap) {
-    if (!targetName || targetName === callerWorker.name) return ERROR_PARAM;
-    if (!workerMap.has(targetName)) return ERROR_TARGET;
+    const isAny = !targetName || targetName.length === 0;
+    if (!isAny) {
+      if (targetName === callerWorker.name) return ERROR_PARAM;
+      if (!workerMap.has(targetName)) return ERROR_TARGET;
 
-    const targetPeer = workerMap.get(targetName);
+      const targetPeer = workerMap.get(targetName);
 
-    // If target is a RemotePeer, transmit over the wire
-    if (targetPeer && targetPeer.isRemote) {
-      const dataCopy = new Uint8Array(size);
-      if (size > 0) {
-        dataCopy.set(new Uint8Array(callerWorker.memory.buffer, dataPtr, size));
+      // If target is a RemotePeer, transmit over the wire
+      if (targetPeer && targetPeer.isRemote) {
+        const dataCopy = new Uint8Array(size);
+        if (size > 0 && callerWorker.memory) {
+          dataCopy.set(new Uint8Array(callerWorker.memory.buffer, dataPtr, size));
+        }
+        this.logMessage(callerWorker.name, targetName, size, dataCopy, 'tell');
+        targetPeer.sendTell(callerWorker.name, dataCopy);
+        return OK;
       }
-      this.logMessage(callerWorker.name, targetName, size, dataCopy, 'tell');
-      targetPeer.sendTell(callerWorker.name, dataCopy);
-      return OK;
     }
 
-    // Check if there is already a matching HEAR waiting for this TELL
-    const matchIdx = this.pendingOps.findIndex(
-      op => op.opType === 'HEAR' &&
-            (!op.target || op.target === callerWorker.name) &&
-            op.caller === targetName
+    // Rendezvous: Find matching HEAR waiting for this TELL
+    const matchIdx = this.hearWaiters.findIndex(
+      w => w.worker !== callerWorker &&
+           (!w.target || w.target === callerWorker.name) &&
+           (isAny || w.caller === targetName)
     );
 
     if (matchIdx !== -1) {
-      const match = this.pendingOps.splice(matchIdx, 1)[0];
+      const match = this.hearWaiters.splice(matchIdx, 1)[0];
       if (size > match.size) return ERROR_SIZE;
       let dataCopy = null;
-      if (size > 0) {
+      if (size > 0 && callerWorker.memory && match.worker.memory) {
         dataCopy = new Uint8Array(size);
         const src = new Uint8Array(callerWorker.memory.buffer, dataPtr, size);
         dataCopy.set(src);
         new Uint8Array(match.worker.memory.buffer, match.dataPtr, size).set(src);
       }
       match.worker.lastIpcSender = callerWorker.name;
-      this.logMessage(callerWorker.name, match.caller, size, dataCopy, 'tell');
+      this.logMessage(callerWorker.name, match.caller, size, dataCopy, 'rendezvous');
       return OK;
     }
 
-    if (timeout === 0) return TIMEOUT;
-
-    // Copy data immediately so local stack variable on caller side isn't clobbered
-    const dataCopy = new Uint8Array(size);
-    if (size > 0) {
-      dataCopy.set(new Uint8Array(callerWorker.memory.buffer, dataPtr, size));
-    }
-
-    this.logMessage(callerWorker.name, targetName, size, dataCopy, 'tell');
-
-    this.pendingOps.push({
-      worker: callerWorker,
-      caller: callerWorker.name,
-      target: targetName,
-      dataPtr,
-      size,
-      data: dataCopy,
-      opType: 'TELL'
-    });
-    return OK;
+    // No receiver at the rendezvous point -> TIMEOUT (zero queue)
+    return TIMEOUT;
   }
 
   /**
@@ -139,15 +113,14 @@ class IpcEngine {
 
     this.logMessage(senderName, targetName || '*', dataCopy.length, dataCopy, 'recv');
 
-    // Check if there is a HEAR waiting for this message
-    const matchIdx = this.pendingOps.findIndex(
-      op => op.opType === 'HEAR' &&
-            (!op.target || op.target === senderName) &&
-            (!targetName || op.caller === targetName)
+    // Deliver directly to matching HEAR waiter if present
+    const matchIdx = this.hearWaiters.findIndex(
+      w => (!w.target || w.target === senderName) &&
+           (!targetName || w.caller === targetName)
     );
 
     if (matchIdx !== -1) {
-      const match = this.pendingOps.splice(matchIdx, 1)[0];
+      const match = this.hearWaiters.splice(matchIdx, 1)[0];
       if (match.worker) {
         match.worker.lastIpcSender = senderName;
         if (match.worker.memory) {
@@ -157,23 +130,11 @@ class IpcEngine {
           }
         }
       }
-      return;
     }
-
-    // Otherwise store as pending TELL
-    this.pendingOps.push({
-      worker: null,
-      caller: senderName,
-      target: targetName || '',
-      dataPtr: 0,
-      size: dataCopy.length,
-      data: dataCopy,
-      opType: 'TELL'
-    });
   }
 
   clear() {
-    this.pendingOps.length = 0;
+    this.hearWaiters.length = 0;
   }
 }
 

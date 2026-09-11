@@ -70,7 +70,7 @@ Inter-module and cross-node communication in Piolho is based on **synchronous re
 ### 4.1 Parameters:
 
 #### `tell(target, data, size, timeout)`
-- `target`: Null-terminated string identifying the destination worker or peer name.
+- `target`: Null-terminated string identifying the destination worker or peer name, or `NULL` / `""` / `ANY` (`TELL_ANY`) for anonymous rendezvous with any available receiver.
 - `data`: Pointer to source payload buffer in caller's WASM memory.
 - `size`: Payload size in bytes (`size >= 0`).
 - `timeout`: Timeout in milliseconds (`0` = non-blocking, `>0` = wait up to $N$ ms, `-1` = wait indefinitely).

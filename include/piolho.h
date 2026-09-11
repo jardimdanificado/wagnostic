@@ -38,8 +38,9 @@
 #define ERROR_SHUTDOWN  ERROR_CLOSED
 #define IPC_SHUTDOWN    ERROR_CLOSED
 
-/* Wildcard Target for hear (receives from any sender) */
+/* Wildcard Target for tell and hear (anonymous broadcast / rendezvous with any peer) */
 #define ANY             ((const char*)0)
+#define TELL_ANY        ((const char*)0)
 #define HEAR_ANY        ((const char*)0)
 
 #ifdef __cplusplus
