@@ -1,5 +1,5 @@
 /**
- * Piolho 2.0 — Universal WebAssembly Host & Multi-ROM Runtime
+ * Piolho 2.0 — Universal WebAssembly Host & Multi-ROM Communication Runtime
  */
 
 const { ENV, isTxiki, isNode, isBun, isDeno } = require('./env');
@@ -9,15 +9,8 @@ const {
   ExtensionRegistry,
   createDefaultRegistry,
   defaultRegistry,
-  framebufferExtension,
-  getFramebuffer,
   clockExtension,
-  keyboardExtension,
-  mouseExtension,
-  gamepadExtension,
   loggerExtension,
-  gifExtension,
-  createGifExtension,
   commTcpExtension,
   commPipeExtension,
   commWsExtension,
@@ -26,7 +19,6 @@ const {
 } = require('./extensions');
 const { IpcEngine } = require('./ipc');
 const { PeerRegistry } = require('./peer_registry');
-const { MinimalGifEncoder } = require('./gif');
 const { extractFromTar } = require('./tar');
 
 async function createHost(options = {}) {
@@ -41,15 +33,8 @@ module.exports = {
   ExtensionRegistry,
   createDefaultRegistry,
   defaultRegistry,
-  framebufferExtension,
-  getFramebuffer,
   clockExtension,
-  keyboardExtension,
-  mouseExtension,
-  gamepadExtension,
   loggerExtension,
-  gifExtension,
-  createGifExtension,
   commTcpExtension,
   commPipeExtension,
   commWsExtension,
@@ -57,7 +42,6 @@ module.exports = {
   commWorkersExtension,
   PeerRegistry,
   IpcEngine,
-  MinimalGifEncoder,
   extractFromTar,
   ENV,
   isTxiki,

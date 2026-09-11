@@ -3,50 +3,22 @@
 # =============================================================================
 
 ROM_DIRS = \
-	display_test \
-	input_test \
-	full_test \
-	full_test_static \
-	full_test_dynamic \
-	buttons_test \
-	fallback_test \
-	bpp1_test \
-	bpp2_test \
-	bpp4_test \
-	exotic1_test \
-	exotic2_test \
-	use_test \
 	bare_counter \
+	use_test \
 	logger_example \
 	ipc_producer \
 	ipc_consumer \
-	pathtracer_master \
-	pathtracer_worker \
 	comm_tcp_test \
 	comm_pipe_test \
 	comm_ws_test \
 	comm_udp_test \
 	comm_workers_test
 
-
 TEST_DIRS = \
 	bare_counter \
-	display_test \
-	input_test \
-	buttons_test \
-	fallback_test \
-	bpp1_test \
-	bpp2_test \
-	bpp4_test \
-	exotic1_test \
-	exotic2_test \
 	use_test \
-	full_test \
-	full_test_static \
-	full_test_dynamic \
 	logger_example \
 	ipc_producer \
-	pathtracer_master \
 	comm_tcp_test \
 	comm_pipe_test \
 	comm_ws_test \
@@ -67,7 +39,7 @@ clean:
 	rm -f *.wasm
 
 test: all
-	@echo "Running all standalone example hosts (node <dir>/host.js)..."
+	@echo "Running all standalone communication and runtime test hosts..."
 	@rm -rf /tmp/piolho_test_logs && mkdir -p /tmp/piolho_test_logs
 	@pids=""; \
 	for dir in $(TEST_DIRS); do \
@@ -96,4 +68,3 @@ test: all
 	echo "===================================================="; \
 	rm -rf /tmp/piolho_test_logs; \
 	if [ $$failed -gt 0 ]; then exit 1; fi
-

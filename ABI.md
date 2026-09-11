@@ -1,16 +1,13 @@
-# Piolho 2.0 — Binary ABI Specification
+# Piolho — Binary ABI Specification
 
-This document defines the core binary Application Binary Interface (ABI) of **Piolho 2.0**.
+This document defines the core binary Application Binary Interface (ABI) of **Piolho**.
 
 The Piolho core ABI is an ultra-minimalist, host-agnostic, and language-neutral specification. It establishes only the basic execution lifecycle and capability negotiation mechanism between a host and a guest WebAssembly module.
-
-All concrete capabilities (graphics, clock, input, sound, storage, network) are implemented as **extensions** negotiated dynamically at runtime. For the standard multimedia extensions specification, see [STD.md](STD.md).
-
 ---
 
 ## 1. Core Execution Model
 
-A Piolho 2.0 module is a standard 32-bit WebAssembly (Wasm MVP) binary with a linear memory.
+A Piolho module is a standard 32-bit WebAssembly (Wasm MVP) binary with a linear memory.
 
 The entire interaction between host and guest is governed by exactly **two functions**:
 1. **One exported entry point**: `update()` (called by the host).
@@ -73,24 +70,20 @@ int32_t tell(const char *target, const void *data, int32_t size, int32_t timeout
 
 ```c
 #include "piolho.h"
-#include "framebuffer.h"
+#include "logger.h"
+#include "comm_workers.h"
 
-static framebuffer_t *fb;
+static logger_t *log_ext;
 
 int32_t setup(void) {
-    fb = (framebuffer_t*)use("std:framebuffer");
-    if (fb) {
-        fb->width = 320;
-        fb->height = 240;
-    }
+    log_ext = (logger_t*)use("logger");
+    int32_t has_workers = (int32_t)(uintptr_t)use("comm:workers");
     return 0;
 }
 
 int32_t update(void) {
-    if (fb && fb->pixels) {
-        uint32_t *p = (uint32_t*)fb->pixels;
-        p[0] = 0xFF0000FF; // Red pixel
-    }
+    uint32_t msg = 0xCAFEBABE;
+    tell("receiver", &msg, sizeof(msg), 0);
     return UPDATE_OK;
 }
 ```

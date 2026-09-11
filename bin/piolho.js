@@ -8,11 +8,7 @@ const path = require('path');
 const {
   Piolho,
   ENV,
-  framebufferExtension,
   clockExtension,
-  keyboardExtension,
-  mouseExtension,
-  gamepadExtension,
   loggerExtension,
   commTcpExtension,
   commPipeExtension,
@@ -22,32 +18,22 @@ const {
 } = require('../src');
 
 const BUILTIN_EXTENSIONS = {
-  'framebuffer': framebufferExtension,
-  'std:framebuffer': framebufferExtension,
-  'surface': framebufferExtension,
-  'std:surface': framebufferExtension,
   'clock': clockExtension,
   'std:clock': clockExtension,
-  'keyboard': keyboardExtension,
-  'std:keyboard': keyboardExtension,
-  'mouse': mouseExtension,
-  'std:mouse': mouseExtension,
-  'gamepad': gamepadExtension,
-  'std:gamepad': gamepadExtension,
   'logger': loggerExtension,
   'std:logger': loggerExtension
 };
 
 function printHelp() {
   console.log(`
-Piolho 2.0 — Universal WASM Host & Multi-ROM Rendezvous IPC
+Piolho 2.0 — Universal WASM Host & Rendezvous IPC Coordinator
 
 Usage:
   piolho [options] <rom.wasm[:name]> [rom2.wasm[:name]...]
 
 Options:
-  -e, --ext <name|file>    Enable extension (e.g. clock, framebuffer, logger, ./custom.js)
-  -E, --ext-dir <path>     Directory to search for extensions when requested by name
+  -e, --ext <name|file>    Enable extension (e.g. clock, logger, ./custom.js)
+  -E, --ext-dir <path>     Directory to search for extensions (name.js) when requested by name
   -s, --steps <N>          Run for N steps/ticks and exit (default: 0 = infinite)
   -r, --rate <hz>          Tick rate in Hz / ticks per second (default: 30)
   -i, --interval <ms>      Tick interval in milliseconds
@@ -56,15 +42,15 @@ Options:
 
 Notes:
   - Communication extensions (comm:tcp, comm:pipe, comm:ws, comm:udp, comm:workers) are always enabled.
-  - Standard extensions (framebuffer, clock, input, etc.) are strictly opt-in via -e/--ext.
+  - Standard extensions (clock, logger, etc.) are strictly opt-in via -e/--ext.
   - When -E <path> is specified, requesting 'abc' will search for path/abc.js.
   - Instance name defaults to file basename if not specified as 'path.wasm:name'.
 
 Examples:
-  piolho app.wasm
-  piolho -e clock,framebuffer display.wasm:ui
+  piolho worker.wasm
+  piolho master.wasm:master worker.wasm:worker
   piolho -E ./my_extensions -e custom_dsp worker.wasm
-  piolho -s 100 master.wasm:master worker.wasm:worker
+  piolho -s 100 benchmark.wasm
 `);
 }
 
