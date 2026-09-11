@@ -22,7 +22,16 @@ class CommWsExtension {
     this.name = 'comm:ws';
   }
 
+  isSupported() {
+    return (
+      typeof WebSocket !== 'undefined' ||
+      typeof globalThis.WebSocket !== 'undefined' ||
+      (typeof require !== 'undefined' && (function() { try { return !!require('ws'); } catch (e) { return false; } })())
+    );
+  }
+
   onRequest(worker, host) {
+    if (!this.isSupported()) return 0;
     if (!worker.extState.has(this.name)) {
       const ptr = worker.alloc(STRUCT_SIZE, 4);
       new Uint8Array(worker.memory.buffer, ptr, STRUCT_SIZE).fill(0);

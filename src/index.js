@@ -15,7 +15,15 @@ const {
   commPipeExtension,
   commWsExtension,
   commUdpExtension,
-  commWorkersExtension
+  commWorkersExtension,
+  commStdioExtension,
+  commBroadcastExtension,
+  commWebrtcExtension,
+  commWebtransportExtension,
+  commSerialExtension,
+  commBluetoothExtension,
+  commHttpExtension,
+  commShmExtension
 } = require('./extensions');
 const { IpcEngine } = require('./ipc');
 const { PeerRegistry } = require('./peer_registry');
@@ -40,6 +48,14 @@ module.exports = {
   commWsExtension,
   commUdpExtension,
   commWorkersExtension,
+  commStdioExtension,
+  commBroadcastExtension,
+  commWebrtcExtension,
+  commWebtransportExtension,
+  commSerialExtension,
+  commBluetoothExtension,
+  commHttpExtension,
+  commShmExtension,
   PeerRegistry,
   IpcEngine,
   extractFromTar,

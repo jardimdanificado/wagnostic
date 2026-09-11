@@ -10,6 +10,14 @@ const { commPipeExtension } = require('./comm_pipe');
 const { commWsExtension } = require('./comm_ws');
 const { commUdpExtension } = require('./comm_udp');
 const { commWorkersExtension } = require('./comm_workers');
+const { commStdioExtension } = require('./comm_stdio');
+const { commBroadcastExtension } = require('./comm_broadcast');
+const { commWebrtcExtension } = require('./comm_webrtc');
+const { commWebtransportExtension } = require('./comm_webtransport');
+const { commSerialExtension } = require('./comm_serial');
+const { commBluetoothExtension } = require('./comm_bluetooth');
+const { commHttpExtension } = require('./comm_http');
+const { commShmExtension } = require('./comm_shm');
 
 function createDefaultRegistry() {
   const registry = new ExtensionRegistry();
@@ -20,6 +28,14 @@ function createDefaultRegistry() {
   registry.register(commWsExtension);
   registry.register(commUdpExtension);
   registry.register(commWorkersExtension);
+  registry.register(commStdioExtension);
+  registry.register(commBroadcastExtension);
+  registry.register(commWebrtcExtension);
+  registry.register(commWebtransportExtension);
+  registry.register(commSerialExtension);
+  registry.register(commBluetoothExtension);
+  registry.register(commHttpExtension);
+  registry.register(commShmExtension);
   return registry;
 }
 
@@ -35,5 +51,13 @@ module.exports = {
   commPipeExtension,
   commWsExtension,
   commUdpExtension,
-  commWorkersExtension
+  commWorkersExtension,
+  commStdioExtension,
+  commBroadcastExtension,
+  commWebrtcExtension,
+  commWebtransportExtension,
+  commSerialExtension,
+  commBluetoothExtension,
+  commHttpExtension,
+  commShmExtension
 };

@@ -53,6 +53,9 @@ class ExtensionRegistry {
               const mod = require(filePath);
               const ext = mod.extension || mod.default || mod;
               if (ext) {
+                if (typeof ext.isSupported === 'function' && !ext.isSupported()) {
+                  return null;
+                }
                 if (!ext.name) ext.name = name;
                 this.register(ext);
                 return ext;
@@ -71,6 +74,10 @@ class ExtensionRegistry {
   register(ext) {
     if (typeof ext === 'function') {
       ext = { onRequest: ext };
+    }
+
+    if (typeof ext.isSupported === 'function' && !ext.isSupported()) {
+      return this; // Skip unsupported extension in current environment
     }
 
     const names = Array.isArray(ext.name) ? ext.name : (ext.name ? [ext.name] : []);

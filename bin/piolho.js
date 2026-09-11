@@ -14,7 +14,15 @@ const {
   commPipeExtension,
   commWsExtension,
   commUdpExtension,
-  commWorkersExtension
+  commWorkersExtension,
+  commStdioExtension,
+  commBroadcastExtension,
+  commWebrtcExtension,
+  commWebtransportExtension,
+  commSerialExtension,
+  commBluetoothExtension,
+  commHttpExtension,
+  commShmExtension
 } = require('../src');
 
 const BUILTIN_EXTENSIONS = {
@@ -119,12 +127,20 @@ async function main() {
 
   const host = new Piolho(hostOptions);
 
-  // Hardcoded communication extensions
+  // Hardcoded communication extensions (auto-checked against environment)
   host.use(commTcpExtension)
       .use(commPipeExtension)
       .use(commWsExtension)
       .use(commUdpExtension)
-      .use(commWorkersExtension);
+      .use(commWorkersExtension)
+      .use(commStdioExtension)
+      .use(commBroadcastExtension)
+      .use(commWebrtcExtension)
+      .use(commWebtransportExtension)
+      .use(commSerialExtension)
+      .use(commBluetoothExtension)
+      .use(commHttpExtension)
+      .use(commShmExtension);
 
   // User-requested extensions
   for (const extName of requestedExts) {

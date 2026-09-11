@@ -12,7 +12,9 @@ ROM_DIRS = \
 	comm_pipe_test \
 	comm_ws_test \
 	comm_udp_test \
-	comm_workers_test
+	comm_workers_test \
+	comm_stdio_test \
+	comm_broadcast_test
 
 TEST_DIRS = \
 	bare_counter \
@@ -23,7 +25,9 @@ TEST_DIRS = \
 	comm_pipe_test \
 	comm_ws_test \
 	comm_udp_test \
-	comm_workers_test
+	comm_workers_test \
+	comm_stdio_test \
+	comm_broadcast_test
 
 .PHONY: all clean test $(ROM_DIRS)
 

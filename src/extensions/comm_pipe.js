@@ -22,7 +22,15 @@ class CommPipeExtension {
     this.name = 'comm:pipe';
   }
 
+  isSupported() {
+    return (
+      (typeof require !== 'undefined' && (function() { try { return !!require('net'); } catch (e) { return false; } })()) ||
+      (typeof tjs !== 'undefined' && typeof tjs.listen === 'function')
+    );
+  }
+
   onRequest(worker, host) {
+    if (!this.isSupported()) return 0;
     if (!worker.extState.has(this.name)) {
       const ptr = worker.alloc(STRUCT_SIZE, 4);
       new Uint8Array(worker.memory.buffer, ptr, STRUCT_SIZE).fill(0);

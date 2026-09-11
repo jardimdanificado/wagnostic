@@ -191,6 +191,72 @@ int32_t has_workers = (int32_t)(uintptr_t)use("comm:workers");
 
 ---
 
+### 5.6 `comm:stdio`
+Standard I/O stream rendezvous communication (`stdio:out`, `stdio:err`, `stdio:in`). Supported on Node.js, txiki.js, Bun, and Deno.
+- **Header**: `include/comm_stdio.h`
+- **Size**: 16 bytes
+
+```c
+typedef struct {
+    int32_t status;
+    int32_t auto_flush;
+    int32_t bytes_available;
+    int32_t reserved;
+} comm_stdio_t;
+```
+
+---
+
+### 5.7 `comm:broadcast`
+Multi-context rendezvous bus via `BroadcastChannel` (Node 15+, Deno, Bun, Browser).
+- **Header**: `include/comm_broadcast.h`
+- **Size**: 144 bytes
+
+```c
+typedef struct {
+    char channel[64];
+    int32_t mode;
+    int32_t status;
+    int32_t peer_count;
+    char advertised_name[32];
+    char peer_name[32];
+    int32_t reserved;
+} comm_broadcast_t;
+```
+
+---
+
+### 5.8 `comm:webrtc`
+WebRTC DataChannel P2P transport.
+- **Header**: `include/comm_webrtc.h`
+- **Size**: 144 bytes
+
+---
+
+### 5.9 `comm:webtransport`
+HTTP/3 QUIC stream/datagram transport.
+- **Header**: `include/comm_webtransport.h`
+- **Size**: 144 bytes
+
+---
+
+### 5.10 `comm:serial` & `comm:bluetooth`
+Hardware serial port and Bluetooth Low Energy interfaces.
+- **Headers**: `include/comm_serial.h`, `include/comm_bluetooth.h`
+
+---
+
+### 5.11 `comm:http` & `comm:shm`
+HTTP streaming client and SharedArrayBuffer / Atomics indicators.
+- **Headers**: `include/comm_http.h`, `include/comm_shm.h`
+
+---
+
+> [!NOTE]
+> All extensions verify environment capability at startup (`isSupported()`). If the host runtime (e.g. txiki.js, Node, or Browser) lacks the required underlying API, the extension is omitted and `use("comm:...")` returns `0` (NULL).
+
+---
+
 ## 6. System Extensions (`clock`, `logger`)
 
 ### 6.1 `clock`
