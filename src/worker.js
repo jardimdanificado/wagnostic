@@ -109,22 +109,6 @@ class WWorker {
     this.instance = wasmModule.instance;
     this.module = wasmModule.module;
     this.memory = this.instance.exports.memory || importObj.env.memory;
-
-    const setupFn = this.instance.exports.setup || this.instance.exports.init || this.instance.exports.winit;
-    if (typeof setupFn === 'function') {
-      try {
-        const initRes = setupFn();
-        if (initRes < 0) {
-          console.error(`[Worker ${this.name}] setup() returned error code ${initRes}`);
-          this.running = false;
-          this.exitCode = initRes;
-        }
-      } catch (err) {
-        console.error(`[Worker ${this.name}] setup() exception:`, err.message);
-        this.running = false;
-        this.exitCode = -1;
-      }
-    }
   }
 
   update() {
@@ -147,10 +131,7 @@ class WWorker {
   }
 
   exit() {
-    const shutdownFn = this.instance.exports.shutdown || this.instance.exports.quit || this.instance.exports.wexit;
-    if (this.instance && typeof shutdownFn === 'function') {
-      try { shutdownFn(); } catch (e) {}
-    }
+    this.running = false;
   }
 }
 

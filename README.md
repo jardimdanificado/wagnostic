@@ -2,9 +2,7 @@
 
 Minimalist, modular, platform-agnostic WebAssembly multi-instance runtime and rendezvous communication coordinator.
 
-- 📜 **[ABI.md](ABI.md)**: Binary ABI specification (`update`, `use`, `tell`, `hear`, and `comm:*` extensions).
-- 🔄 **[IPC.md](IPC.md)**: Synchronous Rendezvous IPC semantics and topologies.
-
+- **[ABI.md](ABI.md)**: Binary ABI specification.
 ---
 
 ## 1. Quick Start (Library Usage)
@@ -61,22 +59,19 @@ In Piolho, modules export a single lifecycle function `update()` and communicate
 #include "logger.h"
 #include "comm_workers.h"
 
-static clock_ext_t *clock_ext;
-
-int32_t setup(void) {
-    clock_ext = (clock_ext_t*)use("clock");
-    int32_t has_workers = (int32_t)(uintptr_t)use("comm:workers");
-    return 0;
-}
+static clock_ext_t *clock_ext = 0;
 
 int32_t update(void) {
+    if (!clock_ext) {
+        clock_ext = (clock_ext_t*)use("clock");
+    }
     uint32_t data = 42;
     tell("worker", &data, sizeof(data), 0);
     return UPDATE_OK; // 0 = OK, 1 = EXIT, <0 = ERROR
 }
 ```
 
-For the complete binary specifications, memory layouts, and communication extensions, see **[ABI.md](ABI.md)**.
+For the complete binary specifications, memory layouts, and communication, see **[ABI.md](ABI.md)**.
 
 ---
 

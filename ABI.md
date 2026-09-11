@@ -9,7 +9,7 @@ This document defines the official binary Application Binary Interface (ABI) of 
 A Piolho module is a standard 32-bit WebAssembly (Wasm MVP) binary with linear memory.
 
 Interaction between host and guest is governed by:
-1. **Lifecycle Exports**: `update()`, optional `setup()`, optional `shutdown()`.
+1. **Single Entry Point Export**: `update()`.
 2. **Capability Import**: `use(name)`.
 3. **Rendezvous IPC Imports**: `tell(target, data, size, timeout)`, `hear(target, data, size, timeout)`.
 
@@ -27,20 +27,17 @@ Interaction between host and guest is governed by:
 
 ---
 
-## 2. Guest Module Exports
+## 2. Guest Module Export: `update`
 
-Every Piolho module must export `update`. `setup` and `shutdown` are optional.
+Every Piolho module must export exactly one function: `update`.
 
 ```c
-int32_t setup(void);    /* Called once on module startup */
-int32_t update(void);   /* Called on each step/tick */
-int32_t shutdown(void); /* Called once on module shutdown */
+int32_t update(void);   /* Called on each execution step/tick */
 ```
 
-### WASM Export Signatures:
-- `(func (export "setup") (result i32))`
-- `(func (export "update") (result i32))`
-- `(func (export "shutdown") (result i32))`
+- **WASM Export Signature**: `(func (export "update") (result i32))`
+- **Initialization**: Standard WASM `(start)` section (executed automatically by the runtime on instantiation) or lazy first-tick initialization in `update()`.
+- **Termination**: Returning `DONE` (1) signals clean shutdown. Host unloads the instance immediately.
 
 ### Return Codes for `update`:
 - `0` (`UPDATE_OK`): Step completed successfully. Host continues execution.
@@ -84,16 +81,22 @@ Inter-module and cross-node communication in Piolho is based on **synchronous re
 - `size`: Buffer capacity in bytes.
 - `timeout`: Timeout in milliseconds (`0` = non-blocking, `>0` = wait up to $N$ ms, `-1` = wait indefinitely).
 
-### 4.2 Status & Return Codes:
+### 4.2 Unified Status & Return Codes:
+
+Both `update()` and IPC operations (`tell`, `hear`) share a single, unified status code definition:
+
 ```c
-#define IPC_OK          1   /* Communication completed successfully */
-#define IPC_TIMEOUT     0   /* Operation timed out before rendezvous */
-#define IPC_ERROR      -1   /* Generic runtime error */
-#define IPC_TARGET     -2   /* Target does not exist or disconnected */
-#define IPC_PARAM      -3   /* Invalid parameter or memory out of bounds */
-#define IPC_SIZE       -4   /* Message exceeds receiver buffer capacity */
-#define IPC_SHUTDOWN   -5   /* Host or worker shutting down */
-#define IPC_STATE      -6   /* Invalid state / reentrancy */
+#define OK               0   /* Success */
+#define DONE             1   /* Finished / Clean Exit / End of stream */
+#define EXIT             1   /* Alias for DONE */
+#define TIMEOUT          2   /* Timed out before match/rendezvous */
+
+#define ERROR           -1   /* Generic error */
+#define ERROR_TARGET    -2   /* Target peer/worker not found */
+#define ERROR_PARAM     -3   /* Invalid parameter or memory bounds */
+#define ERROR_SIZE      -4   /* Message payload exceeds buffer size */
+#define ERROR_SHUTDOWN  -5   /* Host or worker is shutting down */
+#define ERROR_STATE     -6   /* Invalid runtime state / reentrancy */
 ```
 
 ---

@@ -4,7 +4,6 @@
 #include <stdint.h>
 
 #define LOGGER_EXTENSION  "logger"
-#define WLOGGER_EXTENSION "logger"
 
 typedef struct {
     uint32_t buffer;      /* WASM memory pointer to UTF-8 buffer */
@@ -12,6 +11,15 @@ typedef struct {
     uint32_t length;      /* Number of bytes written by ROM */
 } logger_t;
 
-typedef logger_t wlogger_t;
+static inline void logger_print(logger_t *log, const char *str) {
+    if (!log || !log->buffer || !str) return;
+    char *buf = (char*)(uintptr_t)log->buffer;
+    uint32_t i = 0;
+    while (str[i] != '\0' && i < log->capacity) {
+        buf[i] = str[i];
+        i++;
+    }
+    log->length = i;
+}
 
 #endif /* PIOLHO_LOGGER_H */

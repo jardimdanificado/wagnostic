@@ -1,45 +1,52 @@
 /**
  * Piolho Synchronous & Distributed Rendezvous IPC Engine
  * 
- * Implements wask() and wtell() rendezvous matching across local WASM workers
+ * Implements hear() and tell() rendezvous matching across local WASM workers
  * and discovered remote peers (TCP, Pipe, WS, UDP).
  */
 
-const WIPC_OK = 1;
-const WIPC_TIMEOUT = 0;
-const WIPC_ERROR = -1;
-const WIPC_TARGET = -2;
-const WIPC_PARAM = -3;
-const WIPC_SIZE = -4;
+const OK              = 0;
+const DONE            = 1;
+const TIMEOUT         = 2;
+const ERROR           = -1;
+const ERROR_TARGET    = -2;
+const ERROR_PARAM     = -3;
+const ERROR_SIZE      = -4;
+const ERROR_CLOSED    = -5;
+const ERROR_STATE     = -6;
 
 class IpcEngine {
   constructor() {
-    this.pendingOps = []; // { worker, caller, target, dataPtr, size, opType ('ASK'|'TELL'), data: Uint8Array }
+    this.pendingOps = []; // { worker, caller, target, dataPtr, size, opType ('HEAR'|'TELL'), data: Uint8Array }
   }
 
   ask(callerWorker, targetName, dataPtr, size, timeout, workerMap) {
+    return this.hear(callerWorker, targetName, dataPtr, size, timeout, workerMap);
+  }
+
+  hear(callerWorker, targetName, dataPtr, size, timeout, workerMap) {
     const isAny = !targetName;
     if (!isAny) {
-      if (targetName === callerWorker.name) return WIPC_PARAM;
-      if (!workerMap.has(targetName)) return WIPC_TARGET;
+      if (targetName === callerWorker.name) return ERROR_PARAM;
+      if (!workerMap.has(targetName)) return ERROR_TARGET;
     }
 
-    // Check if there is already a matching TELL waiting for this ASK
+    // Check if there is already a matching TELL waiting for this HEAR
     const matchIdx = this.pendingOps.findIndex(
       op => op.opType === 'TELL' && (isAny || op.caller === targetName) && (!op.target || op.target === callerWorker.name)
     );
 
     if (matchIdx !== -1) {
       const match = this.pendingOps.splice(matchIdx, 1)[0];
-      if (match.size > size) return WIPC_SIZE;
+      if (match.size > size) return ERROR_SIZE;
       callerWorker.lastIpcSender = match.caller;
       if (match.size > 0 && match.data) {
         new Uint8Array(callerWorker.memory.buffer, dataPtr, match.size).set(match.data);
       }
-      return WIPC_OK;
+      return OK;
     }
 
-    if (timeout === 0) return WIPC_TIMEOUT;
+    if (timeout === 0) return TIMEOUT;
 
     // Register waiter
     this.pendingOps.push({
@@ -48,14 +55,14 @@ class IpcEngine {
       target: isAny ? '' : targetName,
       dataPtr,
       size,
-      opType: 'ASK'
+      opType: 'HEAR'
     });
-    return WIPC_OK;
+    return OK;
   }
 
   tell(callerWorker, targetName, dataPtr, size, timeout, workerMap) {
-    if (!targetName || targetName === callerWorker.name) return WIPC_PARAM;
-    if (!workerMap.has(targetName)) return WIPC_TARGET;
+    if (!targetName || targetName === callerWorker.name) return ERROR_PARAM;
+    if (!workerMap.has(targetName)) return ERROR_TARGET;
 
     const targetPeer = workerMap.get(targetName);
 
@@ -66,25 +73,25 @@ class IpcEngine {
         dataCopy.set(new Uint8Array(callerWorker.memory.buffer, dataPtr, size));
       }
       targetPeer.sendTell(callerWorker.name, dataCopy);
-      return WIPC_OK;
+      return OK;
     }
 
-    // Check if there is already a matching ASK waiting for this TELL
+    // Check if there is already a matching HEAR waiting for this TELL
     const matchIdx = this.pendingOps.findIndex(
-      op => op.opType === 'ASK' && (!op.target || op.target === callerWorker.name) && op.caller === targetName
+      op => op.opType === 'HEAR' && (!op.target || op.target === callerWorker.name) && op.caller === targetName
     );
 
     if (matchIdx !== -1) {
       const match = this.pendingOps.splice(matchIdx, 1)[0];
-      if (size > match.size) return WIPC_SIZE;
+      if (size > match.size) return ERROR_SIZE;
       if (size > 0) {
         const src = new Uint8Array(callerWorker.memory.buffer, dataPtr, size);
         new Uint8Array(match.worker.memory.buffer, match.dataPtr, size).set(src);
       }
-      return WIPC_OK;
+      return OK;
     }
 
-    if (timeout === 0) return WIPC_TIMEOUT;
+    if (timeout === 0) return TIMEOUT;
 
     // Copy data immediately so local stack variable on caller side isn't clobbered
     const dataCopy = new Uint8Array(size);
@@ -101,7 +108,7 @@ class IpcEngine {
       data: dataCopy,
       opType: 'TELL'
     });
-    return WIPC_OK;
+    return OK;
   }
 
   /**
@@ -110,9 +117,9 @@ class IpcEngine {
   receiveRemoteTell(senderName, targetName, payloadBytes) {
     const dataCopy = payloadBytes instanceof Uint8Array ? payloadBytes : new Uint8Array(payloadBytes);
 
-    // Check if there is an ASK waiting for this message
+    // Check if there is a HEAR waiting for this message
     const matchIdx = this.pendingOps.findIndex(
-      op => op.opType === 'ASK' && (!op.target || op.target === senderName) && (!targetName || op.caller === targetName)
+      op => op.opType === 'HEAR' && (!op.target || op.target === senderName) && (!targetName || op.caller === targetName)
     );
 
     if (matchIdx !== -1) {
@@ -149,11 +156,28 @@ class IpcEngine {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     IpcEngine,
-    WIPC_OK,
-    WIPC_TIMEOUT,
-    WIPC_ERROR,
-    WIPC_TARGET,
-    WIPC_PARAM,
-    WIPC_SIZE
+    OK,
+    DONE,
+    EXIT: DONE,
+    TIMEOUT,
+    ERROR,
+    ERROR_TARGET,
+    ERROR_PARAM,
+    ERROR_SIZE,
+    ERROR_CLOSED,
+    ERROR_STATE,
+    // Aliases
+    ERROR_SHUTDOWN: ERROR_CLOSED,
+    ERR: ERROR,
+    ERR_TARGET: ERROR_TARGET,
+    ERR_PARAM: ERROR_PARAM,
+    ERR_SIZE: ERROR_SIZE,
+    ERR_CLOSED: ERROR_CLOSED,
+    WIPC_OK: OK,
+    WIPC_TIMEOUT: TIMEOUT,
+    WIPC_ERROR: ERROR,
+    WIPC_TARGET: ERROR_TARGET,
+    WIPC_PARAM: ERROR_PARAM,
+    WIPC_SIZE: ERROR_SIZE
   };
 }

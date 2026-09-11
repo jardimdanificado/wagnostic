@@ -6,41 +6,41 @@
 
 #define PIOLHO_VERSION 2
 
-/* Update Status Codes */
-#define UPDATE_OK       0
-#define UPDATE_EXIT     1
-#define UPDATE_ERROR   -1
+/* Unified Status & Return Codes */
+#define OK               0   /* Success */
+#define DONE             1   /* Finished / Clean Exit / End of stream */
+#define EXIT             1   /* Alias for DONE */
+#define TIMEOUT          2   /* Timed out before match/rendezvous */
 
-/* Legacy Update Aliases */
-#define WUPDATE_OK      UPDATE_OK
-#define WUPDATE_EXIT    UPDATE_EXIT
-#define WUPDATE_ERROR   UPDATE_ERROR
+#define ERROR           -1   /* Generic error */
+#define ERROR_TARGET    -2   /* Target peer/worker not found */
+#define ERROR_PARAM     -3   /* Invalid parameter or memory bounds */
+#define ERROR_SIZE      -4   /* Message payload exceeds buffer size */
+#define ERROR_CLOSED    -5   /* Host, worker, or channel is closed */
+#define ERROR_STATE     -6   /* Invalid runtime state / reentrancy */
 
-/* IPC Status Codes */
-#define IPC_OK          1
-#define IPC_TIMEOUT     0
-#define IPC_ERROR      -1
-#define IPC_TARGET     -2
-#define IPC_PARAM      -3
-#define IPC_SIZE       -4
-#define IPC_SHUTDOWN   -5
-#define IPC_STATE      -6
-
-/* Legacy IPC Aliases */
-#define WIPC_OK         IPC_OK
-#define WIPC_TIMEOUT    IPC_TIMEOUT
-#define WIPC_ERROR      IPC_ERROR
-#define WIPC_TARGET     IPC_TARGET
-#define WIPC_PARAM      IPC_PARAM
-#define WIPC_SIZE       IPC_SIZE
-#define WIPC_SHUTDOWN   IPC_SHUTDOWN
-#define WIPC_STATE      IPC_STATE
+/* Backwards Compatibility Aliases */
+#define ERR             ERROR
+#define ERR_TARGET      ERROR_TARGET
+#define ERR_PARAM       ERROR_PARAM
+#define ERR_SIZE        ERROR_SIZE
+#define ERR_CLOSED      ERROR_CLOSED
+#define ERR_STATE       ERROR_STATE
+#define UPDATE_OK       OK
+#define UPDATE_EXIT     EXIT
+#define UPDATE_ERROR    ERROR
+#define IPC_OK          OK
+#define IPC_TIMEOUT     TIMEOUT
+#define IPC_ERROR       ERROR
+#define IPC_TARGET      ERROR_TARGET
+#define IPC_PARAM       ERROR_PARAM
+#define IPC_SIZE        ERROR_SIZE
+#define ERROR_SHUTDOWN  ERROR_CLOSED
+#define IPC_SHUTDOWN    ERROR_CLOSED
 
 /* Wildcard Target for hear (receives from any sender) */
 #define ANY             ((const char*)0)
 #define HEAR_ANY        ((const char*)0)
-#define PIOLHO_ANY      ((const char*)0)
-#define WIPC_ANY        ((const char*)0)
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,21 +50,11 @@ extern "C" {
 void *use(const char *name);
 
 /* Rendezvous IPC */
-int32_t hear(const char *target, void *data, int32_t size, int32_t timeout);
 int32_t tell(const char *target, const void *data, int32_t size, int32_t timeout);
+int32_t hear(const char *target, void *data, int32_t size, int32_t timeout);
 
-/* ROM Lifecycle */
-int32_t setup(void);
+/* Primary Module Entry Point */
 int32_t update(void);
-int32_t shutdown(void);
-
-/* Legacy Function Aliases */
-#define wextension(name)              use(name)
-#define wask(target, data, size, to)  hear(target, data, size, to)
-#define wtell(target, data, size, to) tell(target, data, size, to)
-#define winit()                       setup()
-#define wupdate()                     update()
-#define wexit()                       shutdown()
 
 #ifdef __cplusplus
 }

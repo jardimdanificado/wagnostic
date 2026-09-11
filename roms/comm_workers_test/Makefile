@@ -1,6 +1,6 @@
 CC = clang
 CFLAGS = --target=wasm32 -nostdlib -O2 -I../../include
-LDFLAGS = -Wl,--no-entry -Wl,--export=setup -Wl,--export=update -Wl,--allow-undefined
+LDFLAGS = -Wl,--no-entry -Wl,--export=update -Wl,--allow-undefined
 
 all: ../comm_workers_test.wasm
 
