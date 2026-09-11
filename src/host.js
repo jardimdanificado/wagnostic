@@ -8,6 +8,7 @@ const { ENV } = require('./env');
 const { extractFromTar } = require('./tar');
 const { defaultRegistry } = require('./extensions');
 const { IpcEngine } = require('./ipc');
+const { PeerRegistry } = require('./peer_registry');
 const { WWorker } = require('./worker');
 
 class PiolhoHost {
@@ -19,6 +20,7 @@ class PiolhoHost {
 
     this.workers = [];
     this.workerMap = new Map();
+    this.peers = new PeerRegistry(this);
     this.ipc = new IpcEngine();
     this.isRunning = false;
     this.startTime = 0;
@@ -64,6 +66,7 @@ class PiolhoHost {
 
     this.workers.push(worker);
     this.workerMap.set(name, worker);
+    this.peers.registerLocal(worker);
 
     await worker.instantiate(wasmBytes);
     return worker;
@@ -77,6 +80,7 @@ class PiolhoHost {
       w.exit();
     }
 
+    this.peers.clear();
     this.extensions.onDestroy(this);
   }
 

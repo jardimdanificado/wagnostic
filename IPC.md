@@ -7,13 +7,13 @@ Piolho 2.0 supports concurrent multi-ROM execution with a native synchronous ren
 Every loaded ROM is a first-class, independent worker with its own:
 - WebAssembly module instance
 - Linear memory
-- Native OS thread of execution
+- Native execution context
 - Unique worker identifier and name
 
 Communication between ROMs occurs strictly via **synchronous rendezvous**:
 - There is **no persistent message queue** or mailbox on the host.
-- A message exists only while two compatible operations (`wtell` and `wask`) match.
-- Data transfer is performed directly between the linear memories of the communicating ROMs (`memcpy`).
+- A message exists only while two compatible operations (`tell` and `hear`) match.
+- Data transfer is performed directly between linear memories or routed across network peers.
 
 ---
 
@@ -22,65 +22,45 @@ Communication between ROMs occurs strictly via **synchronous rendezvous**:
 The host provides two core WASM imports under the `"env"` module namespace:
 
 ```c
-int32_t wask(const char *target, void *data, int32_t size, int32_t timeout);
-int32_t wtell(const char *target, const void *data, int32_t size, int32_t timeout);
+int32_t hear(const char *target, void *data, int32_t size, int32_t timeout);
+int32_t tell(const char *target, const void *data, int32_t size, int32_t timeout);
 ```
 
-### 2.1 WASM Import Signatures
-- `(import "env" "wask" (func (param i32 i32 i32 i32) (result i32)))`
-- `(import "env" "wtell" (func (param i32 i32 i32 i32) (result i32)))`
-
-### 2.2 Parameters
-- `target`: 32-bit byte offset pointing to a null-terminated UTF-8 string with the target worker name.
-  - In `wtell`: Must be a valid non-empty worker name.
-  - In `wask`: Can be a specific worker name, or **falsy (`NULL` / `0` / `""` / `WIPC_ANY`)** to accept incoming messages from **ANY** sender.
-- `data`: 32-bit byte offset pointing to caller's buffer in linear memory.
+### 2.1 Parameters
+- `target`: Null-terminated string with the target worker name.
+  - In `tell`: Must be a valid non-empty worker name.
+  - In `hear`: Can be a specific worker name, or **falsy (`NULL` / `0` / `""` / `ANY` / `HEAR_ANY`)** to accept incoming messages from **ANY** sender.
+- `data`: Pointer to caller's buffer in WASM memory.
 - `size`: Size in bytes to transfer (`size >= 0`).
 - `timeout`: Timeout in milliseconds:
   - `0`: Non-blocking (immediate match attempt).
-  - `> 0`: Wait up to `timeout` milliseconds on a monotonic clock.
-  - `-1`: Wait indefinitely until matched or shutdown.
+  - `> 0`: Wait up to `timeout` milliseconds.
+  - `-1`: Wait indefinitely until matched.
 
-### 2.3 Status / Return Codes
+### 2.2 Status / Return Codes
 ```c
-#define WIPC_OK          1   /* Communication completed successfully */
-#define WIPC_TIMEOUT     0   /* Operation timed out before match occurred */
-#define WIPC_ERROR      -1   /* Generic runtime error */
-#define WIPC_TARGET     -2   /* Target worker does not exist or exited */
-#define WIPC_PARAM      -3   /* Invalid argument or memory out-of-bounds */
-#define WIPC_SIZE       -4   /* Sender payload exceeds receiver buffer size */
-#define WIPC_SHUTDOWN   -5   /* Host or worker is shutting down */
-#define WIPC_STATE      -6   /* Invalid IPC state / reentrancy */
+#define IPC_OK          1   /* Communication completed successfully */
+#define IPC_TIMEOUT     0   /* Operation timed out before match occurred */
+#define IPC_ERROR      -1   /* Generic runtime error */
+#define IPC_TARGET     -2   /* Target worker does not exist or exited */
+#define IPC_PARAM      -3   /* Invalid argument or memory out-of-bounds */
+#define IPC_SIZE       -4   /* Sender payload exceeds receiver buffer size */
+#define IPC_SHUTDOWN   -5   /* Host or worker is shutting down */
+#define IPC_STATE      -6   /* Invalid IPC state / reentrancy */
 ```
 
 ---
 
 ## 3. Rendezvous Semantics
 
-A rendezvous occurs when a sender (`wtell`) and a receiver (`wask`) match:
+A rendezvous occurs when a sender (`tell`) and a receiver (`hear`) match:
 
-```text
-Worker "producer"                  Worker "consumer"
-  wtell("consumer", data, 64)        wask("producer", buf, 64)
-           \                                /
-            +------ MATCH (direct memcpy) -+
-```
+```c
+// Worker "producer":
+tell("consumer", &payload, sizeof(payload), 100);
 
-1. **Matching Rule**: `wtell(A -> B)` matches `wask(B <- A)`.
-2. **Reverse Arrival Order**: Works identically regardless of whether `wask` or `wtell` arrives first.
-3. **Atomic Transfer**: Data is copied directly from sender linear memory to receiver linear memory under host synchronization lock.
-4. **No Queuing**: If an operation times out or cancels, no payload remains stored in the host.
-
----
-
-## 4. Multi-ROM Execution CLI
-
-Run multiple ROM workers simultaneously on the native host:
-
-```bash
-# Run producer and consumer concurrently:
-./build/piolho roms/ipc_producer.wasm:producer roms/ipc_consumer.wasm:consumer
-
-# Headless execution with timeout/max frames:
-./build/piolho --headless -n 60 roms/ipc_producer.wasm:producer roms/ipc_consumer.wasm:consumer
+// Worker "consumer":
+hear("producer", &buffer, sizeof(buffer), 100);
+// Ou aceita de qualquer remetente:
+hear(ANY, &buffer, sizeof(buffer), 100);
 ```

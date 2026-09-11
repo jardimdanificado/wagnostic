@@ -13,16 +13,16 @@ All concrete capabilities (graphics, clock, input, sound, storage, network) are 
 A Piolho 2.0 module is a standard 32-bit WebAssembly (Wasm MVP) binary with a linear memory.
 
 The entire interaction between host and guest is governed by exactly **two functions**:
-1. **One exported entry point**: `wupdate()` (called by the host).
-2. **One imported capability dispatcher**: `wextension(name)` (called by the guest).
+1. **One exported entry point**: `update()` (called by the host).
+2. **One imported capability dispatcher**: `use(name)` (called by the guest).
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                            HOST                             │
 │                                                             │
-│   Calls: wupdate() ──────────────► [ Guest Execution Step ] │
+│   Calls: update() ───────────────► [ Guest Execution Step ] │
 │                                             │               │
-│   Resolves: wextension(name) ◄──────────────┘               │
+│   Resolves: use(name) ◄─────────────────────┘               │
 │   Returns: pointer to extension struct in WASM Memory       │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -31,99 +31,66 @@ The entire interaction between host and guest is governed by exactly **two funct
 
 ## 2. Binary Functions
 
-### 2.1 Guest Exports: `wupdate`, `winit`, `wexit`
+### 2.1 Guest Exports: `update`, `setup`, `shutdown`
 
-Every Piolho module must export the `wupdate` function. It may optionally export `winit` and `wexit` for worker lifecycle hooks.
+Every Piolho module must export the `update` function. It may optionally export `setup` and `shutdown` for worker lifecycle hooks.
 
 ```c
-int32_t winit(void);    /* Optional: called once on worker startup */
-int32_t wupdate(void);  /* Mandatory: called repeatedly on each execution cycle */
-int32_t wexit(void);    /* Optional: called once on worker shutdown */
+int32_t setup(void);    /* Optional: called once on worker startup */
+int32_t update(void);   /* Mandatory: called repeatedly on each execution cycle */
+int32_t shutdown(void); /* Optional: called once on worker shutdown */
 ```
 
 - **WASM Type Signatures**:
-  - `(func (export "winit") (result i32))`
-  - `(func (export "wupdate") (result i32))`
-  - `(func (export "wexit") (result i32))`
-- **Return Codes for `wupdate`**:
-  - `0` (`WUPDATE_OK`): The frame/step executed successfully. The host proceeds to the next iteration.
-  - `1` (`WUPDATE_EXIT`): The guest module requests a clean shutdown.
-  - `<0` (`WUPDATE_ERROR`): Fatal error during guest execution.
+  - `(func (export "setup") (result i32))`
+  - `(func (export "update") (result i32))`
+  - `(func (export "shutdown") (result i32))`
+- **Return Codes for `update`**:
+  - `0` (`UPDATE_OK`): The frame/step executed successfully. The host proceeds to the next iteration.
+  - `1` (`UPDATE_EXIT`): The guest module requests a clean shutdown.
+  - `<0` (`UPDATE_ERROR`): Fatal error during guest execution.
 
 ---
 
-### 2.2 Host Imports: `wextension`, `wask`, `wtell`
+### 2.2 Host Imports: `use`, `hear`, `tell`
 
 The host provides capability dispatch and rendezvous IPC imports under the `"env"` module namespace:
 
 ```c
-void*   wextension(const char *name);
-int32_t wask(const char *target, void *data, int32_t size, int32_t timeout);
-int32_t wtell(const char *target, const void *data, int32_t size, int32_t timeout);
+void*   use(const char *name);
+int32_t hear(const char *target, void *data, int32_t size, int32_t timeout);
+int32_t tell(const char *target, const void *data, int32_t size, int32_t timeout);
 ```
 
-- **WASM Type Signatures**:
-  - `(import "env" "wextension" (func (param i32) (result i32)))`
-  - `(import "env" "wask" (func (param i32 i32 i32 i32) (result i32)))`
-  - `(import "env" "wtell" (func (param i32 i32 i32 i32) (result i32)))`
-- For full IPC semantics, parameters, and status codes, see **[IPC.md](IPC.md)**.
+- **WASM Import Signatures**:
+  - `(import "env" "use" (func (param i32) (result i32)))`
+  - `(import "env" "hear" (func (param i32 i32 i32 i32) (result i32)))`
+  - `(import "env" "tell" (func (param i32 i32 i32 i32) (result i32)))`
 
 ---
 
-## 3. Extension Memory Model
+## 3. Minimal ROM Example
 
-Piolho does **not** enforce rigid metadata, mandatory headers, or boilerplate fields at the beginning of extension structs. An extension is simply a named memory structure agreed upon between host and guest.
+```c
+#include "piolho.h"
+#include "framebuffer.h"
 
-### 3.1 Memory Rules
-- **Linear Memory Ownership**: Extension structs reside in the guest module's WebAssembly linear memory. The host allocates them in a dedicated host-reserved arena or mapped region within the guest's linear memory.
-- **Pointer Representation**: Any internal pointers (e.g. buffer locations) are 32-bit byte offsets from the start of the WASM linear memory (`0x00000000`).
-- **Endianness**: All 16-bit, 32-bit, and 64-bit integer and floating-point values are strictly **Little-Endian**.
-- **Alignment**: Struct fields are aligned to their natural size (4-byte alignment for 32-bit fields, 8-byte alignment for 64-bit fields).
+static framebuffer_t *fb;
 
----
+int32_t setup(void) {
+    fb = (framebuffer_t*)use("std:framebuffer");
+    if (fb) {
+        fb->width = 320;
+        fb->height = 240;
+    }
+    return 0;
+}
 
-## 4. Capability Negotiation Lifecycle
-
-```mermaid
-sequenceDiagram
-    participant Host
-    participant Guest as WASM Guest (wupdate)
-    participant Mem as WASM Linear Memory
-
-    Host->>Guest: Call wupdate()
-    activate Guest
-    Guest->>Host: wextension("std:framebuffer")
-    Host->>Mem: Allocate/populate wframebuffer_t struct
-    Host-->>Guest: Return struct pointer (offset)
-    Guest->>Mem: Write pixel data to fb->pixels
-    Guest-->>Host: Return WUPDATE_OK (0)
-    deactivate Guest
-    Host->>Mem: Read fb->pixels & render
+int32_t update(void) {
+    if (fb && fb->pixels) {
+        uint32_t *p = (uint32_t*)fb->pixels;
+        p[0] = 0xFF0000FF; // Red pixel
+    }
+    return UPDATE_OK;
+}
 ```
-
-1. During `wupdate()`, the guest queries desired capabilities by calling `wextension(name)`.
-2. If supported, the host provides a memory struct initialized with its capabilities and returns its offset.
-3. If unsupported, the host returns `0` (`NULL`). The guest must handle missing extensions gracefully.
-
----
-
-## 5. Standard Extensions
-
-The official standard library of extensions is specified in **[STD.md](STD.md)**:
-
-- `std:framebuffer`: 32-bit RGBA8888 raster graphics buffer (`width`, `height`, `pixels`).
-- `std:clock`: Monotonic timing and frame delta (`ticks`, `frequency`, `delta`).
-- `std:keyboard`: Keyboard input state (256 USB HID scancodes).
-- `std:mouse`: Mouse pointer coordinates, button bitmask, and wheel deltas.
-- `std:gamepad`: Gamepad button bitmask and 8 analog axes.
-- `std:gif`: Headless GIF recording synchronization.
-- `logger`: Text logging buffer.
-
----
-
-## 6. Official Hosts & Minimal Templates
- 
-- **Universal Host (`bin/piolho.js`, `src/`)**: Universal zero-dependency JavaScript host compatible with **Node.js**, **txiki.js (`tjs`)**, **Bun**, and **Deno**.
-- **Native Host (`runners/native/`)**: 100% `libc` / POSIX C runner with wasm3. Multi-threaded OS worker pool with headless GIF export. Zero external windowing dependencies.
-- **`examples/bare_runner.c`**: Minimal standalone C host (~90 lines).
-- **`examples/bare_runner.js`**: Minimal standalone JavaScript host (~60 lines).

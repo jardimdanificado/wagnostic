@@ -4,8 +4,8 @@
 #include "framebuffer.h"
 #include "keyboard.h"
 
-static wframebuffer_t *surface;
-static wkeyboard_t    *keyboard;
+static framebuffer_t *surface;
+static keyboard_t    *keyboard;
 
 #define RGBA(r, g, b, a) ((uint32_t)(((uint8_t)(a) << 24) | ((uint8_t)(b) << 16) | ((uint8_t)(g) << 8) | (uint8_t)(r)))
 #define RGB(r, g, b) RGBA(r, g, b, 255)
@@ -72,10 +72,10 @@ static void draw_status(void) {
     fill_rect(50, h - 25, 10, 10, 200, 200, 200);
 }
 
-int32_t wupdate(void) {
+int32_t update(void) {
     if (!initialized) {
-        surface  = (wframebuffer_t*)wextension(WFRAMEBUFFER_EXTENSION);
-        keyboard = (wkeyboard_t*)wextension(WKEYBOARD_EXTENSION);
+        surface  = (framebuffer_t*)use(FRAMEBUFFER_EXTENSION);
+        keyboard = (keyboard_t*)use(KEYBOARD_EXTENSION);
 
         if (surface) {
             surface->width = 320;
@@ -85,7 +85,7 @@ int32_t wupdate(void) {
         initialized = 1;
     }
 
-    if (!surface) return WUPDATE_ERROR;
+    if (!surface) return UPDATE_ERROR;
 
     frame_phase++;
 
@@ -112,5 +112,5 @@ int32_t wupdate(void) {
     int ax = (frame_phase * 3) % (int)surface->width;
     fill_rect(ax, 10, 20, 20, 255, 200, 0);
 
-    return WUPDATE_OK;
+    return UPDATE_OK;
 }

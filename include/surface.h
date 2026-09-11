@@ -3,4 +3,7 @@
 
 #include "framebuffer.h"
 
-#endif
+typedef framebuffer_t surface_t;
+typedef framebuffer_t wsurface_t;
+
+#endif /* PIOLHO_SURFACE_H */

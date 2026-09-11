@@ -20,11 +20,11 @@ typedef struct {
 } PathTracerJob;
 
 /* Extensions */
-static wframebuffer_t *fb = 0;
-static wclock_t       *clk = 0;
-static wkeyboard_t    *kb = 0;
-static wmouse_t       *mouse = 0;
-static wgamepad_t     *gp = 0;
+static framebuffer_t *fb = 0;
+static clock_ext_t       *clk = 0;
+static keyboard_t    *kb = 0;
+static mouse_t       *mouse = 0;
+static gamepad_t     *gp = 0;
 
 /* Camera State */
 static float cam_x = 0.0f;
@@ -260,23 +260,23 @@ static Vec3 ray_color(Vec3 ro, Vec3 rd, uint32_t *seed, int fast_mode) {
 #define MAX_HEIGHT 240
 static float g_local_acc[MAX_WIDTH * MAX_HEIGHT * 3];
 
-int32_t winit(void) {
-    fb    = (wframebuffer_t*)wextension("std:framebuffer");
-    clk   = (wclock_t*)wextension("std:clock");
-    kb    = (wkeyboard_t*)wextension("std:keyboard");
-    mouse = (wmouse_t*)wextension("std:mouse");
-    gp    = (wgamepad_t*)wextension("std:gamepad");
+int32_t setup(void) {
+    fb    = (framebuffer_t*)use("std:framebuffer");
+    clk   = (clock_ext_t*)use("std:clock");
+    kb    = (keyboard_t*)use("std:keyboard");
+    mouse = (mouse_t*)use("std:mouse");
+    gp    = (gamepad_t*)use("std:gamepad");
 
-    if (!fb) fb = (wframebuffer_t*)wextension("framebuffer");
-    if (!clk) clk = (wclock_t*)wextension("clock");
-    if (!kb) kb = (wkeyboard_t*)wextension("keyboard");
-    if (!mouse) mouse = (wmouse_t*)wextension("mouse");
-    if (!gp) gp = (wgamepad_t*)wextension("gamepad");
+    if (!fb) fb = (framebuffer_t*)use("framebuffer");
+    if (!clk) clk = (clock_ext_t*)use("clock");
+    if (!kb) kb = (keyboard_t*)use("keyboard");
+    if (!mouse) mouse = (mouse_t*)use("mouse");
+    if (!gp) gp = (gamepad_t*)use("gamepad");
 
     // Probe active workers
     g_active_workers = 0;
     for (int i = 0; i < MAX_DISCOVER_WORKERS; i++) {
-        int r = wtell(k_worker_names[i], 0, 0, 0);
+        int r = tell(k_worker_names[i], 0, 0, 0);
         if (r != WIPC_TARGET) {
             g_active_workers++;
         }
@@ -285,8 +285,8 @@ int32_t winit(void) {
     return 0;
 }
 
-int32_t wupdate(void) {
-    if (!fb || !fb->pixels) return WUPDATE_EXIT;
+int32_t update(void) {
+    if (!fb || !fb->pixels) return UPDATE_EXIT;
 
     uint32_t width = fb->width ? fb->width : 320;
     uint32_t height = fb->height ? fb->height : 240;
@@ -336,12 +336,12 @@ int32_t wupdate(void) {
     }
 
     if (gp) {
-        if (gp->buttons & WGAMEPAD_BTN_DPAD_UP)    { cam_x += -s * speed; cam_z += c * speed; moved = true; }
-        if (gp->buttons & WGAMEPAD_BTN_DPAD_DOWN)  { cam_x -= -s * speed; cam_z -= c * speed; moved = true; }
-        if (gp->buttons & WGAMEPAD_BTN_DPAD_LEFT)  { cam_yaw += 1.5f * dt; moved = true; }
-        if (gp->buttons & WGAMEPAD_BTN_DPAD_RIGHT) { cam_yaw -= 1.5f * dt; moved = true; }
-        if (gp->buttons & WGAMEPAD_BTN_A) { cam_y += speed; moved = true; }
-        if (gp->buttons & WGAMEPAD_BTN_B) { cam_y -= speed; moved = true; }
+        if (gp->buttons & GAMEPAD_BTN_DPAD_UP)    { cam_x += -s * speed; cam_z += c * speed; moved = true; }
+        if (gp->buttons & GAMEPAD_BTN_DPAD_DOWN)  { cam_x -= -s * speed; cam_z -= c * speed; moved = true; }
+        if (gp->buttons & GAMEPAD_BTN_DPAD_LEFT)  { cam_yaw += 1.5f * dt; moved = true; }
+        if (gp->buttons & GAMEPAD_BTN_DPAD_RIGHT) { cam_yaw -= 1.5f * dt; moved = true; }
+        if (gp->buttons & GAMEPAD_BTN_A) { cam_y += speed; moved = true; }
+        if (gp->buttons & GAMEPAD_BTN_B) { cam_y -= speed; moved = true; }
     }
 
     uint32_t current_frame = frame_count;
@@ -371,7 +371,7 @@ int32_t wupdate(void) {
             job.worker_id = (uint32_t)i;
             job.num_workers = (uint32_t)g_active_workers;
 
-            wtell(k_worker_names[i], &job, sizeof(job), -1);
+            tell(k_worker_names[i], &job, sizeof(job), -1);
         }
 
         // Collect rendered slices from workers
@@ -381,7 +381,7 @@ int32_t wupdate(void) {
             uint32_t slice_lines = end_y - start_y;
             uint32_t slice_bytes = slice_lines * width * 4;
 
-            wask(k_worker_names[i], (uint8_t*)(vram + start_y * width), slice_bytes, -1);
+            hear(k_worker_names[i], (uint8_t*)(vram + start_y * width), slice_bytes, -1);
         }
     } else {
         // Standalone local path tracing
@@ -452,9 +452,9 @@ int32_t wupdate(void) {
         }
     }
 
-    return WUPDATE_OK;
+    return UPDATE_OK;
 }
 
-int32_t wexit(void) {
+int32_t shutdown(void) {
     return 0;
 }

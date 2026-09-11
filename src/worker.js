@@ -52,29 +52,40 @@ class WWorker {
   }
 
   getImportObject() {
+    const handleUse = (namePtr) => {
+      const extName = this.readString(namePtr);
+      return this.host.extensions.dispatch(this, this.host, extName);
+    };
+
+    const handleHear = (targetPtr, dataPtr, size, timeout) => {
+      const target = this.readString(targetPtr);
+      return this.host.ipc.ask(this, target, dataPtr, size, timeout, this.host.workerMap);
+    };
+
+    const handleTell = (targetPtr, dataPtr, size, timeout) => {
+      const target = this.readString(targetPtr);
+      return this.host.ipc.tell(this, target, dataPtr, size, timeout, this.host.workerMap);
+    };
+
+    const handleQuit = (code) => {
+      this.running = false;
+      this.exitCode = code;
+    };
+
     return {
       env: {
         memory: new WebAssembly.Memory({ initial: 16 }),
 
-        wextension: (namePtr) => {
-          const extName = this.readString(namePtr);
-          return this.host.extensions.dispatch(this, this.host, extName);
-        },
+        use: handleUse,
+        hear: handleHear,
+        tell: handleTell,
+        quit: handleQuit,
 
-        wask: (targetPtr, dataPtr, size, timeout) => {
-          const target = this.readString(targetPtr);
-          return this.host.ipc.ask(this, target, dataPtr, size, timeout, this.host.workerMap);
-        },
-
-        wtell: (targetPtr, dataPtr, size, timeout) => {
-          const target = this.readString(targetPtr);
-          return this.host.ipc.tell(this, target, dataPtr, size, timeout, this.host.workerMap);
-        },
-
-        wexit: (code) => {
-          this.running = false;
-          this.exitCode = code;
-        }
+        // Backwards compatibility aliases
+        wextension: handleUse,
+        wask: handleHear,
+        wtell: handleTell,
+        wexit: handleQuit
       },
       wasi_snapshot_preview1: {
         proc_exit: (code) => {
@@ -92,16 +103,17 @@ class WWorker {
     this.module = wasmModule.module;
     this.memory = this.instance.exports.memory || importObj.env.memory;
 
-    if (typeof this.instance.exports.winit === 'function') {
+    const setupFn = this.instance.exports.setup || this.instance.exports.init || this.instance.exports.winit;
+    if (typeof setupFn === 'function') {
       try {
-        const initRes = this.instance.exports.winit();
+        const initRes = setupFn();
         if (initRes < 0) {
-          console.error(`[Worker ${this.name}] winit() returned error code ${initRes}`);
+          console.error(`[Worker ${this.name}] setup() returned error code ${initRes}`);
           this.running = false;
           this.exitCode = initRes;
         }
       } catch (err) {
-        console.error(`[Worker ${this.name}] winit() exception:`, err.message);
+        console.error(`[Worker ${this.name}] setup() exception:`, err.message);
         this.running = false;
         this.exitCode = -1;
       }
@@ -110,16 +122,17 @@ class WWorker {
 
   update() {
     if (!this.running || !this.instance) return 1;
-    if (typeof this.instance.exports.wupdate !== 'function') return 1;
+    const updateFn = this.instance.exports.update || this.instance.exports.step || this.instance.exports.wupdate;
+    if (typeof updateFn !== 'function') return 1;
 
     try {
       this.host.extensions.onBeforeUpdate(this, this.host);
-      const status = this.instance.exports.wupdate();
+      const status = updateFn();
       this.frameCount++;
       this.host.extensions.onAfterUpdate(this, this.host);
       return status;
     } catch (err) {
-      console.error(`[Worker ${this.name}] wupdate() exception:`, err.message);
+      console.error(`[Worker ${this.name}] update() exception:`, err.message);
       this.running = false;
       this.exitCode = -1;
       return -1;
@@ -127,12 +140,13 @@ class WWorker {
   }
 
   exit() {
-    if (this.instance && typeof this.instance.exports.wexit === 'function') {
-      try { this.instance.exports.wexit(); } catch (e) {}
+    const shutdownFn = this.instance.exports.shutdown || this.instance.exports.quit || this.instance.exports.wexit;
+    if (this.instance && typeof shutdownFn === 'function') {
+      try { shutdownFn(); } catch (e) {}
     }
   }
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { WWorker };
+  module.exports = { WWorker, Worker: WWorker };
 }

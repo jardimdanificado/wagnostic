@@ -2,9 +2,9 @@
 
 Minimalist, modular, platform-agnostic WebAssembly multimedia runtime.
 
-- 📜 **[ABI.md](ABI.md)**: Core Binary ABI specification (`wupdate`, `wextension`, execution lifecycle).
-- 🧩 **[STD.md](STD.md)**: Standard Extensions specification (`std:framebuffer`, `std:clock`, `std:keyboard`, `std:mouse`, `std:gamepad`, `std:gif`, `logger`).
-- 🔄 **[IPC.md](IPC.md)**: Multi-ROM Worker & Synchronous Rendezvous IPC specification (`wask`, `wtell`).
+- 📜 **[ABI.md](ABI.md)**: Core Binary ABI specification (`update`, `use`, execution lifecycle).
+- 🧩 **[STD.md](STD.md)**: Standard Extensions specification (`std:framebuffer`, `std:clock`, `std:keyboard`, `std:mouse`, `std:gamepad`, `std:gif`, `logger`, `comm:*`).
+- 🔄 **[IPC.md](IPC.md)**: Multi-ROM Worker & Synchronous Rendezvous IPC specification (`tell`, `hear`).
 
 ---
 
@@ -29,32 +29,33 @@ node bin/piolho.js roms/pathtracer_master.wasm:master \
 
 ## Architecture Overview
 
-In Piolho 2.0, modules export a single lifecycle function `wupdate()` and request capabilities dynamically via named extensions:
+In Piolho 2.0, modules export a single lifecycle function `update()` and request capabilities dynamically via named extensions using `use()`:
 
 ```c
 #include "piolho.h"
 #include "framebuffer.h"
 #include "clock.h"
 
-static wframebuffer_t *fb;
-static wclock_t       *clock_ext;
+static framebuffer_t *fb;
+static clock_ext_t   *clock_ext;
 
-int32_t wupdate(void) {
-    if (!fb) {
-        fb        = (wframebuffer_t*)wextension("std:framebuffer");
-        clock_ext = (wclock_t*)wextension("std:clock");
-        if (fb) {
-            fb->width  = 320;
-            fb->height = 240;
-        }
+int32_t setup(void) {
+    fb        = (framebuffer_t*)use("std:framebuffer");
+    clock_ext = (clock_ext_t*)use("std:clock");
+    if (fb) {
+        fb->width  = 320;
+        fb->height = 240;
     }
+    return 0;
+}
 
+int32_t update(void) {
     if (fb && fb->pixels) {
         uint32_t *pixels = (uint32_t*)fb->pixels;
         // Draw 32-bit RGBA8888 pixels (0xAABBGGRR)...
     }
 
-    return WUPDATE_OK; // 0 = OK, 1 = EXIT, <0 = ERROR
+    return UPDATE_OK; // 0 = OK, 1 = EXIT, <0 = ERROR
 }
 ```
 
@@ -73,19 +74,15 @@ For full memory layouts, struct fields, and specifications, see **[STD.md](STD.m
 | `std:gamepad` | Gamepad digital buttons and 8 analog axes | 20 B | `gamepad.h` |
 | `std:gif` | GIF recording status, frame count, delay, and frame capture synchronization | 20 B | `gif.h` |
 | `logger` | Simple UTF-8 text message logging to host console | 12 B | `logger.h` |
+| `comm:tcp` | TCP peer discovery, active/passive binding, and transparent IPC | 144 B | `comm_tcp.h` |
+| `comm:pipe` | Unix domain socket / named pipe discovery and transparent IPC | 204 B | `comm_pipe.h` |
+| `comm:ws` | WebSocket client/server discovery and transparent IPC | 208 B | `comm_ws.h` |
+| `comm:udp` | UDP datagram probing, beacon broadcast, and transparent IPC | 144 B | `comm_udp.h` |
 
 ---
 
-## Runners & Architecture
- 
-1. **Universal Host (`bin/piolho.js`, `src/`)**:
-   - Universal zero-dependency JavaScript host compatible with **Node.js**, **txiki.js (`tjs`)**, **Bun**, and **Deno**.
-   - Modular Extension Registry (`ExtensionRegistry`), Multi-ROM Rendezvous IPC, and pure JS GIF encoder.
-
----
- 
 ## Running Test Suite
- 
+
 ```bash
 npm test
 # ou:

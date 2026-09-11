@@ -6,12 +6,12 @@
 #include "gamepad.h"
 #include "gif.h"
 
-static wframebuffer_t *framebuffer;
-static wclock_t       *clock_ext;
-static wkeyboard_t    *keyboard;
-static wmouse_t       *mouse;
-static wgamepad_t     *gamepad;
-static wgif_t         *gif;
+static framebuffer_t *framebuffer;
+static clock_ext_t       *clock_ext;
+static keyboard_t    *keyboard;
+static mouse_t       *mouse;
+static gamepad_t     *gamepad;
+static gif_t         *gif;
 
 static int initialized = 0;
 static int test_passed = 0;
@@ -19,18 +19,18 @@ static int test_passed = 0;
 #define RGBA(r, g, b, a) ((uint32_t)(((uint8_t)(a) << 24) | ((uint8_t)(b) << 16) | ((uint8_t)(g) << 8) | (uint8_t)(r)))
 #define RGB(r, g, b) RGBA(r, g, b, 255)
 
-int32_t wupdate(void) {
+int32_t update(void) {
     if (!initialized) {
         // Test 1: Discover standard extensions via std:*
-        framebuffer = (wframebuffer_t*)wextension(WFRAMEBUFFER_EXTENSION);
-        clock_ext   = (wclock_t*)wextension(WCLOCK_EXTENSION);
-        keyboard    = (wkeyboard_t*)wextension(WKEYBOARD_EXTENSION);
-        mouse       = (wmouse_t*)wextension(WMOUSE_EXTENSION);
-        gamepad     = (wgamepad_t*)wextension(WGAMEPAD_EXTENSION);
-        gif         = (wgif_t*)wextension(WGIF_EXTENSION);
+        framebuffer = (framebuffer_t*)use(FRAMEBUFFER_EXTENSION);
+        clock_ext   = (clock_ext_t*)use(CLOCK_EXTENSION);
+        keyboard    = (keyboard_t*)use(KEYBOARD_EXTENSION);
+        mouse       = (mouse_t*)use(MOUSE_EXTENSION);
+        gamepad     = (gamepad_t*)use(GAMEPAD_EXTENSION);
+        gif         = (gif_t*)use(GIF_EXTENSION);
 
         // Test 2: Unknown extension returns NULL
-        void* unk = wextension("unknown_custom_xyz");
+        void* unk = use("unknown_custom_xyz");
 
         test_passed = (framebuffer != NULL) &&
                       (clock_ext != NULL) &&
@@ -58,6 +58,6 @@ int32_t wupdate(void) {
         }
     }
 
-    return test_passed ? WUPDATE_OK : WUPDATE_ERROR;
+    return test_passed ? UPDATE_OK : UPDATE_ERROR;
 }
 

@@ -15,13 +15,17 @@ ROM_DIRS = \
 	bpp4_test \
 	exotic1_test \
 	exotic2_test \
-	wextension_test \
+	use_test \
 	bare_counter \
 	logger_example \
 	ipc_producer \
 	ipc_consumer \
 	pathtracer_master \
-	pathtracer_worker
+	pathtracer_worker \
+	comm_tcp_test \
+	comm_pipe_test \
+	comm_ws_test \
+	comm_udp_test
 
 
 PIOLHO_BIN ?= $(firstword $(wildcard ../build/piolho ../piolho piolho))

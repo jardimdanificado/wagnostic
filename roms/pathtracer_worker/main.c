@@ -232,20 +232,20 @@ static Vec3 ray_color(Vec3 ro, Vec3 rd, uint32_t *seed, int fast_mode) {
 static float g_acc_buffer[MAX_WIDTH * MAX_HEIGHT * 3];
 static uint32_t g_slice_pixels[MAX_WIDTH * MAX_HEIGHT];
 
-int32_t winit(void) {
+int32_t setup(void) {
     return 0;
 }
 
-int32_t wupdate(void) {
+int32_t update(void) {
     PathTracerJob job;
-    int r = wask("master", &job, sizeof(job), -1);
-    if (r != WIPC_OK) return WUPDATE_OK;
+    int r = hear("master", &job, sizeof(job), -1);
+    if (r != IPC_OK) return UPDATE_OK;
 
     uint32_t width = job.width > MAX_WIDTH ? MAX_WIDTH : job.width;
     uint32_t height = job.height > MAX_HEIGHT ? MAX_HEIGHT : job.height;
     uint32_t start_y = job.start_y;
     uint32_t end_y = job.end_y > height ? height : job.end_y;
-    if (start_y >= end_y || width == 0 || height == 0) return WUPDATE_OK;
+    if (start_y >= end_y || width == 0 || height == 0) return UPDATE_OK;
 
     int fast_mode = (job.frame_count == 0);
     Vec3 camera = {job.cam_x, job.cam_y, job.cam_z};
@@ -317,11 +317,11 @@ int32_t wupdate(void) {
     }
 
     uint32_t slice_bytes = slice_row_count * width * 4;
-    wtell("master", g_slice_pixels, slice_bytes, -1);
+    tell("master", g_slice_pixels, slice_bytes, -1);
 
-    return WUPDATE_OK;
+    return UPDATE_OK;
 }
 
-int32_t wexit(void) {
+int32_t shutdown(void) {
     return 0;
 }

@@ -6,10 +6,10 @@
 #include "keyboard.h"
 #include "mouse.h"
 
-static wframebuffer_t *surface;
-static wclock_t       *clock_ext;
-static wkeyboard_t    *keyboard;
-static wmouse_t       *mouse;
+static framebuffer_t *surface;
+static clock_ext_t       *clock_ext;
+static keyboard_t    *keyboard;
+static mouse_t       *mouse;
 
 #define RGBA(r, g, b, a) ((uint32_t)(((uint8_t)(a) << 24) | ((uint8_t)(b) << 16) | ((uint8_t)(g) << 8) | (uint8_t)(r)))
 #define RGB(r, g, b) RGBA(r, g, b, 255)
@@ -118,21 +118,21 @@ static void draw_mouse(int ox, int oy, int qw, int qh) {
 
     fill_rect(cx - 2, cy - 2, 5, 5, 255, 255, 255);
 
-    uint8_t lb = (mbtns & WMOUSE_BTN_LEFT) ? 255 : 80;
+    uint8_t lb = (mbtns & MOUSE_BTN_LEFT) ? 255 : 80;
     fill_rect(ox + 2, oy + qh - 12, 15, 10, lb, 30, 30);
 
-    uint8_t rb = (mbtns & WMOUSE_BTN_RIGHT) ? 100 : 80;
+    uint8_t rb = (mbtns & MOUSE_BTN_RIGHT) ? 100 : 80;
     fill_rect(ox + 22, oy + qh - 12, 15, 10, 30, 30, rb);
 
     draw_number(ox + 45, oy + qh - 12, mwheel, 255, 255, 0);
 }
 
-int32_t wupdate(void) {
+int32_t update(void) {
     if (!initialized) {
-        surface   = (wframebuffer_t*)wextension(WFRAMEBUFFER_EXTENSION);
-        clock_ext = (wclock_t*)wextension(WCLOCK_EXTENSION);
-        keyboard  = (wkeyboard_t*)wextension(WKEYBOARD_EXTENSION);
-        mouse     = (wmouse_t*)wextension(WMOUSE_EXTENSION);
+        surface   = (framebuffer_t*)use(FRAMEBUFFER_EXTENSION);
+        clock_ext = (clock_ext_t*)use(CLOCK_EXTENSION);
+        keyboard  = (keyboard_t*)use(KEYBOARD_EXTENSION);
+        mouse     = (mouse_t*)use(MOUSE_EXTENSION);
 
         if (surface) {
             surface->width = 320;
@@ -142,7 +142,7 @@ int32_t wupdate(void) {
         initialized = 1;
     }
 
-    if (!surface || !surface->pixels) return WUPDATE_ERROR;
+    if (!surface || !surface->pixels) return UPDATE_ERROR;
 
     frame_count++;
 
@@ -157,7 +157,7 @@ int32_t wupdate(void) {
     }
     r_was = key_r;
 
-    if (keyboard && keyboard->keys[41]) return WUPDATE_EXIT;
+    if (keyboard && keyboard->keys[41]) return UPDATE_EXIT;
 
     int W = (int)surface->width, H = (int)surface->height;
     clear(15, 15, 20);
@@ -169,5 +169,5 @@ int32_t wupdate(void) {
     draw_dirty_anim(W/2 + 1, 0, W/2 - 1, H/2);
     draw_mouse(0, H/2 + 1, W/2, H/2 - 1);
 
-    return WUPDATE_OK;
+    return UPDATE_OK;
 }

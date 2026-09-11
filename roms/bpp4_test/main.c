@@ -4,14 +4,14 @@
 #define RGBA(r, g, b, a) ((uint32_t)(((uint8_t)(a) << 24) | ((uint8_t)(b) << 16) | ((uint8_t)(g) << 8) | (uint8_t)(r)))
 #define RGB(r, g, b) RGBA(r, g, b, 255)
 
-static wframebuffer_t *surface;
+static framebuffer_t *surface;
 static int initialized = 0;
 static uint32_t ticks = 0;
 
-int32_t wupdate(void) {
+int32_t update(void) {
     ticks++;
     if (!initialized) {
-        surface = (wframebuffer_t*)wextension(WFRAMEBUFFER_EXTENSION);
+        surface = (framebuffer_t*)use(FRAMEBUFFER_EXTENSION);
         if (surface) {
             surface->width = 320;
             surface->height = 240;
@@ -19,7 +19,7 @@ int32_t wupdate(void) {
         initialized = 1;
     }
 
-    if (!surface || !surface->pixels) return WUPDATE_ERROR;
+    if (!surface || !surface->pixels) return UPDATE_ERROR;
 
     uint32_t *fb = (uint32_t*)surface->pixels;
 
@@ -33,5 +33,5 @@ int32_t wupdate(void) {
         }
     }
 
-    return WUPDATE_OK;
+    return UPDATE_OK;
 }

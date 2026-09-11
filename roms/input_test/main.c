@@ -7,11 +7,11 @@
 #include "mouse.h"
 #include "gamepad.h"
 
-static wframebuffer_t *surface;
-static wclock_t       *clock_ext;
-static wkeyboard_t    *keyboard;
-static wmouse_t       *mouse;
-static wgamepad_t     *gamepad;
+static framebuffer_t *surface;
+static clock_ext_t       *clock_ext;
+static keyboard_t    *keyboard;
+static mouse_t       *mouse;
+static gamepad_t     *gamepad;
 
 static uint32_t ticks = 0;
 static int initialized = 0;
@@ -113,8 +113,8 @@ static void draw_mouse_section(void) {
     draw_vline(cx, cy - 8, cy + 8, RGB(255, 255, 255));
     fill_rect(cx - 1, cy - 1, 3, 3, RGB(255, 0, 0));
 
-    uint32_t lc = (mbtns & WMOUSE_BTN_LEFT) ? RGB(255, 50, 50) : RGB(80, 80, 80);
-    uint32_t rc = (mbtns & WMOUSE_BTN_RIGHT) ? RGB(50, 50, 255) : RGB(80, 80, 80);
+    uint32_t lc = (mbtns & MOUSE_BTN_LEFT) ? RGB(255, 50, 50) : RGB(80, 80, 80);
+    uint32_t rc = (mbtns & MOUSE_BTN_RIGHT) ? RGB(50, 50, 255) : RGB(80, 80, 80);
     fill_rect(ox + 10, oy + h - 18, 25, 12, lc);
     fill_rect(ox + 40, oy + h - 18, 25, 12, rc);
 
@@ -132,28 +132,28 @@ static void draw_gamepad_section(void) {
 
     int bx = ox + 10, by = oy + 10;
     uint32_t dc = RGB(100, 100, 100);
-    fill_rect(bx + 10, by, 10, 10, (gp & WGAMEPAD_BTN_DPAD_UP) ? RGB(0,255,0) : dc);
-    fill_rect(bx + 10, by + 22, 10, 10, (gp & WGAMEPAD_BTN_DPAD_DOWN) ? RGB(0,255,0) : dc);
-    fill_rect(bx, by + 11, 10, 10, (gp & WGAMEPAD_BTN_DPAD_LEFT) ? RGB(0,255,0) : dc);
-    fill_rect(bx + 20, by + 11, 10, 10, (gp & WGAMEPAD_BTN_DPAD_RIGHT) ? RGB(0,255,0) : dc);
+    fill_rect(bx + 10, by, 10, 10, (gp & GAMEPAD_BTN_DPAD_UP) ? RGB(0,255,0) : dc);
+    fill_rect(bx + 10, by + 22, 10, 10, (gp & GAMEPAD_BTN_DPAD_DOWN) ? RGB(0,255,0) : dc);
+    fill_rect(bx, by + 11, 10, 10, (gp & GAMEPAD_BTN_DPAD_LEFT) ? RGB(0,255,0) : dc);
+    fill_rect(bx + 20, by + 11, 10, 10, (gp & GAMEPAD_BTN_DPAD_RIGHT) ? RGB(0,255,0) : dc);
     fill_rect(bx + 10, by + 11, 10, 10, RGB(50,50,50));
 
-    fill_rect(bx + 45, by + 5, 15, 15, (gp & WGAMEPAD_BTN_A) ? RGB(255,50,50) : dc);
-    fill_rect(bx + 65, by + 5, 15, 15, (gp & WGAMEPAD_BTN_B) ? RGB(50,50,255) : dc);
-    fill_rect(bx + 45, by + 25, 15, 10, (gp & WGAMEPAD_BTN_SELECT) ? RGB(200,200,0) : dc);
-    fill_rect(bx + 65, by + 25, 15, 10, (gp & WGAMEPAD_BTN_START) ? RGB(200,200,0) : dc);
+    fill_rect(bx + 45, by + 5, 15, 15, (gp & GAMEPAD_BTN_A) ? RGB(255,50,50) : dc);
+    fill_rect(bx + 65, by + 5, 15, 15, (gp & GAMEPAD_BTN_B) ? RGB(50,50,255) : dc);
+    fill_rect(bx + 45, by + 25, 15, 10, (gp & GAMEPAD_BTN_SELECT) ? RGB(200,200,0) : dc);
+    fill_rect(bx + 65, by + 25, 15, 10, (gp & GAMEPAD_BTN_START) ? RGB(200,200,0) : dc);
 
     draw_number(bx, by + 50, (int)gp, RGB(180, 180, 180));
 }
 
-int32_t wupdate(void) {
+int32_t update(void) {
     ticks++;
     if (!initialized) {
-        surface   = (wframebuffer_t*)wextension(WFRAMEBUFFER_EXTENSION);
-        clock_ext = (wclock_t*)wextension(WCLOCK_EXTENSION);
-        keyboard  = (wkeyboard_t*)wextension(WKEYBOARD_EXTENSION);
-        mouse     = (wmouse_t*)wextension(WMOUSE_EXTENSION);
-        gamepad   = (wgamepad_t*)wextension(WGAMEPAD_EXTENSION);
+        surface   = (framebuffer_t*)use(FRAMEBUFFER_EXTENSION);
+        clock_ext = (clock_ext_t*)use(CLOCK_EXTENSION);
+        keyboard  = (keyboard_t*)use(KEYBOARD_EXTENSION);
+        mouse     = (mouse_t*)use(MOUSE_EXTENSION);
+        gamepad   = (gamepad_t*)use(GAMEPAD_EXTENSION);
 
         if (surface) {
             surface->width = 320;
@@ -163,7 +163,7 @@ int32_t wupdate(void) {
         initialized = 1;
     }
 
-    if (!surface || !surface->pixels) return WUPDATE_ERROR;
+    if (!surface || !surface->pixels) return UPDATE_ERROR;
 
     uint32_t* fb = (uint32_t*)surface->pixels;
     for (int i = 0; i < 320 * 240; i++) fb[i] = RGB(15, 15, 20);
@@ -172,7 +172,7 @@ int32_t wupdate(void) {
     draw_mouse_section();
     draw_gamepad_section();
 
-    if (keyboard && keyboard->keys[41]) return WUPDATE_EXIT; // Escape
+    if (keyboard && keyboard->keys[41]) return UPDATE_EXIT; // Escape
 
-    return WUPDATE_OK;
+    return UPDATE_OK;
 }

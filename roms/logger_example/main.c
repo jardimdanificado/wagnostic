@@ -3,7 +3,7 @@
 #include "piolho.h"
 #include "logger.h"
 
-static wlogger_t *logger;
+static logger_t *logger;
 static int step = 0;
 
 static void log_str(const char *s) {
@@ -18,9 +18,9 @@ static void log_str(const char *s) {
     logger->length = len;
 }
 
-int32_t wupdate(void) {
+int32_t update(void) {
     if (!logger) {
-        logger = (wlogger_t*)wextension(WLOGGER_EXTENSION);
+        logger = (logger_t*)use(LOGGER_EXTENSION);
     }
 
     step++;
@@ -31,8 +31,8 @@ int32_t wupdate(void) {
         log_str("Step 2: Custom extensions are working smoothly.");
     } else if (step == 3) {
         log_str("Step 3: Completing execution. Goodbye!");
-        return WUPDATE_EXIT;
+        return UPDATE_EXIT;
     }
 
-    return WUPDATE_OK;
+    return UPDATE_OK;
 }
