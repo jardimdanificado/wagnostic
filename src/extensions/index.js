@@ -14,6 +14,7 @@ const { commTcpExtension } = require('./comm_tcp');
 const { commPipeExtension } = require('./comm_pipe');
 const { commWsExtension } = require('./comm_ws');
 const { commUdpExtension } = require('./comm_udp');
+const { commWorkersExtension } = require('./comm_workers');
 
 function createDefaultRegistry() {
   const registry = new ExtensionRegistry();
@@ -28,6 +29,7 @@ function createDefaultRegistry() {
   registry.register(commPipeExtension);
   registry.register(commWsExtension);
   registry.register(commUdpExtension);
+  registry.register(commWorkersExtension);
   return registry;
 }
 
@@ -49,5 +51,6 @@ module.exports = {
   commTcpExtension,
   commPipeExtension,
   commWsExtension,
-  commUdpExtension
+  commUdpExtension,
+  commWorkersExtension
 };

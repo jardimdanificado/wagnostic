@@ -16,6 +16,11 @@ class Piolho {
     this.intervalMs = options.intervalMs || (options.tickRate ? 1000 / options.tickRate : (options.fps ? 1000 / options.fps : 1000 / 30));
     this.extensions = options.extensions || new ExtensionRegistry();
 
+    if (options.extDirs) {
+      const dirs = Array.isArray(options.extDirs) ? options.extDirs : [options.extDirs];
+      for (const d of dirs) this.extensions.addSearchPath(d);
+    }
+
     this.workers = [];
     this.workerMap = new Map();
     this.peers = new PeerRegistry(this);
@@ -33,12 +38,22 @@ class Piolho {
     this.stepCount = val;
   }
 
+  addExtDir(dirPath) {
+    this.extensions.addSearchPath(dirPath);
+    return this;
+  }
+
   use(ext) {
-    if (ext instanceof ExtensionRegistry) {
+    if (typeof ext === 'string') {
+      const resolved = this.extensions.resolve(ext);
+      if (!resolved) {
+        throw new Error(`Extension '${ext}' not found in registered extensions or search paths`);
+      }
+    } else if (ext instanceof ExtensionRegistry) {
       for (const e of ext.activeList) {
         this.extensions.register(e);
       }
-    } else {
+    } else if (ext) {
       this.extensions.register(ext);
     }
     return this;

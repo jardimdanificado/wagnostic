@@ -36,6 +36,7 @@ Every standard extension structure adheres to the following conventions:
 | `comm:pipe` | Unix domain socket / named pipe peer discovery | 168 bytes | `comm_pipe.h` |
 | `comm:ws` | WebSocket client/server discovery & binding | 172 bytes | `comm_ws.h` |
 | `comm:udp` | UDP datagram probing & beacon discovery | 108 bytes | `comm_udp.h` |
+| `comm:workers` | Worker sub-instances capability indicator (returns 1 or 0) | 0 bytes | `comm_workers.h` |
 
 ---
 
@@ -269,4 +270,28 @@ typedef struct {
     int32_t status;      /* 0 = IDLE, 1 = CONNECTING, 2 = CONNECTED, -1 = ERROR */
     char peer_name[32];  /* Discovered peer name */
 } comm_udp_t;
+```
+
+---
+
+### 3.12 `comm:workers`
+
+Capability indicator for worker threads / sub-instances in the host runtime.
+
+- **Identifier**: `"comm:workers"` (also aliases to `"workers"`)
+- **Total Struct Size**: `0 bytes` (returns integer `1` if supported, `0` otherwise)
+- **Header File**: `include/comm_workers.h`
+
+#### C Usage Example:
+```c
+#include "piolho.h"
+#include "comm_workers.h"
+
+int32_t setup(void) {
+    int32_t has_workers = (int32_t)(uintptr_t)use("comm:workers");
+    if (has_workers) {
+        /* Host supports multi-worker topology */
+    }
+    return 0;
+}
 ```

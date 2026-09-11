@@ -20,10 +20,33 @@ async function main() {
   host.use(framebufferExtension).use(clockExtension); // opt-in extensions
 
   await host.loadRom('roms/display_test.wasm', 'display');
-  await host.run(60); // run for 60 frames (or omit to run continuously)
+  await host.run(60); // run for 60 steps (or omit to run continuously)
 }
 
 main();
+```
+
+---
+
+## Command Line Interface (CLI)
+
+The CLI allows running ROMs directly from the terminal with opt-in extensions, custom extension search paths, and multi-instance IPC:
+
+```bash
+# Run bare ROM with default communication extensions
+piolho app.wasm
+
+# Run multi-worker with explicit IPC aliases
+piolho master.wasm:master worker.wasm:worker
+
+# Explicitly opt-in to standard extensions
+piolho -e clock,framebuffer display.wasm:ui
+
+# Search for extensions dynamically in directories
+piolho -E ./my_extensions -e custom_dsp worker.wasm
+
+# Limit execution steps
+piolho -s 100 benchmark.wasm
 ```
 
 ---
@@ -79,6 +102,7 @@ For full memory layouts, struct fields, and specifications, see **[STD.md](STD.m
 | `comm:pipe` | Unix domain socket / named pipe discovery and transparent IPC | 204 B | `comm_pipe.h` |
 | `comm:ws` | WebSocket client/server discovery and transparent IPC | 208 B | `comm_ws.h` |
 | `comm:udp` | UDP datagram probing, beacon broadcast, and transparent IPC | 144 B | `comm_udp.h` |
+| `comm:workers` | Worker sub-instance capability indicator (returns 1 or 0) | 0 B | `comm_workers.h` |
 
 ---
 

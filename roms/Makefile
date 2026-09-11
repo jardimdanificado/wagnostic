@@ -25,7 +25,8 @@ ROM_DIRS = \
 	comm_tcp_test \
 	comm_pipe_test \
 	comm_ws_test \
-	comm_udp_test
+	comm_udp_test \
+	comm_workers_test
 
 
 TEST_DIRS = \
@@ -49,7 +50,8 @@ TEST_DIRS = \
 	comm_tcp_test \
 	comm_pipe_test \
 	comm_ws_test \
-	comm_udp_test
+	comm_udp_test \
+	comm_workers_test
 
 .PHONY: all clean test $(ROM_DIRS)
 

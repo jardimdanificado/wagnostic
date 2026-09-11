@@ -3,6 +3,9 @@
   "version": "2.0.0",
   "description": "Universal WASM Host & Multi-ROM Rendezvous IPC Library",
   "main": "src/index.js",
+  "bin": {
+    "piolho": "bin/piolho.js"
+  },
   "scripts": {
     "test": "make -C roms test"
   },

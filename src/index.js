@@ -21,7 +21,8 @@ const {
   commTcpExtension,
   commPipeExtension,
   commWsExtension,
-  commUdpExtension
+  commUdpExtension,
+  commWorkersExtension
 } = require('./extensions');
 const { IpcEngine } = require('./ipc');
 const { PeerRegistry } = require('./peer_registry');
@@ -53,6 +54,7 @@ module.exports = {
   commPipeExtension,
   commWsExtension,
   commUdpExtension,
+  commWorkersExtension,
   PeerRegistry,
   IpcEngine,
   MinimalGifEncoder,
