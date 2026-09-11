@@ -5,15 +5,12 @@
  * Runs on Node.js and txiki.js (tjs).
  * Renders 32-bit RGBA8888 framebuffer directly into any terminal using ANSI TrueColor.
  * 
- * Supports all Standard Extensions:
- * - std:framebuffer (v1)
- * - std:clock       (v1)
- * - std:io          (v1)
- * - std:gif         (v1)
- * - logger          (v1)
+ * Supports:
+ * - Multi-ROM Workers & Synchronous Rendezvous IPC (wask, wtell)
+ * - Standard Extensions: std:framebuffer, std:clock, std:keyboard, std:mouse, std:gamepad, std:gif, logger
  * 
  * Usage:
- *   node runners/node/wagnostic.js <rom.wasm|rom.tar> [-n <frames>] [-fps <fps>] [--headless] [-g <out.gif>]
+ *   node runners/node/wagnostic.js <rom1.wasm[:name1]> [rom2.wasm[:name2] ...] [-n <frames>] [-fps <fps>] [--headless] [-g <out.gif>]
  *   tjs runners/node/wagnostic.js <rom.wasm|rom.tar> ...
  */
 
@@ -63,7 +60,7 @@ const ENV = {
 };
 
 // ── Parse Command Line Arguments ──────────────────────────
-let wasmFile = null;
+const romSpecs = [];
 let maxFrames = 0;
 let targetFps = 30;
 let headless = false;
@@ -81,14 +78,14 @@ for (let i = 0; i < ENV.argv.length; i++) {
     headless = true;
   } else if (arg === '-g' || arg.startsWith('--gif=')) {
     gifPath = arg.includes('=') ? arg.split('=')[1] : ENV.argv[++i];
-  } else if (!wasmFile && !arg.startsWith('-')) {
-    wasmFile = arg;
+  } else if (!arg.startsWith('-')) {
+    romSpecs.push(arg);
   }
 }
 
-if (!wasmFile) {
+if (romSpecs.length === 0) {
   console.log('Wagnostic 2.0 Universal Runner (Node.js & txiki.js)');
-  console.log('Usage: wagnostic <rom.wasm|rom.tar> [-n <frames>] [-fps <fps>] [--headless] [-g <out.gif>]');
+  console.log('Usage: wagnostic <rom1.wasm[:name1]> [rom2.wasm[:name2] ...] [-n <frames>] [-fps <fps>] [--headless] [-g <out.gif>]');
   ENV.exit(1);
 }
 
@@ -120,21 +117,6 @@ function extractFromTar(buf, targetFileName) {
   return lastFound;
 }
 
-// ── Load Binary Bytes ─────────────────────────────────────
-let rawBytes;
-try {
-  rawBytes = ENV.readFile(wasmFile);
-} catch (e) {
-  console.error(`Error: Failed to open file: ${wasmFile}`);
-  ENV.exit(1);
-}
-
-let wasmBytes = rawBytes;
-const extractedWasm = extractFromTar(rawBytes, 'main.wasm');
-if (extractedWasm) {
-  wasmBytes = extractedWasm;
-}
-
 // ── Pure JS LZW GIF Encoder (Zero Dependencies) ───────────
 class MinimalGifEncoder {
   constructor(width, height, delayCs = 2) {
@@ -148,59 +130,122 @@ class MinimalGifEncoder {
     const indexed = new Uint8Array(this.width * this.height);
     for (let i = 0; i < indexed.length; i++) {
       const px = pixelsRgba[i];
-      const r = (px & 0xFF) >> 6;
-      const g = ((px >> 8) & 0xFF) >> 6;
+      const r = (px & 0xFF) >> 5;
+      const g = ((px >> 8) & 0xFF) >> 5;
       const b = ((px >> 16) & 0xFF) >> 6;
-      indexed[i] = (r << 4) | (g << 2) | b;
+      indexed[i] = (r << 5) | (g << 2) | b;
     }
     this.frames.push(indexed);
   }
 
   save() {
     const out = [];
-    const writeStr = (s) => { for (let i = 0; i < s.length; i++) out.push(s.charCodeAt(i)); };
-    const write16 = (v) => { out.push(v & 0xFF, (v >> 8) & 0xFF); };
+    const pushStr = (str) => {
+      for (let i = 0; i < str.length; i++) out.push(str.charCodeAt(i));
+    };
+    const push16 = (v) => { out.push(v & 0xFF, (v >> 8) & 0xFF); };
 
-    writeStr("GIF89a");
-    write16(this.width);
-    write16(this.height);
-    out.push(0xF5, 0x00, 0x00);
+    pushStr('GIF89a');
+    push16(this.width);
+    push16(this.height);
+    out.push(0xF7, 0, 0);
 
-    for (let r = 0; r < 4; r++) {
-      for (let g = 0; g < 4; g++) {
-        for (let b = 0; b < 4; b++) {
-          out.push(Math.round(r * 85), Math.round(g * 85), Math.round(b * 85));
-        }
-      }
+    for (let i = 0; i < 256; i++) {
+      const r = (i >> 5) & 7;
+      const g = (i >> 2) & 7;
+      const b = i & 3;
+      out.push(
+        Math.round((r / 7) * 255),
+        Math.round((g / 7) * 255),
+        Math.round((b / 3) * 255)
+      );
     }
 
     out.push(0x21, 0xFF, 0x0B);
-    writeStr("NETSCAPE2.0");
-    out.push(0x03, 0x01, 0x00, 0x00, 0x00);
+    pushStr('NETSCAPE2.0');
+    out.push(0x03, 0x01);
+    push16(0);
+    out.push(0x00);
 
-    for (const frameData of this.frames) {
+    for (const frame of this.frames) {
       out.push(0x21, 0xF9, 0x04, 0x00);
-      write16(this.delayCs);
+      push16(this.delayCs);
       out.push(0x00, 0x00);
 
       out.push(0x2C);
-      write16(0); write16(0);
-      write16(this.width); write16(this.height);
+      push16(0); push16(0);
+      push16(this.width); push16(this.height);
       out.push(0x00);
 
-      const minCodeSize = 6;
+      const minCodeSize = 8;
       out.push(minCodeSize);
+
       const clearCode = 1 << minCodeSize;
       const eoiCode = clearCode + 1;
+      let nextCode = eoiCode + 1;
+      let curCodeSize = minCodeSize + 1;
 
-      let pos = 0;
-      while (pos < frameData.length) {
-        const chunkLen = Math.min(254, frameData.length - pos);
-        out.push(chunkLen + 1);
-        out.push(clearCode);
-        for (let i = 0; i < chunkLen; i++) out.push(frameData[pos++]);
+      let codeBuf = 0;
+      let codeBits = 0;
+      const packet = [];
+
+      const writeBits = (val, bits) => {
+        codeBuf |= (val << codeBits);
+        codeBits += bits;
+        while (codeBits >= 8) {
+          packet.push(codeBuf & 0xFF);
+          codeBuf >>= 8;
+          codeBits -= 8;
+          if (packet.length === 254) {
+            out.push(packet.length, ...packet);
+            packet.length = 0;
+          }
+        }
+      };
+
+      const codeTable = new Map();
+      const resetTable = () => {
+        codeTable.clear();
+        for (let i = 0; i < clearCode; i++) codeTable.set(String.fromCharCode(i), i);
+        nextCode = eoiCode + 1;
+        curCodeSize = minCodeSize + 1;
+      };
+
+      resetTable();
+      writeBits(clearCode, curCodeSize);
+
+      let curStr = '';
+      for (let i = 0; i < frame.length; i++) {
+        const k = String.fromCharCode(frame[i]);
+        const testStr = curStr + k;
+        if (codeTable.has(testStr)) {
+          curStr = testStr;
+        } else {
+          writeBits(codeTable.get(curStr), curCodeSize);
+          if (nextCode < 4096) {
+            codeTable.set(testStr, nextCode++);
+            if (nextCode > (1 << curCodeSize) && curCodeSize < 12) {
+              curCodeSize++;
+            }
+          } else {
+            writeBits(clearCode, curCodeSize);
+            resetTable();
+          }
+          curStr = k;
+        }
       }
-      out.push(1, eoiCode);
+
+      if (curStr.length > 0) {
+        writeBits(codeTable.get(curStr), curCodeSize);
+      }
+      writeBits(eoiCode, curCodeSize);
+
+      if (codeBits > 0) {
+        packet.push(codeBuf & 0xFF);
+      }
+      if (packet.length > 0) {
+        out.push(packet.length, ...packet);
+      }
       out.push(0x00);
     }
 
@@ -209,172 +254,271 @@ class MinimalGifEncoder {
   }
 }
 
-// ── Main Execution ────────────────────────────────────────
+// ── Main Multi-Worker Runner ──────────────────────────────
 async function run() {
-  let memory = null;
-  let arenaOffset = 0;
-
-  function hostAlloc(size, align = 4) {
-    if (arenaOffset === 0) {
-      arenaOffset = (memory.buffer.byteLength > 1048576) ? 0x20000 : 0x8000;
-    }
-    if (align > 1) {
-      arenaOffset = (arenaOffset + align - 1) & ~(align - 1);
-    }
-    const ptr = arenaOffset;
-    arenaOffset += size;
-    return ptr;
-  }
-
-  function readString(ptr) {
-    if (!ptr || !memory) return '';
-    const bytes = new Uint8Array(memory.buffer, ptr);
-    let len = 0;
-    while (len < 256 && bytes[len] !== 0) len++;
-    return new TextDecoder().decode(bytes.subarray(0, len));
-  }
-
-  let fbPtr = 0;
-  let defaultFbPtr = 0;
-  let clockPtr = 0;
-  let keyboardPtr = 0;
-  let mousePtr = 0;
-  let gamepadPtr = 0;
-  let gifPtr = 0;
-  let loggerPtr = 0;
-  let loggerBufPtr = 0;
+  const workers = [];
+  const pendingIpcOps = []; // { sender, target, dataPtr, size, opType ('ASK'|'TELL') }
 
   const keyState = new Uint8Array(256);
   let mouseX = 0, mouseY = 0, mouseButtons = 0;
   let gamepadMask = 0;
   const gamepadAxes = new Int16Array(8);
 
-  const importObject = {
-    env: {
-      memory: new WebAssembly.Memory({ initial: 16 }),
-      wextension: (namePtr) => {
-        const name = readString(namePtr);
+  for (let i = 0; i < romSpecs.length; i++) {
+    const spec = romSpecs[i];
+    let filePath = spec;
+    let name = '';
 
-        // 1. Framebuffer (std:framebuffer)
-        if (name === 'std:framebuffer' || name === 'framebuffer' || name === 'surface' || name === 'std:surface') {
-          if (!fbPtr) {
-            fbPtr = hostAlloc(12, 4);
-            defaultFbPtr = hostAlloc(640 * 480 * 4, 4);
-            const view = new DataView(memory.buffer, fbPtr, 12);
-            view.setUint32(0, 320, true);             // width = 320
-            view.setUint32(4, 240, true);             // height = 240
-            view.setUint32(8, defaultFbPtr, true);    // pixels
-          }
-          return fbPtr;
-        }
-
-        // 2. Clock (std:clock)
-        if (name === 'std:clock' || name === 'clock') {
-          if (!clockPtr) {
-            clockPtr = hostAlloc(24, 8);
-            const view = new DataView(memory.buffer, clockPtr, 24);
-            view.setBigUint64(0, 0n, true);           // ticks
-            view.setBigUint64(8, 1000n, true);       // frequency
-            view.setFloat32(16, 1.0 / targetFps, true); // delta
-          }
-          return clockPtr;
-        }
-
-        // 3. Keyboard (std:keyboard)
-        if (name === 'std:keyboard' || name === 'keyboard') {
-          if (!keyboardPtr) {
-            keyboardPtr = hostAlloc(256, 4);
-            new Uint8Array(memory.buffer, keyboardPtr, 256).fill(0);
-          }
-          return keyboardPtr;
-        }
-
-        // 4. Mouse (std:mouse)
-        if (name === 'std:mouse' || name === 'mouse') {
-          if (!mousePtr) {
-            mousePtr = hostAlloc(20, 4);
-            const view = new DataView(memory.buffer, mousePtr, 20);
-            view.setInt32(0, 0, true);                // x
-            view.setInt32(4, 0, true);                // y
-            view.setUint32(8, 0, true);               // buttons
-            view.setInt32(12, 0, true);               // wheel_x
-            view.setInt32(16, 0, true);               // wheel_y
-          }
-          return mousePtr;
-        }
-
-        // 5. Gamepad (std:gamepad)
-        if (name === 'std:gamepad' || name === 'gamepad') {
-          if (!gamepadPtr) {
-            gamepadPtr = hostAlloc(20, 4);
-            const view = new DataView(memory.buffer, gamepadPtr, 20);
-            view.setUint32(0, 0, true);              // buttons
-            new Int16Array(memory.buffer, gamepadPtr + 4, 8).fill(0); // axes[8]
-          }
-          return gamepadPtr;
-        }
-
-        // 4. GIF Recording (std:gif)
-        if (name === 'std:gif' || name === 'gif') {
-          if (!gifPtr) {
-            gifPtr = hostAlloc(20, 4);
-            const view = new DataView(memory.buffer, gifPtr, 20);
-            view.setUint32(0, (gifPath || maxFrames > 0) ? 1 : 0, true); // recording
-            view.setUint32(4, 0, true);               // frame_count
-            view.setUint32(8, maxFrames, true);       // max_frames
-            view.setUint32(12, 2, true);              // delay_cs
-            view.setUint32(16, 0, true);              // save_trigger
-          }
-          return gifPtr;
-        }
-
-        // 5. Logger (logger)
-        if (name === 'logger') {
-          if (!loggerPtr) {
-            loggerPtr = hostAlloc(12, 4);
-            loggerBufPtr = hostAlloc(1024, 4);
-            const view = new DataView(memory.buffer, loggerPtr, 12);
-            view.setUint32(0, loggerBufPtr, true);    // buffer
-            view.setUint32(4, 1024, true);            // capacity
-            view.setUint32(8, 0, true);               // length
-          }
-          return loggerPtr;
-        }
-
-        return 0;
-      },
-      abort: () => console.error('WASM Aborted'),
-    },
-    wasi_snapshot_preview1: {
-      fd_write: () => 0,
-      fd_seek: () => 0,
-      fd_close: () => 0,
-      proc_exit: (code) => ENV.exit(code),
+    if (spec.includes(':')) {
+      const parts = spec.split(':');
+      filePath = parts[0];
+      name = parts[1];
+    } else {
+      name = filePath.split('/').pop().replace(/\.wasm$|\.tar$/, '');
     }
-  };
 
-  let wasmModule;
-  try {
-    wasmModule = await WebAssembly.instantiate(wasmBytes, importObject);
-  } catch (err) {
+    let rawBytes;
     try {
-      wasmModule = await WebAssembly.instantiate(wasmBytes, {});
-    } catch (e2) {
-      console.error('Failed to instantiate WebAssembly module:', err.message);
+      rawBytes = ENV.readFile(filePath);
+    } catch (e) {
+      console.error(`Error: Failed to open file: ${filePath}`);
       ENV.exit(1);
     }
+
+    let wasmBytes = rawBytes;
+    const extractedWasm = extractFromTar(rawBytes, 'main.wasm');
+    if (extractedWasm) wasmBytes = extractedWasm;
+
+    const worker = {
+      id: i + 1,
+      name,
+      filePath,
+      memory: null,
+      instance: null,
+      arenaOffset: 0,
+      running: true,
+      exitCode: 0,
+      fbPtr: 0,
+      defaultFbPtr: 0,
+      clockPtr: 0,
+      keyboardPtr: 0,
+      mousePtr: 0,
+      gamepadPtr: 0,
+      gifPtr: 0,
+      loggerPtr: 0,
+      loggerBufPtr: 0,
+    };
+
+    function hostAlloc(size, align = 4) {
+      if (worker.arenaOffset === 0) {
+        const blen = worker.memory.buffer.byteLength;
+        if (blen >= 2097152) {
+          worker.arenaOffset = blen - 1400000;
+        } else if (blen >= 1048576) {
+          worker.arenaOffset = blen - 400000;
+        } else {
+          worker.arenaOffset = 0x8000;
+        }
+      }
+      if (align > 1) {
+        worker.arenaOffset = (worker.arenaOffset + align - 1) & ~(align - 1);
+      }
+      const ptr = worker.arenaOffset;
+      worker.arenaOffset += size;
+      return ptr;
+    }
+
+    function readString(ptr) {
+      if (!ptr || !worker.memory) return '';
+      const bytes = new Uint8Array(worker.memory.buffer, ptr);
+      let len = 0;
+      while (len < 256 && bytes[len] !== 0) len++;
+      return new TextDecoder().decode(bytes.subarray(0, len));
+    }
+
+    const importObject = {
+      env: {
+        memory: new WebAssembly.Memory({ initial: 16 }),
+        wextension: (namePtr) => {
+          const extName = readString(namePtr);
+
+          if (extName === 'std:framebuffer' || extName === 'framebuffer' || extName === 'surface' || extName === 'std:surface') {
+            if (!worker.fbPtr) {
+              worker.fbPtr = hostAlloc(12, 4);
+              worker.defaultFbPtr = hostAlloc(640 * 480 * 4, 4);
+              const view = new DataView(worker.memory.buffer, worker.fbPtr, 12);
+              view.setUint32(0, 320, true);
+              view.setUint32(4, 240, true);
+              view.setUint32(8, worker.defaultFbPtr, true);
+            }
+            return worker.fbPtr;
+          }
+
+          if (extName === 'std:clock' || extName === 'clock') {
+            if (!worker.clockPtr) {
+              worker.clockPtr = hostAlloc(24, 8);
+              const view = new DataView(worker.memory.buffer, worker.clockPtr, 24);
+              view.setBigUint64(0, 0n, true);
+              view.setBigUint64(8, 1000n, true);
+              view.setFloat32(16, 1.0 / targetFps, true);
+            }
+            return worker.clockPtr;
+          }
+
+          if (extName === 'std:keyboard' || extName === 'keyboard') {
+            if (!worker.keyboardPtr) {
+              worker.keyboardPtr = hostAlloc(256, 4);
+              new Uint8Array(worker.memory.buffer, worker.keyboardPtr, 256).fill(0);
+            }
+            return worker.keyboardPtr;
+          }
+
+          if (extName === 'std:mouse' || extName === 'mouse') {
+            if (!worker.mousePtr) {
+              worker.mousePtr = hostAlloc(20, 4);
+            }
+            return worker.mousePtr;
+          }
+
+          if (extName === 'std:gamepad' || extName === 'gamepad') {
+            if (!worker.gamepadPtr) {
+              worker.gamepadPtr = hostAlloc(20, 4);
+            }
+            return worker.gamepadPtr;
+          }
+
+          if (extName === 'std:gif' || extName === 'gif') {
+            if (!worker.gifPtr) {
+              worker.gifPtr = hostAlloc(20, 4);
+              const view = new DataView(worker.memory.buffer, worker.gifPtr, 20);
+              view.setUint32(0, (gifPath || maxFrames > 0) ? 1 : 0, true);
+              view.setUint32(4, 0, true);
+              view.setUint32(8, maxFrames, true);
+              view.setUint32(12, 2, true);
+              view.setUint32(16, 0, true);
+            }
+            return worker.gifPtr;
+          }
+
+          if (extName === 'logger') {
+            if (!worker.loggerPtr) {
+              worker.loggerPtr = hostAlloc(12, 4);
+              worker.loggerBufPtr = hostAlloc(1024, 4);
+              const view = new DataView(worker.memory.buffer, worker.loggerPtr, 12);
+              view.setUint32(0, worker.loggerBufPtr, true);
+              view.setUint32(4, 1024, true);
+              view.setUint32(8, 0, true);
+            }
+            return worker.loggerPtr;
+          }
+
+          return 0;
+        },
+
+        wask: (targetPtr, dataPtr, size, timeout) => {
+          const target = readString(targetPtr);
+          if (target === worker.name) return -3; // WIPC_PARAM
+
+          const targetExists = romSpecs.some(s => (s.includes(':') ? s.split(':')[1] : s.split('/').pop().replace(/\.wasm$|\.tar$/, '')) === target);
+          if (!targetExists) return -2; // WIPC_TARGET
+
+          const matchIdx = pendingIpcOps.findIndex(
+            op => op.opType === 'TELL' && op.caller === target && op.target === worker.name
+          );
+
+          if (matchIdx !== -1) {
+            const match = pendingIpcOps.splice(matchIdx, 1)[0];
+            if (match.size > size) return -4; // WIPC_SIZE
+            if (match.size > 0) {
+              const src = new Uint8Array(match.data);
+              new Uint8Array(worker.memory.buffer, dataPtr, match.size).set(src);
+            }
+            return 1; // WIPC_OK
+          }
+
+          if (timeout === 0) return 0; // WIPC_TIMEOUT
+
+          // Register waiter
+          pendingIpcOps.push({
+            worker,
+            caller: worker.name,
+            target,
+            dataPtr,
+            size,
+            opType: 'ASK'
+          });
+          return 1; // WIPC_OK (cooperative)
+        },
+
+        wtell: (targetPtr, dataPtr, size, timeout) => {
+          const target = readString(targetPtr);
+          if (target === worker.name) return -3; // WIPC_PARAM
+
+          const targetExists = romSpecs.some(s => (s.includes(':') ? s.split(':')[1] : s.split('/').pop().replace(/\.wasm$|\.tar$/, '')) === target);
+          if (!targetExists) return -2; // WIPC_TARGET
+
+          const matchIdx = pendingIpcOps.findIndex(
+            op => op.opType === 'ASK' && op.caller === target && op.target === worker.name
+          );
+
+          if (matchIdx !== -1) {
+            const match = pendingIpcOps.splice(matchIdx, 1)[0];
+            if (size > match.size) return -4; // WIPC_SIZE
+            if (size > 0) {
+              const src = new Uint8Array(worker.memory.buffer, dataPtr, size);
+              new Uint8Array(match.worker.memory.buffer, match.dataPtr, size).set(src);
+            }
+            return 1; // WIPC_OK
+          }
+
+          if (timeout === 0) return 0; // WIPC_TIMEOUT
+
+          // Copy data immediately so local stack variable on caller side isn't clobbered
+          const dataCopy = new Uint8Array(size);
+          if (size > 0) {
+            dataCopy.set(new Uint8Array(worker.memory.buffer, dataPtr, size));
+          }
+
+          // Register offer
+          pendingIpcOps.push({
+            worker,
+            caller: worker.name,
+            target,
+            data: dataCopy,
+            size,
+            opType: 'TELL'
+          });
+          return 1; // WIPC_OK (cooperative)
+        },
+
+        abort: () => console.error(`Worker ${name} WASM Aborted`),
+      },
+      wasi_snapshot_preview1: {
+        fd_write: () => 0,
+        fd_seek: () => 0,
+        fd_close: () => 0,
+        proc_exit: (code) => ENV.exit(code),
+      }
+    };
+
+    let wasmModule;
+    try {
+      wasmModule = await WebAssembly.instantiate(wasmBytes, importObject);
+    } catch (err) {
+      console.error(`Failed to instantiate WASM module for ${name}:`, err.message);
+      ENV.exit(1);
+    }
+
+    worker.instance = wasmModule.instance;
+    worker.memory = worker.instance.exports.memory || importObject.env.memory;
+    workers.push(worker);
+
+    if (typeof worker.instance.exports.winit === 'function') {
+      try { worker.instance.exports.winit(); } catch (e) {}
+    }
   }
 
-  const instance = wasmModule.instance;
-  const exports = instance.exports;
-
-  if (typeof exports.wupdate !== 'function') {
-    console.error('Error: ROM does not export wupdate()');
-    ENV.exit(1);
-  }
-
-  memory = exports.memory || importObject.env.memory;
-
+  const primary = workers[0];
   let gifEncoder = null;
   let isRunning = true;
 
@@ -387,13 +531,22 @@ async function run() {
         process.stdin.setRawMode(false);
       }
     }
-    if (gifEncoder && gifPath) {
-      try {
-        const gifData = gifEncoder.save();
-        ENV.writeFile(gifPath, gifData);
-        console.log(`[GIF] Saved ${gifEncoder.frames.length} frames to ${gifPath}`);
-      } catch (err) {
-        console.error('Failed to save GIF:', err.message);
+    for (const w of workers) {
+      if (w.instance && typeof w.instance.exports.wexit === 'function') {
+        try { w.instance.exports.wexit(); } catch (e) {}
+      }
+    }
+    if (gifPath) {
+      if (gifEncoder && gifEncoder.frames.length > 0) {
+        try {
+          const gifData = gifEncoder.save();
+          ENV.writeFile(gifPath, gifData);
+          console.log(`[GIF] Saved ${gifEncoder.frames.length} frames to ${gifPath}`);
+        } catch (err) {
+          console.error('Failed to save GIF:', err.message);
+        }
+      } else {
+        console.log(`[GIF] No active framebuffer in loaded ROMs; skipping ${gifPath}`);
       }
     }
   }
@@ -427,16 +580,17 @@ async function run() {
   }
 
   function renderTerminal(frameNum) {
-    if (!fbPtr || fbPtr + 12 > memory.buffer.byteLength) return;
+    const fbWorker = workers.find(w => w.fbPtr && w.fbPtr + 12 <= w.memory.buffer.byteLength);
+    if (!fbWorker) return;
 
-    const fbView = new DataView(memory.buffer, fbPtr, 12);
+    const fbView = new DataView(fbWorker.memory.buffer, fbWorker.fbPtr, 12);
     const fbW = fbView.getUint32(0, true) || 320;
     const fbH = fbView.getUint32(4, true) || 240;
     const pixelsPtr = fbView.getUint32(8, true);
 
-    if (!pixelsPtr || fbW === 0 || fbH === 0 || pixelsPtr + fbW * fbH * 4 > memory.buffer.byteLength) return;
+    if (!pixelsPtr || fbW === 0 || fbH === 0 || pixelsPtr + fbW * fbH * 4 > fbWorker.memory.buffer.byteLength) return;
 
-    const pixels = new Uint32Array(memory.buffer, pixelsPtr, fbW * fbH);
+    const pixels = new Uint32Array(fbWorker.memory.buffer, pixelsPtr, fbW * fbH);
 
     if (gifPath && !gifEncoder) {
       gifEncoder = new MinimalGifEncoder(fbW, fbH, Math.round(100 / targetFps));
@@ -487,57 +641,72 @@ async function run() {
     const deltaSec = (now - lastTime) / 1000.0;
     lastTime = now;
 
-    if (clockPtr && clockPtr + 24 <= memory.buffer.byteLength) {
-      const view = new DataView(memory.buffer, clockPtr, 24);
-      view.setBigUint64(0, BigInt(now - startTime), true);
-      view.setFloat32(16, deltaSec, true);
-    }
+    let anyRunning = false;
 
-    if (keyboardPtr && keyboardPtr + 256 <= memory.buffer.byteLength) {
-      new Uint8Array(memory.buffer, keyboardPtr, 256).set(keyState);
-    }
+    for (const w of workers) {
+      if (!w.running) continue;
 
-    if (mousePtr && mousePtr + 20 <= memory.buffer.byteLength) {
-      const view = new DataView(memory.buffer, mousePtr, 20);
-      view.setInt32(0, mouseX, true);
-      view.setInt32(4, mouseY, true);
-      view.setUint32(8, mouseButtons, true);
-    }
+      if (w.clockPtr && w.clockPtr + 24 <= w.memory.buffer.byteLength) {
+        const view = new DataView(w.memory.buffer, w.clockPtr, 24);
+        view.setBigUint64(0, BigInt(now - startTime), true);
+        view.setFloat32(16, deltaSec, true);
+      }
 
-    if (gamepadPtr && gamepadPtr + 20 <= memory.buffer.byteLength) {
-      const view = new DataView(memory.buffer, gamepadPtr, 20);
-      view.setUint32(0, gamepadMask, true);
-      new Int16Array(memory.buffer, gamepadPtr + 4, 8).set(gamepadAxes);
-    }
+      if (w === primary) {
+        if (w.keyboardPtr && w.keyboardPtr + 256 <= w.memory.buffer.byteLength) {
+          new Uint8Array(w.memory.buffer, w.keyboardPtr, 256).set(keyState);
+        }
 
-    if (loggerPtr && loggerPtr + 12 <= memory.buffer.byteLength) {
-      const view = new DataView(memory.buffer, loggerPtr, 12);
-      const len = view.getUint32(8, true);
-      if (len > 0) {
-        const textBytes = new Uint8Array(memory.buffer, loggerBufPtr, len);
-        const str = new TextDecoder().decode(textBytes);
-        console.log(`[ROM Log] ${str}`);
-        view.setUint32(8, 0, true);
+        if (w.mousePtr && w.mousePtr + 20 <= w.memory.buffer.byteLength) {
+          const view = new DataView(w.memory.buffer, w.mousePtr, 20);
+          view.setInt32(0, mouseX, true);
+          view.setInt32(4, mouseY, true);
+          view.setUint32(8, mouseButtons, true);
+        }
+
+        if (w.gamepadPtr && w.gamepadPtr + 20 <= w.memory.buffer.byteLength) {
+          const view = new DataView(w.memory.buffer, w.gamepadPtr, 20);
+          view.setUint32(0, gamepadMask, true);
+          new Int16Array(w.memory.buffer, w.gamepadPtr + 4, 8).set(gamepadAxes);
+        }
+      }
+
+      if (w.loggerPtr && w.loggerPtr + 12 <= w.memory.buffer.byteLength) {
+        const view = new DataView(w.memory.buffer, w.loggerPtr, 12);
+        const len = view.getUint32(8, true);
+        if (len > 0) {
+          const textBytes = new Uint8Array(w.memory.buffer, w.loggerBufPtr, len);
+          const str = new TextDecoder().decode(textBytes);
+          console.log(`[${w.name} Log] ${str}`);
+          view.setUint32(8, 0, true);
+        }
+      }
+
+      let status = 0;
+      try {
+        if (typeof w.instance.exports.wupdate === 'function') {
+          status = w.instance.exports.wupdate();
+        }
+      } catch (err) {
+        console.error(`[Worker ${w.name}] wupdate() error at frame ${frame}:`, err.message);
+        cleanup();
+        ENV.exit(1);
+      }
+
+      if (status === 1) { // WUPDATE_EXIT
+        w.running = false;
+      } else if (status < 0) { // WUPDATE_ERROR
+        console.error(`[Worker ${w.name}] wupdate() returned error code ${status}`);
+        cleanup();
+        ENV.exit(1);
+      } else {
+        anyRunning = true;
       }
     }
 
-    let status = 0;
-    try {
-      status = exports.wupdate();
-    } catch (err) {
-      console.error(`wupdate() error at frame ${frame}:`, err.message);
-      cleanup();
-      ENV.exit(1);
-    }
-
-    if (status === 1) {
+    if (!anyRunning) {
       cleanup();
       ENV.exit(0);
-    }
-    if (status < 0) {
-      console.error(`wupdate() returned error code ${status}`);
-      cleanup();
-      ENV.exit(1);
     }
 
     renderTerminal(frame);

@@ -9,6 +9,9 @@ file(GLOB WASM3_SRC "runners/native/wasm3/source/*.c")
 # ── wagnostic (100% Libc/POSIX Terminal + GIF Native Runner) ──────────────────
 set(WAGNOSTIC_SOURCES
     runners/native/host.c
+    runners/native/platform.c
+    runners/native/ipc.c
+    runners/native/worker.c
     runners/native/gif_encoder.c
     ${WASM3_SRC}
 )

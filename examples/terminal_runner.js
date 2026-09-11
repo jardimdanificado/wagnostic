@@ -59,6 +59,9 @@ async function run() {
     return new TextDecoder().decode(bytes.subarray(0, len));
   }
 
+  let fbPtr = 0;
+  let defaultFbPtr = 0;
+  let clockPtr = 0;
   let keyboardPtr = 0;
   let mousePtr = 0;
   let gamepadPtr = 0;
@@ -121,7 +124,7 @@ async function run() {
         }
 
         // 6. Logger
-        if (name === 'logger' && version === 1) {
+        if (name === 'logger' || name === 'std:logger') {
           if (!loggerPtr) {
             loggerPtr = hostAlloc(20, 4);
             loggerBufPtr = hostAlloc(1024, 4);
@@ -137,13 +140,23 @@ async function run() {
 
         return 0;
       },
+      wask: () => -2,
+      wtell: () => -2,
+      wexit: (code) => {
+        cleanup();
+        console.log(`\n[Host] ROM called wexit(${code})`);
+        process.exit(code);
+      },
       abort: () => console.error('WASM Aborted'),
     },
     wasi_snapshot_preview1: {
       fd_write: () => 0,
       fd_seek: () => 0,
       fd_close: () => 0,
-      proc_exit: (code) => process.exit(code),
+      proc_exit: (code) => {
+        cleanup();
+        process.exit(code);
+      },
     }
   };
 
@@ -161,6 +174,10 @@ async function run() {
 
   const instance = wasmModule.instance;
   const exports = instance.exports;
+
+  if (typeof exports.winit === 'function') {
+    exports.winit();
+  }
 
   if (typeof exports.wupdate !== 'function') {
     console.error('Error: ROM does not export wupdate()');
@@ -196,10 +213,10 @@ async function run() {
   function renderTerminal(frameNum) {
     if (!fbPtr) return;
 
-    const fbView = new DataView(memory.buffer, fbPtr, 20);
-    const fbW = fbView.getUint32(8, true);
-    const fbH = fbView.getUint32(12, true);
-    const pixelsPtr = fbView.getUint32(16, true);
+    const fbView = new DataView(memory.buffer, fbPtr, 12);
+    const fbW = fbView.getUint32(0, true);
+    const fbH = fbView.getUint32(4, true);
+    const pixelsPtr = fbView.getUint32(8, true);
 
     if (!pixelsPtr || fbW === 0 || fbH === 0) return;
 

@@ -31,37 +31,42 @@ The entire interaction between host and guest is governed by exactly **two funct
 
 ## 2. Binary Functions
 
-### 2.1 Guest Export: `wupdate`
+### 2.1 Guest Exports: `wupdate`, `winit`, `wexit`
 
-Every Wagnostic module must export the `wupdate` function.
+Every Wagnostic module must export the `wupdate` function. It may optionally export `winit` and `wexit` for worker lifecycle hooks.
 
 ```c
-int32_t wupdate(void);
+int32_t winit(void);    /* Optional: called once on worker startup */
+int32_t wupdate(void);  /* Mandatory: called repeatedly on each execution cycle */
+int32_t wexit(void);    /* Optional: called once on worker shutdown */
 ```
 
-- **WASM Type Signature**: `(func (export "wupdate") (result i32))`
-- **Invocation**: The host invokes `wupdate()` periodically (e.g. once per frame at 60 Hz, or on every tick/step in headless runners).
-- **Return Codes**:
+- **WASM Type Signatures**:
+  - `(func (export "winit") (result i32))`
+  - `(func (export "wupdate") (result i32))`
+  - `(func (export "wexit") (result i32))`
+- **Return Codes for `wupdate`**:
   - `0` (`WUPDATE_OK`): The frame/step executed successfully. The host proceeds to the next iteration.
-  - `1` (`WUPDATE_EXIT`): The guest module requests a clean shutdown. The host terminates execution loop.
+  - `1` (`WUPDATE_EXIT`): The guest module requests a clean shutdown.
   - `<0` (`WUPDATE_ERROR`): Fatal error during guest execution.
 
 ---
 
-### 2.2 Host Import: `wextension`
+### 2.2 Host Imports: `wextension`, `wask`, `wtell`
 
-The host provides a single import under the `"env"` module namespace:
+The host provides capability dispatch and rendezvous IPC imports under the `"env"` module namespace:
 
 ```c
-void* wextension(const char *name);
+void*   wextension(const char *name);
+int32_t wask(const char *target, void *data, int32_t size, int32_t timeout);
+int32_t wtell(const char *target, const void *data, int32_t size, int32_t timeout);
 ```
 
-- **WASM Type Signature**: `(import "env" "wextension" (func (param i32) (result i32)))`
-- **Parameters**:
-  - `name`: 32-bit byte offset in WASM linear memory pointing to a null-terminated UTF-8 string identifying the extension (e.g., `"std:framebuffer"`, `"logger"`).
-- **Return Value**:
-  - A 32-bit byte offset in WASM linear memory pointing to the extension's memory block/struct.
-  - Returns `0` (`NULL`) if the host does not support or recognize the requested extension.
+- **WASM Type Signatures**:
+  - `(import "env" "wextension" (func (param i32) (result i32)))`
+  - `(import "env" "wask" (func (param i32 i32 i32 i32) (result i32)))`
+  - `(import "env" "wtell" (func (param i32 i32 i32 i32) (result i32)))`
+- For full IPC semantics, parameters, and status codes, see **[IPC.md](IPC.md)**.
 
 ---
 

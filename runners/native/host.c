@@ -1,16 +1,11 @@
 /*
- * Wagnostic 2.0 Native Runner — 100% Libc/POSIX Terminal & GIF Host
+ * Wagnostic 2.0 Native Runner — Multi-ROM Concurrent Worker & Rendezvous IPC Host
  *
- * Implements the Wagnostic 2.0 ABI using wasm3:
- * - Exports: wupdate() -> int32_t (WUPDATE_OK, WUPDATE_EXIT, WUPDATE_ERROR)
- * - Imports: env.wextension(const char *name, uint32_t version) -> void*
- *
- * Standard Extensions:
- * - std:framebuffer (v1) — Terminal ANSI TrueColor (▀) rendering
- * - std:clock       (v1) — Monotonic clock and frame delta
- * - std:io          (v1) — Unified input (Keyboard scancodes, Gamepad, Mouse)
- * - std:gif         (v1) — Headless GIF recording synchronization
- * - logger          (v1) — UTF-8 debug logging to host terminal
+ * Implements:
+ * - Multi-ROM worker execution with 1 OS thread per worker
+ * - Rendezvous IPC: wask() and wtell()
+ * - Standard Extensions: std:framebuffer, std:clock, std:keyboard, std:mouse, std:gamepad, std:gif, logger
+ * - ANSI TrueColor Terminal Rendering & Headless GIF Export
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -30,41 +25,16 @@
 #include <sys/ioctl.h>
 #endif
 
-#include "wasm3.h"
-#include "m3_env.h"
-#include "m3_api_libc.h"
-
 #include "wagnostic.h"
-#include "framebuffer.h"
-#include "clock.h"
-#include "keyboard.h"
-#include "mouse.h"
-#include "gamepad.h"
-#include "gif.h"
-#include "logger.h"
+#include "platform.h"
+#include "ipc.h"
+#include "worker.h"
 #include "gif_encoder.h"
 
-/* ================================================================
- * Globals & State
- * ================================================================ */
+#define MAX_WORKERS 64
 
-static IM3Module  g_module  = NULL;
-static IM3Runtime g_runtime = NULL;
-
-static uint8_t *g_mem     = NULL;
-static uint32_t g_mem_len = 0;
-
-static uint32_t g_fb_ptr       = 0;
-static uint32_t g_clock_ptr    = 0;
-static uint32_t g_keyboard_ptr = 0;
-static uint32_t g_mouse_ptr    = 0;
-static uint32_t g_gamepad_ptr  = 0;
-static uint32_t g_gif_ptr      = 0;
-static uint32_t g_logger_ptr   = 0;
-
-static uint32_t g_default_fb_ptr = 0;
-static uint32_t g_logger_buf_ptr = 0;
-static uint32_t g_arena_offset   = 0;
+static WWorker   *g_workers[MAX_WORKERS];
+static int        g_worker_count = 0;
 
 static const char *g_gif_path    = NULL;
 static GIFEncoder *g_gif_encoder = NULL;
@@ -72,8 +42,6 @@ static uint8_t    *g_gif_rgb_buf = NULL;
 static uint64_t    g_max_frames  = 0;
 static uint32_t    g_target_fps  = 30;
 static int         g_headless    = 0;
-static int         g_is_tar      = 0;
-static char        g_rom_path[1024] = {0};
 
 #if !defined(_WIN32)
 static struct termios g_orig_termios;
@@ -118,173 +86,44 @@ static uint8_t* tar_extract_file(const char* tar_path, const char* target_filena
 }
 
 /* ================================================================
- * Memory & Arena Helpers
- * ================================================================ */
-
-static void refresh_memory(void) {
-    g_mem = m3_GetMemory(g_runtime, &g_mem_len, 0);
-}
-
-static uint32_t host_alloc(uint32_t size, uint32_t align) {
-    refresh_memory();
-    if (g_arena_offset == 0) {
-        g_arena_offset = (g_mem_len > 1048576) ? 0x20000 : 0x8000;
-    }
-    if (align > 1) {
-        g_arena_offset = (g_arena_offset + align - 1) & ~(align - 1);
-    }
-    uint32_t ptr = g_arena_offset;
-    g_arena_offset += size;
-    if (g_arena_offset > g_mem_len && g_runtime) {
-        uint32_t pages = (g_arena_offset + 65535) / 65536;
-        ResizeMemory(g_runtime, pages);
-        refresh_memory();
-    }
-    return ptr;
-}
-
-/* ================================================================
- * Extension Dispatcher (env.wextension)
- * ================================================================ */
-
-m3ApiRawFunction(host_wextension) {
-    m3ApiReturnType(uint32_t);
-    m3ApiGetArg(uint32_t, name_ptr);
-
-    refresh_memory();
-    if (!g_mem || name_ptr >= g_mem_len) m3ApiReturn(0);
-
-    const char *name = (const char*)(g_mem + name_ptr);
-
-    /* 1. Framebuffer: std:framebuffer */
-    if (strcmp(name, WFRAMEBUFFER_EXTENSION) == 0 || strcmp(name, "surface") == 0 ||
-        strcmp(name, "framebuffer") == 0 || strcmp(name, "std:surface") == 0) {
-        if (g_fb_ptr == 0) {
-            g_fb_ptr = host_alloc(sizeof(wframebuffer_t), 4);
-            g_default_fb_ptr = host_alloc(640 * 480 * 4, 4);
-            wframebuffer_t *fb = (wframebuffer_t*)(g_mem + g_fb_ptr);
-            fb->width = 320;
-            fb->height = 240;
-            fb->pixels = g_default_fb_ptr;
-        }
-        m3ApiReturn(g_fb_ptr);
-    }
-
-    /* 2. Clock: std:clock */
-    if (strcmp(name, WCLOCK_EXTENSION) == 0 || strcmp(name, "clock") == 0) {
-        if (g_clock_ptr == 0) {
-            g_clock_ptr = host_alloc(sizeof(wclock_t), 8);
-            wclock_t *clk = (wclock_t*)(g_mem + g_clock_ptr);
-            clk->ticks = 0;
-            clk->frequency = 1000;
-            clk->delta = 1.0f / (float)g_target_fps;
-        }
-        m3ApiReturn(g_clock_ptr);
-    }
-
-    /* 3. Keyboard: std:keyboard */
-    if (strcmp(name, WKEYBOARD_EXTENSION) == 0 || strcmp(name, "keyboard") == 0) {
-        if (g_keyboard_ptr == 0) {
-            g_keyboard_ptr = host_alloc(sizeof(wkeyboard_t), 4);
-            wkeyboard_t *kb = (wkeyboard_t*)(g_mem + g_keyboard_ptr);
-            memset(kb, 0, sizeof(wkeyboard_t));
-        }
-        m3ApiReturn(g_keyboard_ptr);
-    }
-
-    /* 4. Mouse: std:mouse */
-    if (strcmp(name, WMOUSE_EXTENSION) == 0 || strcmp(name, "mouse") == 0) {
-        if (g_mouse_ptr == 0) {
-            g_mouse_ptr = host_alloc(sizeof(wmouse_t), 4);
-            wmouse_t *mouse = (wmouse_t*)(g_mem + g_mouse_ptr);
-            memset(mouse, 0, sizeof(wmouse_t));
-        }
-        m3ApiReturn(g_mouse_ptr);
-    }
-
-    /* 5. Gamepad: std:gamepad */
-    if (strcmp(name, WGAMEPAD_EXTENSION) == 0 || strcmp(name, "gamepad") == 0) {
-        if (g_gamepad_ptr == 0) {
-            g_gamepad_ptr = host_alloc(sizeof(wgamepad_t), 4);
-            wgamepad_t *gp = (wgamepad_t*)(g_mem + g_gamepad_ptr);
-            memset(gp, 0, sizeof(wgamepad_t));
-        }
-        m3ApiReturn(g_gamepad_ptr);
-    }
-
-    /* 4. GIF Recording: std:gif */
-    if (strcmp(name, WGIF_EXTENSION) == 0 || strcmp(name, "gif") == 0) {
-        if (g_gif_ptr == 0) {
-            g_gif_ptr = host_alloc(sizeof(wgif_t), 4);
-            wgif_t *g = (wgif_t*)(g_mem + g_gif_ptr);
-            g->recording = (g_gif_path != NULL) ? 1 : 0;
-            g->frame_count = 0;
-            g->max_frames = (uint32_t)g_max_frames;
-            g->delay_cs = (uint32_t)(100 / g_target_fps);
-            g->save_trigger = 0;
-        }
-        m3ApiReturn(g_gif_ptr);
-    }
-
-    /* 5. Logger: logger */
-    if (strcmp(name, "logger") == 0) {
-        if (g_logger_ptr == 0) {
-            g_logger_ptr = host_alloc(sizeof(wlogger_t), 4);
-            g_logger_buf_ptr = host_alloc(1024, 4);
-            wlogger_t *log = (wlogger_t*)(g_mem + g_logger_ptr);
-            log->buffer = g_logger_buf_ptr;
-            log->capacity = 1024;
-            log->length = 0;
-        }
-        m3ApiReturn(g_logger_ptr);
-    }
-
-    m3ApiReturn(0);
-}
-
-/* ================================================================
- * Terminal & Input Management (POSIX / Libc)
+ * Terminal & Input Management
  * ================================================================ */
 
 static void restore_terminal(void) {
 #if !defined(_WIN32)
     if (g_termios_saved) {
-        tcsetattr(STDIN_FILENO, TCSAFLUSH, &g_orig_termios);
+        tcsetattr(STDIN_FILENO, TCSANOW, &g_orig_termios);
         g_termios_saved = 0;
-    }
-    if (!g_headless) {
         printf("\x1b[?25h\x1b[0m\n");
         fflush(stdout);
     }
 #endif
-    if (g_gif_encoder && g_gif_path) {
-        gif_close(g_gif_encoder);
-        g_gif_encoder = NULL;
-        printf("[GIF] Saved GIF to %s\n", g_gif_path);
-    }
 }
 
-static void init_terminal_raw(void) {
+static void enable_raw_terminal(void) {
 #if !defined(_WIN32)
-    if (isatty(STDIN_FILENO)) {
-        tcgetattr(STDIN_FILENO, &g_orig_termios);
+    if (!isatty(STDIN_FILENO)) return;
+    if (tcgetattr(STDIN_FILENO, &g_orig_termios) == 0) {
         g_termios_saved = 1;
+        atexit(restore_terminal);
+
         struct termios raw = g_orig_termios;
-        raw.c_lflag &= ~(ICANON | ECHO);
-        tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+        raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
+        raw.c_iflag &= ~(IXON | ICRNL);
+        raw.c_cc[VMIN]  = 0;
+        raw.c_cc[VTIME] = 0;
+        tcsetattr(STDIN_FILENO, TCSANOW, &raw);
 
         int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
         fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
-    }
-    if (!g_headless) {
+
         printf("\x1b[?25l\x1b[2J");
         fflush(stdout);
     }
 #endif
-    atexit(restore_terminal);
 }
 
-static void get_terminal_size(int *out_cols, int *out_rows) {
+static void get_terminal_dimensions(int *out_cols, int *out_rows) {
     *out_cols = 80;
     *out_rows = 24;
 #if !defined(_WIN32)
@@ -296,9 +135,12 @@ static void get_terminal_size(int *out_cols, int *out_rows) {
 #endif
 }
 
-static int poll_terminal_input(wkeyboard_t *kb, wmouse_t *mouse, wgamepad_t *gp) {
+static int poll_terminal_input(WWorker *w) {
 #if !defined(_WIN32)
-    (void)mouse;
+    if (!w || !w->mem) return 1;
+    wkeyboard_t *kb = (w->keyboard_ptr && w->keyboard_ptr + sizeof(wkeyboard_t) <= w->mem_len) ? (wkeyboard_t*)(w->mem + w->keyboard_ptr) : NULL;
+    wgamepad_t  *gp = (w->gamepad_ptr  && w->gamepad_ptr + sizeof(wgamepad_t)   <= w->mem_len) ? (wgamepad_t*)(w->mem + w->gamepad_ptr)   : NULL;
+
     uint8_t buf[16];
     ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
     if (n > 0) {
@@ -326,14 +168,15 @@ static int poll_terminal_input(wkeyboard_t *kb, wmouse_t *mouse, wgamepad_t *gp)
  * Terminal Frame Rendering (ANSI TrueColor Half-Blocks)
  * ================================================================ */
 
-static void render_terminal_frame(wframebuffer_t *fb, uint64_t frame_num) {
-    if (!fb || fb->pixels == 0) return;
-    refresh_memory();
-    if (!g_mem || fb->pixels >= g_mem_len) return;
+static void render_terminal_frame(WWorker *w, uint64_t frame_num) {
+    if (!w || !w->mem || !w->fb_ptr || w->fb_ptr + sizeof(wframebuffer_t) > w->mem_len) return;
+
+    wframebuffer_t *fb = (wframebuffer_t*)(w->mem + w->fb_ptr);
+    if (!fb || fb->pixels == 0 || fb->pixels >= w->mem_len) return;
 
     uint32_t W = fb->width ? fb->width : 320;
     uint32_t H = fb->height ? fb->height : 240;
-    uint32_t *vram = (uint32_t*)(g_mem + fb->pixels);
+    uint32_t *vram = (uint32_t*)(w->mem + fb->pixels);
 
     /* GIF Capture if enabled */
     if (g_gif_path) {
@@ -344,258 +187,244 @@ static void render_terminal_frame(wframebuffer_t *fb, uint64_t frame_num) {
         if (g_gif_encoder && g_gif_rgb_buf) {
             for (uint32_t i = 0; i < W * H; i++) {
                 uint32_t px = vram[i];
-                g_gif_rgb_buf[i * 3 + 0] = px & 0xFF;
-                g_gif_rgb_buf[i * 3 + 1] = (px >> 8) & 0xFF;
-                g_gif_rgb_buf[i * 3 + 2] = (px >> 16) & 0xFF;
+                g_gif_rgb_buf[i * 3 + 0] = (uint8_t)(px & 0xFF);
+                g_gif_rgb_buf[i * 3 + 1] = (uint8_t)((px >> 8) & 0xFF);
+                g_gif_rgb_buf[i * 3 + 2] = (uint8_t)((px >> 16) & 0xFF);
             }
-            gif_add_frame(g_gif_encoder, g_gif_rgb_buf, (uint16_t)(100 / g_target_fps));
+            uint16_t delay_cs = (uint16_t)(100 / g_target_fps);
+            gif_add_frame(g_gif_encoder, g_gif_rgb_buf, delay_cs);
         }
     }
 
     if (g_headless) return;
 
     int term_cols = 80, term_rows = 24;
-    get_terminal_size(&term_cols, &term_rows);
-    int max_term_rows = term_rows > 2 ? term_rows - 2 : 10;
+    get_terminal_dimensions(&term_cols, &term_rows);
+    int max_term_rows = (term_rows > 2) ? term_rows - 2 : 20;
 
-    int term_w = (int)W < term_cols ? (int)W : term_cols;
-    int term_h = (int)H < (max_term_rows * 2) ? (int)H : (max_term_rows * 2);
+    int term_w = (term_cols < (int)W) ? term_cols : (int)W;
+    int term_h = (max_term_rows * 2 < (int)H) ? max_term_rows * 2 : (int)H;
 
-    /* Stream to stdout with chunked buffer */
-    char out_buf[16384];
-    int pos = 0;
-    
-    #define APPEND_STR(s, slen) do { \
-        if (pos + (slen) >= (int)sizeof(out_buf)) { \
-            fwrite(out_buf, 1, pos, stdout); \
-            pos = 0; \
-        } \
-        memcpy(out_buf + pos, s, slen); \
-        pos += (slen); \
-    } while(0)
+    char *out_buf = (char*)malloc(term_w * term_h * 32 + 256);
+    if (!out_buf) return;
+    char *p = out_buf;
 
-    APPEND_STR("\x1b[H", 3);
+    p += sprintf(p, "\x1b[H");
 
     for (int ty = 0; ty < term_h; ty += 2) {
         for (int tx = 0; tx < term_w; tx++) {
-            uint32_t src_x = (uint32_t)((tx * W) / term_w);
-            uint32_t src_y1 = (uint32_t)((ty * H) / term_h);
-            uint32_t src_y2 = (uint32_t)(((ty + 1) * H) / term_h);
-            if (src_y2 >= H) src_y2 = H - 1;
+            int src_x  = (tx * (int)W) / term_w;
+            int src_y1 = (ty * (int)H) / term_h;
+            int src_y2 = ((ty + 1) * (int)H) / term_h;
+            if (src_y2 >= (int)H) src_y2 = (int)H - 1;
 
-            uint32_t px1 = vram[src_y1 * W + src_x];
-            uint32_t px2 = (ty + 1 < term_h) ? vram[src_y2 * W + src_x] : px1;
+            uint32_t px_top = vram[src_y1 * W + src_x];
+            uint32_t px_bot = (ty + 1 < term_h) ? vram[src_y2 * W + src_x] : px_top;
 
-            uint8_t r1 = px1 & 0xFF, g1 = (px1 >> 8) & 0xFF, b1 = (px1 >> 16) & 0xFF;
-            uint8_t r2 = px2 & 0xFF, g2 = (px2 >> 8) & 0xFF, b2 = (px2 >> 16) & 0xFF;
+            uint8_t r1 = px_top & 0xFF, g1 = (px_top >> 8) & 0xFF, b1 = (px_top >> 16) & 0xFF;
+            uint8_t r2 = px_bot & 0xFF, g2 = (px_bot >> 8) & 0xFF, b2 = (px_bot >> 16) & 0xFF;
 
-            char cell[64];
-            int clen = snprintf(cell, sizeof(cell), "\x1b[38;2;%u;%u;%um\x1b[48;2;%u;%u;%um▀",
-                                r1, g1, b1, r2, g2, b2);
-            APPEND_STR(cell, clen);
+            p += sprintf(p, "\x1b[38;2;%u;%u;%um\x1b[48;2;%u;%u;%um▀", r1, g1, b1, r2, g2, b2);
         }
-        APPEND_STR("\x1b[0m\n", 5);
+        p += sprintf(p, "\x1b[0m\n");
     }
 
-    char footer[128];
-    int flen = snprintf(footer, sizeof(footer),
-                        "\x1b[0m\x1b[90m [Wagnostic] Frame %lu | %ux%u -> %dx%d (Press 'q' or ESC to exit)\x1b[0m",
-                        (unsigned long)frame_num, W, H, term_w, term_h);
-    APPEND_STR(footer, flen);
+    p += sprintf(p, "\x1b[0m\x1b[90m [Wagnostic 2.0] Frame %lu | %ux%u -> %dx%d (Press 'q' or ESC to exit)\x1b[0m",
+                 (unsigned long)frame_num, W, H, term_w, term_h);
 
-    if (pos > 0) {
-        fwrite(out_buf, 1, pos, stdout);
-    }
+    fwrite(out_buf, 1, p - out_buf, stdout);
     fflush(stdout);
+    free(out_buf);
 }
 
 /* ================================================================
- * Main Host Entry Point
+ * Main Host Execution Entry Point
  * ================================================================ */
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        printf("Wagnostic 2.0 Native Runner (100%% Libc Terminal Host)\n");
-        printf("Usage: %s <rom.wasm|rom.tar> [-n <frames>] [-fps <fps>] [--headless] [-g <out.gif>]\n", argv[0]);
+        printf("Wagnostic 2.0 Native Multi-ROM Runner\n");
+        printf("Usage: %s <rom1.wasm[:name1]> [rom2.wasm[:name2] ...] [-n <frames>] [-fps <fps>] [--headless] [-g <out.gif>]\n", argv[0]);
         return 1;
     }
+
+    char *rom_specs[MAX_WORKERS];
+    int rom_spec_count = 0;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-n") == 0 && i + 1 < argc) {
-            g_max_frames = strtoull(argv[++i], NULL, 10);
-        } else if (strncmp(argv[i], "-n=", 3) == 0) {
-            g_max_frames = strtoull(argv[i] + 3, NULL, 10);
-        } else if (strcmp(argv[i], "-fps") == 0 && i + 1 < argc) {
-            g_target_fps = (uint32_t)strtoul(argv[++i], NULL, 10);
-        } else if (strncmp(argv[i], "--fps=", 6) == 0) {
-            g_target_fps = (uint32_t)strtoul(argv[i] + 6, NULL, 10);
-        } else if (strcmp(argv[i], "--headless") == 0) {
+        const char *arg = argv[i];
+        if (strcmp(arg, "-n") == 0 || strcmp(arg, "--frames") == 0) {
+            if (i + 1 < argc) g_max_frames = strtoull(argv[++i], NULL, 10);
+        } else if (strncmp(arg, "-n=", 3) == 0) {
+            g_max_frames = strtoull(arg + 3, NULL, 10);
+        } else if (strcmp(arg, "-fps") == 0) {
+            if (i + 1 < argc) g_target_fps = atoi(argv[++i]);
+        } else if (strncmp(arg, "-fps=", 5) == 0) {
+            g_target_fps = atoi(arg + 5);
+        } else if (strcmp(arg, "--headless") == 0) {
             g_headless = 1;
-        } else if (strcmp(argv[i], "-g") == 0 && i + 1 < argc) {
-            g_gif_path = argv[++i];
-        } else if (strncmp(argv[i], "-g=", 3) == 0) {
-            g_gif_path = argv[i] + 3;
-        } else if (argv[i][0] != '-' && g_rom_path[0] == '\0') {
-            strncpy(g_rom_path, argv[i], sizeof(g_rom_path) - 1);
+        } else if (strcmp(arg, "-g") == 0 || strncmp(arg, "--gif=", 6) == 0) {
+            if (strncmp(arg, "--gif=", 6) == 0) g_gif_path = arg + 6;
+            else if (i + 1 < argc) g_gif_path = argv[++i];
+        } else if (arg[0] != '-') {
+            if (rom_spec_count < MAX_WORKERS) {
+                rom_specs[rom_spec_count++] = (char*)arg;
+            }
         }
     }
 
-    if (g_rom_path[0] == '\0') {
-        fprintf(stderr, "Error: No ROM file specified.\n");
+    if (rom_spec_count == 0) {
+        fprintf(stderr, "Error: No ROM specified.\n");
         return 1;
     }
 
-    /* Load WASM or TAR file */
-    size_t wasm_size = 0;
-    uint8_t *wasm_bytes = NULL;
+    if (g_target_fps == 0) g_target_fps = 30;
 
-    size_t name_len = strlen(g_rom_path);
-    if (name_len > 4 && strcmp(g_rom_path + name_len - 4, ".tar") == 0) {
-        g_is_tar = 1;
-        wasm_bytes = tar_extract_file(g_rom_path, "main.wasm", &wasm_size);
-        if (!wasm_bytes) {
-            fprintf(stderr, "Error: 'main.wasm' not found in TAR archive %s\n", g_rom_path);
+    wipc_init();
+
+    /* Load and instantiate all workers */
+    for (int i = 0; i < rom_spec_count; i++) {
+        char path_buf[512] = {0};
+        char name_buf[64] = {0};
+
+        char *spec = rom_specs[i];
+        char *colon = strchr(spec, ':');
+        if (colon) {
+            size_t path_len = (size_t)(colon - spec);
+            strncpy(path_buf, spec, path_len);
+            path_buf[path_len] = '\0';
+            strncpy(name_buf, colon + 1, sizeof(name_buf) - 1);
+        } else {
+            strncpy(path_buf, spec, sizeof(path_buf) - 1);
+            /* Extract basename as default name */
+            const char *slash = strrchr(path_buf, '/');
+            const char *base = slash ? slash + 1 : path_buf;
+            strncpy(name_buf, base, sizeof(name_buf) - 1);
+            char *dot = strstr(name_buf, ".wasm");
+            if (dot) *dot = '\0';
+            char *dot_tar = strstr(name_buf, ".tar");
+            if (dot_tar) *dot_tar = '\0';
+        }
+
+        uint8_t *wasm_buf = NULL;
+        size_t wasm_size = 0;
+
+        if (strstr(path_buf, ".tar") != NULL) {
+            wasm_buf = tar_extract_file(path_buf, "main.wasm", &wasm_size);
+        }
+
+        if (!wasm_buf) {
+            FILE *f = fopen(path_buf, "rb");
+            if (!f) {
+                fprintf(stderr, "Error: Could not open ROM file '%s'\n", path_buf);
+                wipc_cleanup();
+                return 1;
+            }
+            fseek(f, 0, SEEK_END);
+            wasm_size = (size_t)ftell(f);
+            fseek(f, 0, SEEK_SET);
+            wasm_buf = (uint8_t*)malloc(wasm_size);
+            fread(wasm_buf, 1, wasm_size, f);
+            fclose(f);
+        }
+
+        uint32_t worker_id = (uint32_t)(i + 1);
+        WWorker *w = worker_create(worker_id, name_buf, path_buf, wasm_buf, wasm_size);
+        free(wasm_buf);
+
+        if (!w) {
+            fprintf(stderr, "Error: Failed to create worker '%s' from '%s'\n", name_buf, path_buf);
+            wipc_cleanup();
             return 1;
         }
-    } else {
-        FILE *f = fopen(g_rom_path, "rb");
-        if (!f) {
-            fprintf(stderr, "Error: Could not open ROM file: %s\n", g_rom_path);
-            return 1;
-        }
-        fseek(f, 0, SEEK_END);
-        wasm_size = ftell(f);
-        fseek(f, 0, SEEK_SET);
-        wasm_bytes = (uint8_t*)malloc(wasm_size);
-        fread(wasm_bytes, 1, wasm_size, f);
-        fclose(f);
+
+        g_workers[g_worker_count++] = w;
     }
 
-    /* Initialize wasm3 */
-    IM3Environment env = m3_NewEnvironment();
-    if (!env) {
-        fprintf(stderr, "Failed to create wasm3 environment\n");
-        return 1;
+    /* Start all workers */
+    for (int i = 0; i < g_worker_count; i++) {
+        worker_start(g_workers[i]);
     }
 
-    g_runtime = m3_NewRuntime(env, 64 * 1024, NULL);
-    if (!g_runtime) {
-        fprintf(stderr, "Failed to create wasm3 runtime\n");
-        return 1;
+    if (!g_headless) {
+        enable_raw_terminal();
     }
 
-    M3Result result = m3_ParseModule(env, &g_module, wasm_bytes, (uint32_t)wasm_size);
-    if (result) {
-        fprintf(stderr, "Failed to parse WASM module: %s\n", result);
-        return 1;
-    }
+    /* Main presentation & event loop */
+    uint64_t last_rendered_frame = 0;
+    WWorker *primary = (g_worker_count > 0) ? g_workers[0] : NULL;
 
-    result = m3_LoadModule(g_runtime, g_module);
-    if (result) {
-        fprintf(stderr, "Failed to load WASM module: %s\n", result);
-        return 1;
-    }
-
-    /* Link wextension import */
-    m3_LinkRawFunction(g_module, "env", "wextension", "i(i)", &host_wextension);
-
-    /* Lookup wupdate export */
-    IM3Function f_wupdate = NULL;
-    result = m3_FindFunction(&f_wupdate, g_runtime, "wupdate");
-    if (result || !f_wupdate) {
-        fprintf(stderr, "Error: ROM does not export 'wupdate()' function\n");
-        return 1;
-    }
-
-    init_terminal_raw();
-
-    uint64_t frame_count = 0;
-    struct timespec start_ts, last_ts;
-    clock_gettime(CLOCK_MONOTONIC, &start_ts);
-    last_ts = start_ts;
-
-    long frame_delay_ns = (1000000000L / (g_target_fps ? g_target_fps : 30));
-
-    while (g_max_frames == 0 || frame_count < g_max_frames) {
-        frame_count++;
-
-        struct timespec now_ts;
-        clock_gettime(CLOCK_MONOTONIC, &now_ts);
-        double elapsed_ms = (now_ts.tv_sec - start_ts.tv_sec) * 1000.0 + (now_ts.tv_nsec - start_ts.tv_nsec) / 1000000.0;
-        double dt = (now_ts.tv_sec - last_ts.tv_sec) + (now_ts.tv_nsec - last_ts.tv_nsec) / 1000000000.0;
-        last_ts = now_ts;
-
-        /* Update Clock */
-        if (g_clock_ptr && g_clock_ptr + sizeof(wclock_t) <= g_mem_len) {
-            wclock_t *clk = (wclock_t*)(g_mem + g_clock_ptr);
-            clk->ticks = (uint64_t)elapsed_ms;
-            clk->delta = (float)dt;
-        }
-
-        /* Update I/O */
-        wkeyboard_t *kb = NULL;
-        if (g_keyboard_ptr && g_keyboard_ptr + sizeof(wkeyboard_t) <= g_mem_len) {
-            kb = (wkeyboard_t*)(g_mem + g_keyboard_ptr);
-        }
-        wmouse_t *mouse = NULL;
-        if (g_mouse_ptr && g_mouse_ptr + sizeof(wmouse_t) <= g_mem_len) {
-            mouse = (wmouse_t*)(g_mem + g_mouse_ptr);
-        }
-        wgamepad_t *gp = NULL;
-        if (g_gamepad_ptr && g_gamepad_ptr + sizeof(wgamepad_t) <= g_mem_len) {
-            gp = (wgamepad_t*)(g_mem + g_gamepad_ptr);
-        }
-        if (!poll_terminal_input(kb, mouse, gp)) {
-            break;
-        }
-
-        /* Update Logger */
-        if (g_logger_ptr && g_logger_ptr + sizeof(wlogger_t) <= g_mem_len) {
-            wlogger_t *log = (wlogger_t*)(g_mem + g_logger_ptr);
-            uint32_t len = log->length;
-            if (len > 0 && g_logger_buf_ptr && g_logger_buf_ptr + len <= g_mem_len) {
-                char log_str[1024];
-                uint32_t cpy_len = len < 1023 ? len : 1023;
-                memcpy(log_str, g_mem + g_logger_buf_ptr, cpy_len);
-                log_str[cpy_len] = '\0';
-                printf("[ROM Log] %s\n", log_str);
-                log->length = 0;
+    while (1) {
+        /* Check if any worker is still running */
+        bool any_running = false;
+        for (int i = 0; i < g_worker_count; i++) {
+            if (g_workers[i]->running) {
+                any_running = true;
+                break;
             }
         }
 
-        /* Call wupdate() */
-        result = m3_CallV(f_wupdate);
-        if (result) {
-            fprintf(stderr, "Runtime error in wupdate(): %s\n", result);
+        if (!any_running) {
             break;
         }
 
-        int32_t status = 0;
-        m3_GetResultsV(f_wupdate, &status);
+        /* Input polling */
+        if (!g_headless && primary) {
+            if (!poll_terminal_input(primary)) {
+                break;
+            }
+        }
 
-        if (status == WUPDATE_EXIT) {
+        /* Render terminal frame & capture GIF when a new frame is completed */
+        uint64_t cur_worker_frame = primary ? primary->frame_count : 0;
+        if (cur_worker_frame > last_rendered_frame) {
+            last_rendered_frame = cur_worker_frame;
+            if (primary) {
+                render_terminal_frame(primary, cur_worker_frame);
+            }
+        }
+
+        if (g_max_frames > 0 && cur_worker_frame >= (uint64_t)g_max_frames) {
             break;
         }
-        if (status < 0) {
-            fprintf(stderr, "wupdate() returned error code %d\n", status);
-            break;
-        }
 
-        /* Render terminal frame */
-        if (g_fb_ptr && g_fb_ptr + sizeof(wframebuffer_t) <= g_mem_len) {
-            wframebuffer_t *fb = (wframebuffer_t*)(g_mem + g_fb_ptr);
-            render_terminal_frame(fb, frame_count);
-        }
-
-        /* Frame pacing if interactive */
         if (!g_headless) {
-#if !defined(_WIN32)
-            struct timespec req = { 0, frame_delay_ns };
-            nanosleep(&req, NULL);
-#endif
+            wthread_sleep_ms(1000 / g_target_fps);
+        } else {
+            wthread_sleep_ms(1);
         }
     }
 
-    restore_terminal();
-    return 0;
+    if (!g_headless) {
+        restore_terminal();
+    }
+
+    /* Shutdown IPC to wake any remaining blocked threads */
+    wipc_shutdown();
+
+    /* Stop and join all workers */
+    int final_exit_code = 0;
+    for (int i = 0; i < g_worker_count; i++) {
+        worker_stop(g_workers[i]);
+        worker_join(g_workers[i]);
+        if (g_workers[i]->exit_code != 0 && final_exit_code == 0) {
+            final_exit_code = g_workers[i]->exit_code;
+        }
+    }
+
+    /* Finalize GIF if active */
+    if (g_gif_encoder) {
+        gif_close(g_gif_encoder);
+        g_gif_encoder = NULL;
+        if (g_gif_rgb_buf) { free(g_gif_rgb_buf); g_gif_rgb_buf = NULL; }
+        printf("[GIF] Animation saved to %s\n", g_gif_path);
+    }
+
+    for (int i = 0; i < g_worker_count; i++) {
+        worker_destroy(g_workers[i]);
+    }
+    g_worker_count = 0;
+
+    wipc_cleanup();
+    return (final_exit_code < 0) ? final_exit_code : 0;
 }

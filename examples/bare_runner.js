@@ -77,6 +77,12 @@ async function run() {
         // Return 0 (NULL) if extension is unknown/unsupported
         return 0;
       },
+      wask: () => -2,  // WIPC_TIMEOUT
+      wtell: () => -2, // WIPC_TIMEOUT
+      wexit: (code) => {
+        console.log(`[Host] ROM called wexit(${code})`);
+        process.exit(code);
+      },
     },
     wasi_snapshot_preview1: {
       fd_write: () => 0,
@@ -88,6 +94,10 @@ async function run() {
 
   const { instance } = await WebAssembly.instantiate(wasmBytes, importObject);
   memory = instance.exports.memory || importObject.env.memory;
+
+  if (typeof instance.exports.winit === 'function') {
+    instance.exports.winit();
+  }
 
   if (typeof instance.exports.wupdate !== 'function') {
     console.error('Error: WASM module does not export "wupdate()"');

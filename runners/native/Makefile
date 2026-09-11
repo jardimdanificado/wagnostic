@@ -30,7 +30,7 @@ $(WASM3_DIR)/m3_api_libc.c:
 
 host: $(HOST)
 
-$(HOST): host.c gif_encoder.c $(WASM3_SRC)
+$(HOST): host.c platform.c ipc.c worker.c gif_encoder.c $(WASM3_SRC)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 clean:

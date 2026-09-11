@@ -77,6 +77,26 @@ m3ApiRawFunction(host_wextension) {
     m3ApiReturn(0);
 }
 
+/* ── Core Rendezvous IPC Stubs (Single-ROM runner has no peers) ── */
+m3ApiRawFunction(host_wask) {
+    m3ApiReturnType(int32_t);
+    // Returns -2 (WIPC_TIMEOUT) as there is no peer
+    m3ApiReturn(-2);
+}
+
+m3ApiRawFunction(host_wtell) {
+    m3ApiReturnType(int32_t);
+    // Returns -2 (WIPC_TIMEOUT) as there is no peer
+    m3ApiReturn(-2);
+}
+
+m3ApiRawFunction(host_wexit) {
+    m3ApiGetArg(int32_t, code);
+    printf("[Host] ROM called wexit(%d)\n", code);
+    exit(code);
+    m3ApiSuccess();
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         printf("Usage: %s <path-to-rom.wasm> [max_frames]\n", argv[0]);
@@ -111,8 +131,21 @@ int main(int argc, char **argv) {
     res = m3_LoadModule(runtime, module);
     if (res) { fprintf(stderr, "LoadModule error: %s\n", res); return 1; }
 
-    // Link wextension import
+    // Link core imports
     m3_LinkRawFunction(module, "env", "wextension", "i(i)", &host_wextension);
+    m3_LinkRawFunction(module, "env", "wask", "i(iiii)", &host_wask);
+    m3_LinkRawFunction(module, "env", "wtell", "i(iiii)", &host_wtell);
+    m3_LinkRawFunction(module, "env", "wexit", "v(i)", &host_wexit);
+
+    // Call optional winit export
+    IM3Function func_winit;
+    if (m3_FindFunction(&func_winit, runtime, "winit") == m3Err_none) {
+        res = m3_CallV(func_winit);
+        if (res) {
+            fprintf(stderr, "winit runtime error: %s\n", res);
+            return 1;
+        }
+    }
 
     // Find wupdate export
     IM3Function func_wupdate;
