@@ -4,7 +4,7 @@
 
 ROM_DIRS = \
 	bare_counter \
-	use_test \
+	ask_test \
 	logger_example \
 	ipc_producer \
 	ipc_consumer \
@@ -18,7 +18,7 @@ ROM_DIRS = \
 
 TEST_DIRS = \
 	bare_counter \
-	use_test \
+	ask_test \
 	logger_example \
 	ipc_producer \
 	comm_tcp_test \

@@ -4,10 +4,10 @@
 #include "comm_workers.h"
 
 int32_t update(void) {
-    clock_ext_t *clock_ext = (clock_ext_t*)use("clock");
-    logger_t    *log_ext   = (logger_t*)use("logger");
-    int32_t has_workers    = (int32_t)(uintptr_t)use("comm:workers");
-    void* unk              = use("unknown_custom_xyz");
+    clock_ext_t *clock_ext = (clock_ext_t*)ask("clock");
+    logger_t    *log_ext   = (logger_t*)ask("logger");
+    int32_t has_workers    = (int32_t)(uintptr_t)ask("comm:workers");
+    void* unk              = ask("unknown_custom_xyz");
 
     int test_passed = (clock_ext != NULL) &&
                       (log_ext != NULL) &&

@@ -6,7 +6,7 @@ static int step = 0;
 
 int32_t update(void) {
     if (!bc) {
-        bc = (comm_broadcast_t*)use("comm:broadcast");
+        bc = (comm_broadcast_t*)ask("comm:broadcast");
         if (!bc) return ERROR;
     }
 

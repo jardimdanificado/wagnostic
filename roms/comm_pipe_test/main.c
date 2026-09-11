@@ -6,7 +6,7 @@ static int step = 0;
 
 int32_t update(void) {
     if (!pipe) {
-        pipe = (comm_pipe_t*)use("comm:pipe");
+        pipe = (comm_pipe_t*)ask("comm:pipe");
         if (!pipe) return ERROR;
     }
 

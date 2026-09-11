@@ -6,7 +6,7 @@ static int step = 0;
 
 int32_t update(void) {
     if (!ws) {
-        ws = (comm_ws_t*)use("comm:ws");
+        ws = (comm_ws_t*)ask("comm:ws");
         if (!ws) return ERROR;
     }
 

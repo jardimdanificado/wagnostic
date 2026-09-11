@@ -59,14 +59,14 @@ class WWorker {
   }
 
   getImportObject() {
-    const handleUse = (namePtr) => {
+    const handleAsk = (namePtr) => {
       const extName = this.readString(namePtr);
       return this.host.extensions.dispatch(this, this.host, extName);
     };
 
     const handleHear = (targetPtr, dataPtr, size, timeout) => {
       const target = this.readString(targetPtr);
-      return this.host.ipc.ask(this, target, dataPtr, size, timeout, this.host.workerMap);
+      return this.host.ipc.hear(this, target, dataPtr, size, timeout, this.host.workerMap);
     };
 
     const handleTell = (targetPtr, dataPtr, size, timeout) => {
@@ -83,15 +83,16 @@ class WWorker {
       env: {
         memory: new WebAssembly.Memory({ initial: 16 }),
 
-        use: handleUse,
+        ask: handleAsk,
         hear: handleHear,
         tell: handleTell,
         quit: handleQuit,
 
         // Backwards compatibility aliases
-        wextension: handleUse,
-        wask: handleHear,
+        use: handleAsk,
+        wextension: handleAsk,
         wtell: handleTell,
+        whear: handleHear,
         wexit: handleQuit
       },
       wasi_snapshot_preview1: {

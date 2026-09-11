@@ -6,7 +6,7 @@ static int step = 0;
 
 int32_t update(void) {
     if (!udp) {
-        udp = (comm_udp_t*)use("comm:udp");
+        udp = (comm_udp_t*)ask("comm:udp");
         if (!udp) return ERROR;
     }
 

@@ -63,7 +63,7 @@ static clock_ext_t *clock_ext = 0;
 
 int32_t update(void) {
     if (!clock_ext) {
-        clock_ext = (clock_ext_t*)use("clock");
+        clock_ext = (clock_ext_t*)ask("clock");
     }
     uint32_t data = 42;
     tell("worker", &data, sizeof(data), 0);

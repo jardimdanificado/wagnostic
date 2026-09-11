@@ -1,6 +1,6 @@
 # Piolho — Binary ABI & Communication Specification
 
-This document defines the official binary Application Binary Interface (ABI) of **Piolho**, including core lifecycle exports, capability negotiation (`use`), IPC rendezvous functions (`tell`, `hear`), and communication extensions (`comm:*`).
+This document defines the official binary Application Binary Interface (ABI) of **Piolho**, including core lifecycle exports, capability negotiation (`ask`), IPC rendezvous functions (`tell`, `hear`), and communication extensions (`comm:*`).
 
 ---
 
@@ -10,7 +10,7 @@ A Piolho module is a standard 32-bit WebAssembly (Wasm MVP) binary with linear m
 
 Interaction between host and guest is governed by:
 1. **Single Entry Point Export**: `update()`.
-2. **Capability Import**: `use(name)`.
+2. **Capability Import**: `ask(name)`.
 3. **Rendezvous IPC Imports**: `tell(target, data, size, timeout)`, `hear(target, data, size, timeout)`.
 
 ```
@@ -19,7 +19,7 @@ Interaction between host and guest is governed by:
 │                                                                             │
 │   Calls: update() ───────────────────────► [ Guest Execution Step ]         │
 │                                                       │                     │
-│   Resolves: use(name) ◄───────────────────────────────┤                     │
+│   Resolves: ask(name) ◄───────────────────────────────┤                     │
 │   Executes: tell(target, data, size, timeout) ◄───────┤                     │
 │   Executes: hear(target, data, size, timeout) ◄───────┘                     │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -46,18 +46,18 @@ int32_t update(void);   /* Called on each execution step/tick */
 
 ---
 
-## 3. Host Imports: `use`, `tell`, `hear`
+## 3. Host Imports: `ask`, `tell`, `hear`
 
 All host functions are imported under the `"env"` module namespace.
 
 ```c
-void*   use(const char *name);
+void*   ask(const char *name);
 int32_t tell(const char *target, const void *data, int32_t size, int32_t timeout);
 int32_t hear(const char *target, void *data, int32_t size, int32_t timeout);
 ```
 
 ### WASM Import Signatures:
-- `(import "env" "use" (func (param i32) (result i32)))`
+- `(import "env" "ask" (func (param i32) (result i32)))`
 - `(import "env" "tell" (func (param i32 i32 i32 i32) (result i32)))`
 - `(import "env" "hear" (func (param i32 i32 i32 i32) (result i32)))`
 
@@ -186,7 +186,7 @@ Indicator of multi-worker / multi-instance host capability.
 - **Size**: 0 bytes (returns integer `1` if supported, `0` otherwise)
 
 ```c
-int32_t has_workers = (int32_t)(uintptr_t)use("comm:workers");
+int32_t has_workers = (int32_t)(uintptr_t)ask("comm:workers");
 ```
 
 ---
@@ -253,7 +253,7 @@ HTTP streaming client and SharedArrayBuffer / Atomics indicators.
 ---
 
 > [!NOTE]
-> All extensions verify environment capability at startup (`isSupported()`). If the host runtime (e.g. txiki.js, Node, or Browser) lacks the required underlying API, the extension is omitted and `use("comm:...")` returns `0` (NULL).
+> All extensions verify environment capability at startup (`isSupported()`). If the host runtime (e.g. txiki.js, Node, or Browser) lacks the required underlying API, the extension is omitted and `ask("comm:...")` returns `0` (NULL).
 
 ---
 

@@ -2,7 +2,7 @@
  * Piolho Standard Extension: comm:workers
  * 
  * Capability indicator for worker threads / sub-instances.
- * Calling use("comm:workers") returns 1 if supported, 0 otherwise.
+ * Calling ask("comm:workers") returns 1 if supported, 0 otherwise.
  */
 
 #ifndef PIOLHO_COMM_WORKERS_H

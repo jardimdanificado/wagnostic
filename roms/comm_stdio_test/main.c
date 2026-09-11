@@ -6,7 +6,7 @@ static int step = 0;
 
 int32_t update(void) {
     if (!stdio_ext) {
-        stdio_ext = (comm_stdio_t*)use("comm:stdio");
+        stdio_ext = (comm_stdio_t*)ask("comm:stdio");
         if (!stdio_ext) return ERROR;
     }
 

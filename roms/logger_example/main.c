@@ -6,7 +6,7 @@ static int step = 0;
 
 int32_t update(void) {
     if (!log_ext) {
-        log_ext = (logger_t*)use("logger");
+        log_ext = (logger_t*)ask("logger");
     }
 
     step++;

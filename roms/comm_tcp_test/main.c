@@ -6,7 +6,7 @@ static int step = 0;
 
 int32_t update(void) {
     if (!tcp) {
-        tcp = (comm_tcp_t*)use("comm:tcp");
+        tcp = (comm_tcp_t*)ask("comm:tcp");
         if (!tcp) return ERROR;
     }
 

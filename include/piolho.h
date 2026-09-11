@@ -47,7 +47,8 @@ extern "C" {
 #endif
 
 /* Capability / Extension Dispatcher */
-void *use(const char *name);
+void *ask(const char *name);
+#define use ask
 
 /* Rendezvous IPC */
 int32_t tell(const char *target, const void *data, int32_t size, int32_t timeout);
