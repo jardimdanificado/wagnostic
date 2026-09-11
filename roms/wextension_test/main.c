@@ -1,12 +1,16 @@
 #include "wagnostic.h"
 #include "framebuffer.h"
 #include "clock.h"
-#include "io.h"
+#include "keyboard.h"
+#include "mouse.h"
+#include "gamepad.h"
 #include "gif.h"
 
 static wframebuffer_t *framebuffer;
 static wclock_t       *clock_ext;
-static wio_t          *io;
+static wkeyboard_t    *keyboard;
+static wmouse_t       *mouse;
+static wgamepad_t     *gamepad;
 static wgif_t         *gif;
 
 static int initialized = 0;
@@ -20,7 +24,9 @@ int32_t wupdate(void) {
         // Test 1: Discover standard extensions via std:*
         framebuffer = (wframebuffer_t*)wextension(WFRAMEBUFFER_EXTENSION);
         clock_ext   = (wclock_t*)wextension(WCLOCK_EXTENSION);
-        io          = (wio_t*)wextension(WIO_EXTENSION);
+        keyboard    = (wkeyboard_t*)wextension(WKEYBOARD_EXTENSION);
+        mouse       = (wmouse_t*)wextension(WMOUSE_EXTENSION);
+        gamepad     = (wgamepad_t*)wextension(WGAMEPAD_EXTENSION);
         gif         = (wgif_t*)wextension(WGIF_EXTENSION);
 
         // Test 2: Unknown extension returns NULL
@@ -28,7 +34,9 @@ int32_t wupdate(void) {
 
         test_passed = (framebuffer != NULL) &&
                       (clock_ext != NULL) &&
-                      (io != NULL) &&
+                      (keyboard != NULL) &&
+                      (mouse != NULL) &&
+                      (gamepad != NULL) &&
                       (gif != NULL) &&
                       (unk == NULL) &&
                       (framebuffer->width == 320) &&

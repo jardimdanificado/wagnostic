@@ -108,7 +108,9 @@ The official standard library of extensions is specified in **[STD.md](STD.md)**
 
 - `std:framebuffer`: 32-bit RGBA8888 raster graphics buffer (`width`, `height`, `pixels`).
 - `std:clock`: Monotonic timing and frame delta (`ticks`, `frequency`, `delta`).
-- `std:io`: Unified keyboard, mouse, and gamepad input.
+- `std:keyboard`: Keyboard input state (256 USB HID scancodes).
+- `std:mouse`: Mouse pointer coordinates, button bitmask, and wheel deltas.
+- `std:gamepad`: Gamepad button bitmask and 8 analog axes.
 - `std:gif`: Headless GIF recording synchronization.
 - `logger`: Text logging buffer.
 

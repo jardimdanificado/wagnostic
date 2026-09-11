@@ -59,10 +59,9 @@ async function run() {
     return new TextDecoder().decode(bytes.subarray(0, len));
   }
 
-  let fbPtr = 0;
-  let defaultFbPtr = 0;
-  let clockPtr = 0;
-  let ioPtr = 0;
+  let keyboardPtr = 0;
+  let mousePtr = 0;
+  let gamepadPtr = 0;
   let loggerPtr = 0;
   let loggerBufPtr = 0;
 
@@ -97,12 +96,28 @@ async function run() {
           return clockPtr;
         }
 
-        // 3. IO
-        if (name === 'io' || name === 'std:io' || name === 'keyboard' || name === 'mouse' || name === 'gamepad') {
-          if (!ioPtr) {
-            ioPtr = hostAlloc(296, 4);
+        // 3. Keyboard
+        if (name === 'keyboard' || name === 'std:keyboard') {
+          if (!keyboardPtr) {
+            keyboardPtr = hostAlloc(256, 4);
           }
-          return ioPtr;
+          return keyboardPtr;
+        }
+
+        // 4. Mouse
+        if (name === 'mouse' || name === 'std:mouse') {
+          if (!mousePtr) {
+            mousePtr = hostAlloc(20, 4);
+          }
+          return mousePtr;
+        }
+
+        // 5. Gamepad
+        if (name === 'gamepad' || name === 'std:gamepad') {
+          if (!gamepadPtr) {
+            gamepadPtr = hostAlloc(20, 4);
+          }
+          return gamepadPtr;
         }
 
         // 6. Logger

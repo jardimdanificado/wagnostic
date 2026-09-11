@@ -3,7 +3,7 @@
 Minimalist, modular, platform-agnostic WebAssembly multimedia runtime.
 
 - 📜 **[ABI.md](ABI.md)**: Core Binary ABI specification (`wupdate`, `wextension`, execution lifecycle).
-- 🧩 **[STD.md](STD.md)**: Standard Extensions specification (`std:framebuffer`, `std:clock`, `std:io`, `std:gif`, `logger`).
+- 🧩 **[STD.md](STD.md)**: Standard Extensions specification (`std:framebuffer`, `std:clock`, `std:keyboard`, `std:mouse`, `std:gamepad`, `std:gif`, `logger`).
 
 ---
 
@@ -80,7 +80,9 @@ For full memory layouts, struct fields, and specifications, see **[STD.md](STD.m
 |---|---|:---:|---|
 | `std:framebuffer` | Direct 32-bit RGBA8888 framebuffer (`0xAABBGGRR`) and dimensions | 12 B | `framebuffer.h` |
 | `std:clock` | Monotonic ticks, frequency, and frame delta time | 24 B | `clock.h` |
-| `std:io` | Unified I/O: Mouse/Pointer, Gamepad (buttons, 8 axes), Keyboard (256 scancodes) | 296 B | `io.h` |
+| `std:keyboard` | Keyboard state (256 USB HID scancodes) | 256 B | `keyboard.h` |
+| `std:mouse` | Mouse coordinates (x, y), button bitmask, and wheel scroll deltas | 20 B | `mouse.h` |
+| `std:gamepad` | Gamepad digital buttons and 8 analog axes | 20 B | `gamepad.h` |
 | `std:gif` | GIF recording status, frame count, delay, and frame capture synchronization | 20 B | `gif.h` |
 | `logger` | Simple UTF-8 text message logging to host console | 12 B | `logger.h` |
 

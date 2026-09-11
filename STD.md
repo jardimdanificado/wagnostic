@@ -27,7 +27,9 @@ Every standard extension structure adheres to the following conventions:
 |---|---|:---:|---|
 | `std:framebuffer` | 32-bit RGBA8888 visual framebuffer (`0xAABBGGRR`) | 12 bytes | `framebuffer.h` |
 | `std:clock` | Monotonic ticks, tick frequency, and delta time | 24 bytes | `clock.h` |
-| `std:io` | Unified mouse/pointer, gamepad, and keyboard input | 296 bytes | `io.h` |
+| `std:keyboard` | Keyboard state (256 USB HID scancodes) | 256 bytes | `keyboard.h` |
+| `std:mouse` | Mouse/pointer coordinates, buttons, and wheel | 20 bytes | `mouse.h` |
+| `std:gamepad` | Gamepad buttons and 8 analog axes | 20 bytes | `gamepad.h` |
 | `std:gif` | GIF recording status and frame synchronization | 20 bytes | `gif.h` |
 | `logger` | UTF-8 host console text logging buffer | 12 bytes | `logger.h` |
 
@@ -88,13 +90,35 @@ typedef struct {
 
 ---
 
-### 3.3 `std:io`
+### 3.3 `std:keyboard`
 
-Unified input subsystem encapsulating mouse/touch pointer, gamepad, and keyboard state into a single 296-byte structure.
+Provides keyboard input state representing 256 standard USB HID scancodes.
 
-- **Identifier**: `"std:io"` (also aliases to `"io"`, `"std:keyboard"`, `"std:mouse"`, `"std:gamepad"`)
-- **Total Struct Size**: `296 bytes`
-- **Header File**: `include/io.h`
+- **Identifier**: `"std:keyboard"` (also aliases to `"keyboard"`)
+- **Total Struct Size**: `256 bytes`
+- **Header File**: `include/keyboard.h`
+
+#### C Structure Definition:
+```c
+typedef struct {
+    uint8_t keys[256]; /* Offset 0 (256B) - USB HID scancodes (0=up, 1=down) */
+} wkeyboard_t;
+```
+
+#### Memory Layout:
+| Offset | Size | Type | Field | Access | Description |
+| :---: | :---: | :---: | :--- | :---: | :--- |
+| `0` | 256 | `u8[256]` | `keys` | Host (R) | Standard USB HID scancode table (0=up, 1=down) |
+
+---
+
+### 3.4 `std:mouse`
+
+Provides mouse / pointer coordinates, button bitmask, and 2-axis wheel scroll deltas.
+
+- **Identifier**: `"std:mouse"` (also aliases to `"mouse"`)
+- **Total Struct Size**: `20 bytes`
+- **Header File**: `include/mouse.h`
 
 #### C Structure Definition:
 ```c
@@ -103,6 +127,36 @@ Unified input subsystem encapsulating mouse/touch pointer, gamepad, and keyboard
 #define WMOUSE_BTN_RIGHT  (1 << 1)
 #define WMOUSE_BTN_MIDDLE (1 << 2)
 
+typedef struct {
+    int32_t  x;          /* Offset  0 (4B) - Cursor X coordinate */
+    int32_t  y;          /* Offset  4 (4B) - Cursor Y coordinate */
+    uint32_t buttons;    /* Offset  8 (4B) - Buttons bitmask (1=L, 2=R, 4=M) */
+    int32_t  wheel_x;    /* Offset 12 (4B) - Horizontal scroll delta */
+    int32_t  wheel_y;    /* Offset 16 (4B) - Vertical scroll delta */
+} wmouse_t;
+```
+
+#### Memory Layout:
+| Offset | Size | Type | Field | Access | Description |
+| :---: | :---: | :---: | :--- | :---: | :--- |
+| `0` | 4 | `i32` | `x` | Host (R) | Mouse/pointer X coordinate in pixels |
+| `4` | 4 | `i32` | `y` | Host (R) | Mouse/pointer Y coordinate in pixels |
+| `8` | 4 | `u32` | `buttons` | Host (R) | Mouse button bitmask |
+| `12` | 4 | `i32` | `wheel_x` | Host (R) | Horizontal wheel delta |
+| `16` | 4 | `i32` | `wheel_y` | Host (R) | Vertical wheel delta |
+
+---
+
+### 3.5 `std:gamepad`
+
+Provides digital gamepad buttons and 8 analog axes.
+
+- **Identifier**: `"std:gamepad"` (also aliases to `"gamepad"`)
+- **Total Struct Size**: `20 bytes`
+- **Header File**: `include/gamepad.h`
+
+#### C Structure Definition:
+```c
 /* Gamepad Buttons */
 #define WGAMEPAD_BTN_A             (1 << 0)
 #define WGAMEPAD_BTN_B             (1 << 1)
@@ -120,37 +174,20 @@ Unified input subsystem encapsulating mouse/touch pointer, gamepad, and keyboard
 #define WGAMEPAD_BTN_DPAD_RIGHT    (1 << 13)
 
 typedef struct {
-    /* Pointer / Mouse */
-    int32_t  mouse_x;          /* Offset   0 (4B) - Cursor X coordinate */
-    int32_t  mouse_y;          /* Offset   4 (4B) - Cursor Y coordinate */
-    uint32_t mouse_buttons;    /* Offset   8 (4B) - Buttons bitmask (1=L, 2=R, 4=M) */
-    int32_t  mouse_wheel_x;    /* Offset  12 (4B) - Horizontal scroll delta */
-    int32_t  mouse_wheel_y;    /* Offset  16 (4B) - Vertical scroll delta */
-
-    /* Gamepad */
-    uint32_t gamepad_buttons;  /* Offset  20 (4B) - Gamepad buttons bitmask */
-    int16_t  gamepad_axes[8];  /* Offset  24 (16B) - 8 analog axes (-32768..32767) */
-
-    /* Keyboard */
-    uint8_t  keys[256];        /* Offset  40 (256B) - USB HID scancodes (0=up, 1=down) */
-} wio_t;
+    uint32_t buttons;  /* Offset  0 (4B) - Gamepad buttons bitmask */
+    int16_t  axes[8];  /* Offset  4 (16B) - 8 analog axes (-32768..32767) */
+} wgamepad_t;
 ```
 
 #### Memory Layout:
 | Offset | Size | Type | Field | Access | Description |
 | :---: | :---: | :---: | :--- | :---: | :--- |
-| `0` | 4 | `i32` | `mouse_x` | Host (R) | Mouse/pointer X coordinate in pixels |
-| `4` | 4 | `i32` | `mouse_y` | Host (R) | Mouse/pointer Y coordinate in pixels |
-| `8` | 4 | `u32` | `mouse_buttons` | Host (R) | Mouse button bitmask |
-| `12` | 4 | `i32` | `mouse_wheel_x` | Host (R) | Mouse horizontal wheel delta |
-| `16` | 4 | `i32` | `mouse_wheel_y` | Host (R) | Mouse vertical wheel delta |
-| `20` | 4 | `u32` | `gamepad_buttons` | Host (R) | Digital gamepad buttons bitmask |
-| `24` | 16 | `i16[8]` | `gamepad_axes` | Host (R) | 8 analog axes (`-32768` to `32767`) |
-| `40` | 256 | `u8[256]` | `keys` | Host (R) | Standard USB HID scancode table (0=up, 1=down) |
+| `0` | 4 | `u32` | `buttons` | Host (R) | Digital gamepad buttons bitmask |
+| `4` | 16 | `i16[8]` | `axes` | Host (R) | 8 analog axes (`-32768` to `32767`) |
 
 ---
 
-### 3.4 `std:gif`
+### 3.6 `std:gif`
 
 Synchronizes headless GIF animation capture and recording status between host and guest.
 
@@ -180,7 +217,7 @@ typedef struct {
 
 ---
 
-### 3.5 `logger`
+### 3.7 `logger`
 
 Provides a simple UTF-8 text logging buffer to the host console.
 

@@ -2,10 +2,10 @@
 
 #include "wagnostic.h"
 #include "framebuffer.h"
-#include "io.h"
+#include "keyboard.h"
 
 static wframebuffer_t *surface;
-static wio_t          *io;
+static wkeyboard_t    *keyboard;
 
 #define RGBA(r, g, b, a) ((uint32_t)(((uint8_t)(a) << 24) | ((uint8_t)(b) << 16) | ((uint8_t)(g) << 8) | (uint8_t)(r)))
 #define RGB(r, g, b) RGBA(r, g, b, 255)
@@ -74,8 +74,8 @@ static void draw_status(void) {
 
 int32_t wupdate(void) {
     if (!initialized) {
-        surface = (wframebuffer_t*)wextension(WFRAMEBUFFER_EXTENSION);
-        io      = (wio_t*)wextension(WIO_EXTENSION);
+        surface  = (wframebuffer_t*)wextension(WFRAMEBUFFER_EXTENSION);
+        keyboard = (wkeyboard_t*)wextension(WKEYBOARD_EXTENSION);
 
         if (surface) {
             surface->width = 320;
@@ -91,7 +91,7 @@ int32_t wupdate(void) {
 
     static int r_was_down = 0;
 
-    int r_down = io ? io->keys[21] : 0;
+    int r_down = keyboard ? keyboard->keys[21] : 0;
     if (r_down && !r_was_down) {
         resize_state = (resize_state + 1) % 3;
         if (resize_state == 0) {

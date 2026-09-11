@@ -237,7 +237,9 @@ async function run() {
   let fbPtr = 0;
   let defaultFbPtr = 0;
   let clockPtr = 0;
-  let ioPtr = 0;
+  let keyboardPtr = 0;
+  let mousePtr = 0;
+  let gamepadPtr = 0;
   let gifPtr = 0;
   let loggerPtr = 0;
   let loggerBufPtr = 0;
@@ -278,21 +280,38 @@ async function run() {
           return clockPtr;
         }
 
-        // 3. Unified I/O (std:io)
-        if (name === 'std:io' || name === 'io' || name === 'std:keyboard' || name === 'std:mouse' || name === 'std:gamepad' || name === 'keyboard' || name === 'mouse' || name === 'gamepad') {
-          if (!ioPtr) {
-            ioPtr = hostAlloc(296, 4);
-            const view = new DataView(memory.buffer, ioPtr, 296);
-            view.setInt32(0, 0, true);                // mouse_x
-            view.setInt32(4, 0, true);                // mouse_y
-            view.setUint32(8, 0, true);               // mouse_buttons
-            view.setInt32(12, 0, true);               // mouse_wheel_x
-            view.setInt32(16, 0, true);               // mouse_wheel_y
-            view.setUint32(20, 0, true);              // gamepad_buttons
-            new Int16Array(memory.buffer, ioPtr + 24, 8).fill(0); // gamepad_axes[8]
-            new Uint8Array(memory.buffer, ioPtr + 40, 256).fill(0); // keys[256]
+        // 3. Keyboard (std:keyboard)
+        if (name === 'std:keyboard' || name === 'keyboard') {
+          if (!keyboardPtr) {
+            keyboardPtr = hostAlloc(256, 4);
+            new Uint8Array(memory.buffer, keyboardPtr, 256).fill(0);
           }
-          return ioPtr;
+          return keyboardPtr;
+        }
+
+        // 4. Mouse (std:mouse)
+        if (name === 'std:mouse' || name === 'mouse') {
+          if (!mousePtr) {
+            mousePtr = hostAlloc(20, 4);
+            const view = new DataView(memory.buffer, mousePtr, 20);
+            view.setInt32(0, 0, true);                // x
+            view.setInt32(4, 0, true);                // y
+            view.setUint32(8, 0, true);               // buttons
+            view.setInt32(12, 0, true);               // wheel_x
+            view.setInt32(16, 0, true);               // wheel_y
+          }
+          return mousePtr;
+        }
+
+        // 5. Gamepad (std:gamepad)
+        if (name === 'std:gamepad' || name === 'gamepad') {
+          if (!gamepadPtr) {
+            gamepadPtr = hostAlloc(20, 4);
+            const view = new DataView(memory.buffer, gamepadPtr, 20);
+            view.setUint32(0, 0, true);              // buttons
+            new Int16Array(memory.buffer, gamepadPtr + 4, 8).fill(0); // axes[8]
+          }
+          return gamepadPtr;
         }
 
         // 4. GIF Recording (std:gif)
@@ -474,13 +493,21 @@ async function run() {
       view.setFloat32(16, deltaSec, true);
     }
 
-    if (ioPtr && ioPtr + 296 <= memory.buffer.byteLength) {
-      const view = new DataView(memory.buffer, ioPtr, 296);
+    if (keyboardPtr && keyboardPtr + 256 <= memory.buffer.byteLength) {
+      new Uint8Array(memory.buffer, keyboardPtr, 256).set(keyState);
+    }
+
+    if (mousePtr && mousePtr + 20 <= memory.buffer.byteLength) {
+      const view = new DataView(memory.buffer, mousePtr, 20);
       view.setInt32(0, mouseX, true);
       view.setInt32(4, mouseY, true);
       view.setUint32(8, mouseButtons, true);
-      view.setUint32(20, gamepadMask, true);
-      new Uint8Array(memory.buffer, ioPtr + 40, 256).set(keyState);
+    }
+
+    if (gamepadPtr && gamepadPtr + 20 <= memory.buffer.byteLength) {
+      const view = new DataView(memory.buffer, gamepadPtr, 20);
+      view.setUint32(0, gamepadMask, true);
+      new Int16Array(memory.buffer, gamepadPtr + 4, 8).set(gamepadAxes);
     }
 
     if (loggerPtr && loggerPtr + 12 <= memory.buffer.byteLength) {

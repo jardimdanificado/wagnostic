@@ -37,7 +37,9 @@
 #include "wagnostic.h"
 #include "framebuffer.h"
 #include "clock.h"
-#include "io.h"
+#include "keyboard.h"
+#include "mouse.h"
+#include "gamepad.h"
 #include "gif.h"
 #include "logger.h"
 #include "gif_encoder.h"
@@ -54,7 +56,9 @@ static uint32_t g_mem_len = 0;
 
 static uint32_t g_fb_ptr       = 0;
 static uint32_t g_clock_ptr    = 0;
-static uint32_t g_io_ptr       = 0;
+static uint32_t g_keyboard_ptr = 0;
+static uint32_t g_mouse_ptr    = 0;
+static uint32_t g_gamepad_ptr  = 0;
 static uint32_t g_gif_ptr      = 0;
 static uint32_t g_logger_ptr   = 0;
 
@@ -178,17 +182,34 @@ m3ApiRawFunction(host_wextension) {
         m3ApiReturn(g_clock_ptr);
     }
 
-    /* 3. Unified I/O: std:io */
-    if (strcmp(name, WIO_EXTENSION) == 0 || strcmp(name, "io") == 0 ||
-        strcmp(name, "std:keyboard") == 0 || strcmp(name, "std:mouse") == 0 ||
-        strcmp(name, "std:gamepad") == 0 || strcmp(name, "keyboard") == 0 ||
-        strcmp(name, "mouse") == 0 || strcmp(name, "gamepad") == 0) {
-        if (g_io_ptr == 0) {
-            g_io_ptr = host_alloc(sizeof(wio_t), 4);
-            wio_t *io = (wio_t*)(g_mem + g_io_ptr);
-            memset(io, 0, sizeof(wio_t));
+    /* 3. Keyboard: std:keyboard */
+    if (strcmp(name, WKEYBOARD_EXTENSION) == 0 || strcmp(name, "keyboard") == 0) {
+        if (g_keyboard_ptr == 0) {
+            g_keyboard_ptr = host_alloc(sizeof(wkeyboard_t), 4);
+            wkeyboard_t *kb = (wkeyboard_t*)(g_mem + g_keyboard_ptr);
+            memset(kb, 0, sizeof(wkeyboard_t));
         }
-        m3ApiReturn(g_io_ptr);
+        m3ApiReturn(g_keyboard_ptr);
+    }
+
+    /* 4. Mouse: std:mouse */
+    if (strcmp(name, WMOUSE_EXTENSION) == 0 || strcmp(name, "mouse") == 0) {
+        if (g_mouse_ptr == 0) {
+            g_mouse_ptr = host_alloc(sizeof(wmouse_t), 4);
+            wmouse_t *mouse = (wmouse_t*)(g_mem + g_mouse_ptr);
+            memset(mouse, 0, sizeof(wmouse_t));
+        }
+        m3ApiReturn(g_mouse_ptr);
+    }
+
+    /* 5. Gamepad: std:gamepad */
+    if (strcmp(name, WGAMEPAD_EXTENSION) == 0 || strcmp(name, "gamepad") == 0) {
+        if (g_gamepad_ptr == 0) {
+            g_gamepad_ptr = host_alloc(sizeof(wgamepad_t), 4);
+            wgamepad_t *gp = (wgamepad_t*)(g_mem + g_gamepad_ptr);
+            memset(gp, 0, sizeof(wgamepad_t));
+        }
+        m3ApiReturn(g_gamepad_ptr);
     }
 
     /* 4. GIF Recording: std:gif */
@@ -275,9 +296,9 @@ static void get_terminal_size(int *out_cols, int *out_rows) {
 #endif
 }
 
-static int poll_terminal_input(wio_t *io) {
+static int poll_terminal_input(wkeyboard_t *kb, wmouse_t *mouse, wgamepad_t *gp) {
 #if !defined(_WIN32)
-    if (!io) return 1;
+    (void)mouse;
     uint8_t buf[16];
     ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
     if (n > 0) {
@@ -286,15 +307,15 @@ static int poll_terminal_input(wio_t *io) {
                 return 0;
             }
             if (buf[i] == 0x1b && i + 2 < n && buf[i+1] == '[') {
-                if (buf[i+2] == 'A') { io->keys[0x52] = 1; io->gamepad_buttons |= WGAMEPAD_BTN_DPAD_UP; }
-                if (buf[i+2] == 'B') { io->keys[0x51] = 1; io->gamepad_buttons |= WGAMEPAD_BTN_DPAD_DOWN; }
-                if (buf[i+2] == 'D') { io->keys[0x50] = 1; io->gamepad_buttons |= WGAMEPAD_BTN_DPAD_LEFT; }
-                if (buf[i+2] == 'C') { io->keys[0x4F] = 1; io->gamepad_buttons |= WGAMEPAD_BTN_DPAD_RIGHT; }
+                if (buf[i+2] == 'A') { if (kb) kb->keys[0x52] = 1; if (gp) gp->buttons |= WGAMEPAD_BTN_DPAD_UP; }
+                if (buf[i+2] == 'B') { if (kb) kb->keys[0x51] = 1; if (gp) gp->buttons |= WGAMEPAD_BTN_DPAD_DOWN; }
+                if (buf[i+2] == 'D') { if (kb) kb->keys[0x50] = 1; if (gp) gp->buttons |= WGAMEPAD_BTN_DPAD_LEFT; }
+                if (buf[i+2] == 'C') { if (kb) kb->keys[0x4F] = 1; if (gp) gp->buttons |= WGAMEPAD_BTN_DPAD_RIGHT; }
                 i += 2;
             }
-            if (buf[i] == 'z' || buf[i] == 'Z') { io->keys[0x1D] = 1; io->gamepad_buttons |= WGAMEPAD_BTN_A; }
-            if (buf[i] == 'x' || buf[i] == 'X') { io->keys[0x1B] = 1; io->gamepad_buttons |= WGAMEPAD_BTN_B; }
-            if (buf[i] == '\n' || buf[i] == '\r') { io->keys[0x28] = 1; io->gamepad_buttons |= WGAMEPAD_BTN_START; }
+            if (buf[i] == 'z' || buf[i] == 'Z') { if (kb) kb->keys[0x1D] = 1; if (gp) gp->buttons |= WGAMEPAD_BTN_A; }
+            if (buf[i] == 'x' || buf[i] == 'X') { if (kb) kb->keys[0x1B] = 1; if (gp) gp->buttons |= WGAMEPAD_BTN_B; }
+            if (buf[i] == '\n' || buf[i] == '\r') { if (kb) kb->keys[0x28] = 1; if (gp) gp->buttons |= WGAMEPAD_BTN_START; }
         }
     }
 #endif
@@ -512,11 +533,19 @@ int main(int argc, char **argv) {
         }
 
         /* Update I/O */
-        wio_t *io = NULL;
-        if (g_io_ptr && g_io_ptr + sizeof(wio_t) <= g_mem_len) {
-            io = (wio_t*)(g_mem + g_io_ptr);
+        wkeyboard_t *kb = NULL;
+        if (g_keyboard_ptr && g_keyboard_ptr + sizeof(wkeyboard_t) <= g_mem_len) {
+            kb = (wkeyboard_t*)(g_mem + g_keyboard_ptr);
         }
-        if (!poll_terminal_input(io)) {
+        wmouse_t *mouse = NULL;
+        if (g_mouse_ptr && g_mouse_ptr + sizeof(wmouse_t) <= g_mem_len) {
+            mouse = (wmouse_t*)(g_mem + g_mouse_ptr);
+        }
+        wgamepad_t *gp = NULL;
+        if (g_gamepad_ptr && g_gamepad_ptr + sizeof(wgamepad_t) <= g_mem_len) {
+            gp = (wgamepad_t*)(g_mem + g_gamepad_ptr);
+        }
+        if (!poll_terminal_input(kb, mouse, gp)) {
             break;
         }
 
