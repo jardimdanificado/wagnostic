@@ -1,22 +1,20 @@
 /**
  * Piolho Host Runner
  * 
- * Coordinates workers, frame loops, and extension lifecycle hooks.
+ * Minimalist WebAssembly Multi-Worker Host & Rendezvous IPC Coordinator.
  */
 
 const { ENV } = require('./env');
 const { extractFromTar } = require('./tar');
-const { defaultRegistry } = require('./extensions');
+const { ExtensionRegistry } = require('./extensions/registry');
 const { IpcEngine } = require('./ipc');
 const { PeerRegistry } = require('./peer_registry');
 const { WWorker } = require('./worker');
 
-class PiolhoHost {
+class Piolho {
   constructor(options = {}) {
-    this.maxFrames = (options.maxFrames !== undefined) ? options.maxFrames : 1;
-    this.targetFps = options.targetFps || 30;
-    this.gifPath = options.gifPath || null;
-    this.extensions = options.extensions || defaultRegistry;
+    this.intervalMs = options.intervalMs || (options.tickRate ? 1000 / options.tickRate : (options.fps ? 1000 / options.fps : 1000 / 30));
+    this.extensions = options.extensions || new ExtensionRegistry();
 
     this.workers = [];
     this.workerMap = new Map();
@@ -25,29 +23,37 @@ class PiolhoHost {
     this.isRunning = false;
     this.startTime = 0;
     this.lastTime = 0;
-    this.frameCount = 0;
-
-    // Generic host input state for input extensions
-    this.keyState = new Uint8Array(256);
-    this.mouseX = 0;
-    this.mouseY = 0;
-    this.mouseButtons = 0;
-    this.mouseWheelX = 0;
-    this.mouseWheelY = 0;
-    this.gamepadMask = 0;
-    this.gamepadAxes = new Int16Array(8);
+    this.stepCount = 0;
   }
 
-  async loadRom(spec) {
-    let filePath = spec;
-    let name = '';
+  get frameCount() {
+    return this.stepCount;
+  }
+  set frameCount(val) {
+    this.stepCount = val;
+  }
 
-    if (spec.includes(':')) {
-      const parts = spec.split(':');
-      filePath = parts[0];
-      name = parts[1];
+  use(ext) {
+    if (ext instanceof ExtensionRegistry) {
+      for (const e of ext.activeList) {
+        this.extensions.register(e);
+      }
     } else {
-      name = filePath.split('/').pop().replace(/\.wasm$|\.tar$/, '');
+      this.extensions.register(ext);
+    }
+    return this;
+  }
+
+  async loadRom(filePath, customName) {
+    let name = customName;
+    if (!name) {
+      if (filePath.includes(':')) {
+        const parts = filePath.split(':');
+        filePath = parts[0];
+        name = parts[1];
+      } else {
+        name = filePath.split('/').pop().replace(/\.wasm$|\.tar$/, '');
+      }
     }
 
     let rawBytes;
@@ -86,7 +92,7 @@ class PiolhoHost {
 
   step() {
     if (!this.isRunning) return false;
-    this.frameCount++;
+    this.stepCount++;
     const now = Date.now();
     this.lastTime = now;
 
@@ -96,10 +102,10 @@ class PiolhoHost {
       if (!w.running) continue;
 
       const status = w.update();
-      if (status === 1) { // WUPDATE_EXIT
+      if (status === 1) { // UPDATE_EXIT
         w.running = false;
-      } else if (status < 0) { // WUPDATE_ERROR
-        console.error(`[Worker ${w.name}] wupdate() returned error code ${status}`);
+      } else if (status < 0) { // UPDATE_ERROR
+        console.error(`[Worker ${w.name}] update() returned error code ${status}`);
         this.cleanup();
         return false;
       } else {
@@ -112,17 +118,14 @@ class PiolhoHost {
       return false;
     }
 
-    this.extensions.onFrameComplete(this);
-
-    if (this.maxFrames > 0 && this.frameCount >= this.maxFrames) {
-      this.cleanup();
-      return false;
-    }
-
+    this.extensions.onPostStep(this);
     return true;
   }
 
-  async run() {
+  async run(options = {}) {
+    const maxSteps = typeof options === 'number'
+      ? options
+      : (options.steps || options.ticks || options.maxSteps || options.frames || options.maxFrames || 0);
     this.isRunning = true;
     this.startTime = Date.now();
     this.lastTime = this.startTime;
@@ -132,16 +135,17 @@ class PiolhoHost {
     return new Promise((resolve) => {
       const loop = () => {
         const shouldContinue = this.step();
-        if (!shouldContinue) {
+        if (!shouldContinue || (maxSteps > 0 && this.stepCount >= maxSteps)) {
+          this.cleanup();
           resolve(0);
           return;
         }
 
-        if (this.maxFrames > 0) {
+        if (maxSteps > 0) {
           if (typeof setImmediate !== 'undefined') setImmediate(loop);
           else setTimeout(loop, 0);
         } else {
-          setTimeout(loop, 1000 / this.targetFps);
+          setTimeout(loop, this.intervalMs);
         }
       };
 
@@ -150,6 +154,4 @@ class PiolhoHost {
   }
 }
 
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { PiolhoHost };
-}
+module.exports = { Piolho };

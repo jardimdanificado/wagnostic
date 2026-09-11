@@ -3,7 +3,7 @@
  */
 
 const { ENV, isTxiki, isNode, isBun, isDeno } = require('./env');
-const { PiolhoHost } = require('./host');
+const { Piolho } = require('./host');
 const { WWorker } = require('./worker');
 const {
   ExtensionRegistry,
@@ -16,20 +16,27 @@ const {
   mouseExtension,
   gamepadExtension,
   loggerExtension,
-  gifExtension
+  gifExtension,
+  createGifExtension,
+  commTcpExtension,
+  commPipeExtension,
+  commWsExtension,
+  commUdpExtension
 } = require('./extensions');
 const { IpcEngine } = require('./ipc');
+const { PeerRegistry } = require('./peer_registry');
 const { MinimalGifEncoder } = require('./gif');
 const { extractFromTar } = require('./tar');
 
 async function createHost(options = {}) {
-  return new PiolhoHost(options);
+  return new Piolho(options);
 }
 
 module.exports = {
   createHost,
-  PiolhoHost,
+  Piolho,
   WWorker,
+  Worker: WWorker,
   ExtensionRegistry,
   createDefaultRegistry,
   defaultRegistry,
@@ -41,6 +48,12 @@ module.exports = {
   gamepadExtension,
   loggerExtension,
   gifExtension,
+  createGifExtension,
+  commTcpExtension,
+  commPipeExtension,
+  commWsExtension,
+  commUdpExtension,
+  PeerRegistry,
   IpcEngine,
   MinimalGifEncoder,
   extractFromTar,

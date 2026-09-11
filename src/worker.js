@@ -17,11 +17,18 @@ class WWorker {
     this.arenaOffset = 0;
     this.running = true;
     this.exitCode = 0;
-    this.frameCount = 0;
+    this.stepCount = 0;
 
     // Extension state storage & active extension trackers
     this.extState = new Map();
     this.activeExtensions = [];
+  }
+
+  get frameCount() {
+    return this.stepCount;
+  }
+  set frameCount(v) {
+    this.stepCount = v;
   }
 
   alloc(size, align = 4) {
@@ -128,7 +135,7 @@ class WWorker {
     try {
       this.host.extensions.onBeforeUpdate(this, this.host);
       const status = updateFn();
-      this.frameCount++;
+      this.stepCount++;
       this.host.extensions.onAfterUpdate(this, this.host);
       return status;
     } catch (err) {

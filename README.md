@@ -8,21 +8,22 @@ Minimalist, modular, platform-agnostic WebAssembly multimedia runtime.
 
 ---
 
-## Quick Start
+## Quick Start (Using Piolho as a Library)
 
-### 1. Universal Host (Node.js & txiki.js — Zero External Dependencies)
-The primary and most portable host ecosystem. Works out of the box with Node.js, `tjs` (txiki.js), Bun, or Deno:
-```bash
-# Run with Node.js (via root CLI or npm start):
-node bin/piolho.js roms/display_test.wasm
+Piolho is a zero-dependency WebAssembly runtime library for Node.js, `tjs` (txiki.js), Bun, and Deno:
 
-# Run with txiki.js:
-tjs bin/piolho.js roms/display_test.wasm
+```javascript
+const { Piolho, framebufferExtension, clockExtension } = require('piolho');
 
-# Multi-ROM Parallel Path Tracer with 2 Workers & GIF Export:
-node bin/piolho.js roms/pathtracer_master.wasm:master \
-                   roms/pathtracer_worker.wasm:worker0 \
-                   roms/pathtracer_worker.wasm:worker1 -g render.gif -n 30
+async function main() {
+  const host = new Piolho(); // 0 extensions by default
+  host.use(framebufferExtension).use(clockExtension); // opt-in extensions
+
+  await host.loadRom('roms/display_test.wasm', 'display');
+  await host.run(60); // run for 60 frames (or omit to run continuously)
+}
+
+main();
 ```
 
 ---

@@ -74,12 +74,20 @@ class ExtensionRegistry {
     }
   }
 
-  onFrameComplete(host) {
+  onPostStep(host) {
     for (const ext of this.activeList) {
-      if (typeof ext.onFrameComplete === 'function') {
+      if (typeof ext.onPostStep === 'function') {
+        ext.onPostStep(host);
+      } else if (typeof ext.onStep === 'function') {
+        ext.onStep(host);
+      } else if (typeof ext.onFrameComplete === 'function') {
         ext.onFrameComplete(host);
       }
     }
+  }
+
+  onFrameComplete(host) {
+    this.onPostStep(host);
   }
 
   onDestroy(host) {

@@ -9,7 +9,7 @@ const { keyboardExtension } = require('./keyboard');
 const { mouseExtension } = require('./mouse');
 const { gamepadExtension } = require('./gamepad');
 const { loggerExtension } = require('./logger');
-const { gifExtension } = require('./gif');
+const { gifExtension, createGifExtension } = require('./gif');
 const { commTcpExtension } = require('./comm_tcp');
 const { commPipeExtension } = require('./comm_pipe');
 const { commWsExtension } = require('./comm_ws');
@@ -45,6 +45,7 @@ module.exports = {
   gamepadExtension,
   loggerExtension,
   gifExtension,
+  createGifExtension,
   commTcpExtension,
   commPipeExtension,
   commWsExtension,
