@@ -7,7 +7,8 @@
     "piolho": "bin/piolho.js"
   },
   "scripts": {
-    "test": "make -C roms test"
+    "test": "make -C roms test",
+    "bench": "node benchmarks/complex_mesh/run_mesh_benchmark.js"
   },
   "keywords": [
     "piolho",
