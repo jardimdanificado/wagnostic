@@ -1,89 +1,211 @@
-# Piolho — Binary ABI Specification
+# Piolho — Binary ABI & Communication Specification
 
-This document defines the core binary Application Binary Interface (ABI) of **Piolho**.
+This document defines the official binary Application Binary Interface (ABI) of **Piolho**, including core lifecycle exports, capability negotiation (`use`), IPC rendezvous functions (`tell`, `hear`), and communication extensions (`comm:*`).
 
-The Piolho core ABI is an ultra-minimalist, host-agnostic, and language-neutral specification. It establishes only the basic execution lifecycle and capability negotiation mechanism between a host and a guest WebAssembly module.
 ---
 
 ## 1. Core Execution Model
 
-A Piolho module is a standard 32-bit WebAssembly (Wasm MVP) binary with a linear memory.
+A Piolho module is a standard 32-bit WebAssembly (Wasm MVP) binary with linear memory.
 
-The entire interaction between host and guest is governed by exactly **two functions**:
-1. **One exported entry point**: `update()` (called by the host).
-2. **One imported capability dispatcher**: `use(name)` (called by the guest).
+Interaction between host and guest is governed by:
+1. **Lifecycle Exports**: `update()`, optional `setup()`, optional `shutdown()`.
+2. **Capability Import**: `use(name)`.
+3. **Rendezvous IPC Imports**: `tell(target, data, size, timeout)`, `hear(target, data, size, timeout)`.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                            HOST                             │
-│                                                             │
-│   Calls: update() ───────────────► [ Guest Execution Step ] │
-│                                             │               │
-│   Resolves: use(name) ◄─────────────────────┘               │
-│   Returns: pointer to extension struct in WASM Memory       │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                    HOST                                     │
+│                                                                             │
+│   Calls: update() ───────────────────────► [ Guest Execution Step ]         │
+│                                                       │                     │
+│   Resolves: use(name) ◄───────────────────────────────┤                     │
+│   Executes: tell(target, data, size, timeout) ◄───────┤                     │
+│   Executes: hear(target, data, size, timeout) ◄───────┘                     │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 2. Binary Functions
+## 2. Guest Module Exports
 
-### 2.1 Guest Exports: `update`, `setup`, `shutdown`
-
-Every Piolho module must export the `update` function. It may optionally export `setup` and `shutdown` for worker lifecycle hooks.
+Every Piolho module must export `update`. `setup` and `shutdown` are optional.
 
 ```c
-int32_t setup(void);    /* Optional: called once on worker startup */
-int32_t update(void);   /* Mandatory: called repeatedly on each execution cycle */
-int32_t shutdown(void); /* Optional: called once on worker shutdown */
+int32_t setup(void);    /* Called once on module startup */
+int32_t update(void);   /* Called on each step/tick */
+int32_t shutdown(void); /* Called once on module shutdown */
 ```
 
-- **WASM Type Signatures**:
-  - `(func (export "setup") (result i32))`
-  - `(func (export "update") (result i32))`
-  - `(func (export "shutdown") (result i32))`
-- **Return Codes for `update`**:
-  - `0` (`UPDATE_OK`): The frame/step executed successfully. The host proceeds to the next iteration.
-  - `1` (`UPDATE_EXIT`): The guest module requests a clean shutdown.
-  - `<0` (`UPDATE_ERROR`): Fatal error during guest execution.
+### WASM Export Signatures:
+- `(func (export "setup") (result i32))`
+- `(func (export "update") (result i32))`
+- `(func (export "shutdown") (result i32))`
+
+### Return Codes for `update`:
+- `0` (`UPDATE_OK`): Step completed successfully. Host continues execution.
+- `1` (`UPDATE_EXIT`): Clean module exit.
+- `<0` (`UPDATE_ERROR`): Fatal error in module.
 
 ---
 
-### 2.2 Host Imports: `use`, `hear`, `tell`
+## 3. Host Imports: `use`, `tell`, `hear`
 
-The host provides capability dispatch and rendezvous IPC imports under the `"env"` module namespace:
+All host functions are imported under the `"env"` module namespace.
 
 ```c
 void*   use(const char *name);
-int32_t hear(const char *target, void *data, int32_t size, int32_t timeout);
 int32_t tell(const char *target, const void *data, int32_t size, int32_t timeout);
+int32_t hear(const char *target, void *data, int32_t size, int32_t timeout);
 ```
 
-- **WASM Import Signatures**:
-  - `(import "env" "use" (func (param i32) (result i32)))`
-  - `(import "env" "hear" (func (param i32 i32 i32 i32) (result i32)))`
-  - `(import "env" "tell" (func (param i32 i32 i32 i32) (result i32)))`
+### WASM Import Signatures:
+- `(import "env" "use" (func (param i32) (result i32)))`
+- `(import "env" "tell" (func (param i32 i32 i32 i32) (result i32)))`
+- `(import "env" "hear" (func (param i32 i32 i32 i32) (result i32)))`
 
 ---
 
-## 3. Minimal ROM Example
+## 4. Synchronous Rendezvous IPC (`tell` & `hear`)
+
+Inter-module and cross-node communication in Piolho is based on **synchronous rendezvous**. Data transfers directly between linear memories or across network transports when matching `tell` and `hear` calls meet.
+
+### 4.1 Parameters:
+
+#### `tell(target, data, size, timeout)`
+- `target`: Null-terminated string identifying the destination worker or peer name.
+- `data`: Pointer to source payload buffer in caller's WASM memory.
+- `size`: Payload size in bytes (`size >= 0`).
+- `timeout`: Timeout in milliseconds (`0` = non-blocking, `>0` = wait up to $N$ ms, `-1` = wait indefinitely).
+
+#### `hear(target, data, size, timeout)`
+- `target`: Specific sender name, or `NULL` / `""` / `ANY` (`HEAR_ANY`) to accept data from any sender.
+- `data`: Pointer to destination buffer in caller's WASM memory.
+- `size`: Buffer capacity in bytes.
+- `timeout`: Timeout in milliseconds (`0` = non-blocking, `>0` = wait up to $N$ ms, `-1` = wait indefinitely).
+
+### 4.2 Status & Return Codes:
+```c
+#define IPC_OK          1   /* Communication completed successfully */
+#define IPC_TIMEOUT     0   /* Operation timed out before rendezvous */
+#define IPC_ERROR      -1   /* Generic runtime error */
+#define IPC_TARGET     -2   /* Target does not exist or disconnected */
+#define IPC_PARAM      -3   /* Invalid parameter or memory out of bounds */
+#define IPC_SIZE       -4   /* Message exceeds receiver buffer capacity */
+#define IPC_SHUTDOWN   -5   /* Host or worker shutting down */
+#define IPC_STATE      -6   /* Invalid state / reentrancy */
+```
+
+---
+
+## 5. Communication Extensions (`comm:*`)
+
+Communication extensions enable active and passive discovery across processes and networks. Once connected, messaging between discovered peers is performed transparently through standard `tell` and `hear`.
+
+### 5.1 `comm:tcp`
+TCP client connection or server binding.
+- **Header**: `include/comm_tcp.h`
+- **Size**: 144 bytes
 
 ```c
-#include "piolho.h"
-#include "logger.h"
-#include "comm_workers.h"
+typedef struct {
+    char host[64];            /* Remote host IP or local bind address */
+    int32_t port;             /* TCP Port */
+    int32_t mode;             /* 0 = connect (client), 1 = listen (server) */
+    int32_t status;           /* 0 = IDLE, 1 = CONNECTING, 2 = CONNECTED, -1 = ERROR */
+    int32_t peer_count;       /* Active peer count */
+    char advertised_name[32]; /* Local advertised alias */
+    char peer_name[32];       /* Discovered peer name */
+} comm_tcp_t;
+```
 
-static logger_t *log_ext;
+---
 
-int32_t setup(void) {
-    log_ext = (logger_t*)use("logger");
-    int32_t has_workers = (int32_t)(uintptr_t)use("comm:workers");
-    return 0;
-}
+### 5.2 `comm:pipe`
+Unix domain socket / named pipe local IPC.
+- **Header**: `include/comm_pipe.h`
+- **Size**: 204 bytes
 
-int32_t update(void) {
-    uint32_t msg = 0xCAFEBABE;
-    tell("receiver", &msg, sizeof(msg), 0);
-    return UPDATE_OK;
-}
+```c
+typedef struct {
+    char path[128];           /* Socket file path */
+    int32_t mode;             /* 0 = connect, 1 = listen */
+    int32_t status;           /* 0 = IDLE, 1 = CONNECTING, 2 = CONNECTED, -1 = ERROR */
+    int32_t peer_count;       /* Active peer count */
+    char advertised_name[32]; /* Local advertised alias */
+    char peer_name[32];       /* Discovered peer name */
+} comm_pipe_t;
+```
+
+---
+
+### 5.3 `comm:ws`
+WebSocket network connection and endpoint discovery.
+- **Header**: `include/comm_ws.h`
+- **Size**: 208 bytes
+
+```c
+typedef struct {
+    char url[128];            /* ws:// or wss:// URL */
+    int32_t port;             /* Listen port (when mode == 1) */
+    int32_t mode;             /* 0 = connect, 1 = listen */
+    int32_t status;           /* 0 = IDLE, 1 = CONNECTING, 2 = CONNECTED, -1 = ERROR */
+    int32_t peer_count;       /* Active peer count */
+    char advertised_name[32]; /* Local advertised alias */
+    char peer_name[32];       /* Discovered peer name */
+} comm_ws_t;
+```
+
+---
+
+### 5.4 `comm:udp`
+UDP datagram discovery and broadcast beacons.
+- **Header**: `include/comm_udp.h`
+- **Size**: 144 bytes
+
+```c
+typedef struct {
+    char host[64];            /* Target host or broadcast address */
+    int32_t port;             /* UDP Port */
+    int32_t mode;             /* 0 = probe/client, 1 = listen/server */
+    int32_t status;           /* 0 = IDLE, 1 = CONNECTING, 2 = CONNECTED, -1 = ERROR */
+    int32_t peer_count;       /* Active peer count */
+    char advertised_name[32]; /* Local advertised alias */
+    char peer_name[32];       /* Discovered peer name */
+} comm_udp_t;
+```
+
+---
+
+### 5.5 `comm:workers`
+Indicator of multi-worker / multi-instance host capability.
+- **Header**: `include/comm_workers.h`
+- **Size**: 0 bytes (returns integer `1` if supported, `0` otherwise)
+
+```c
+int32_t has_workers = (int32_t)(uintptr_t)use("comm:workers");
+```
+
+---
+
+## 6. System Extensions (`clock`, `logger`)
+
+### 6.1 `clock`
+- **Header**: `include/clock.h` (24 bytes)
+```c
+typedef struct {
+    uint64_t ticks;      /* Monotonic tick counter */
+    uint64_t frequency;  /* Ticks per second */
+    float    delta;      /* Elapsed seconds since last step */
+} clock_ext_t;
+```
+
+### 6.2 `logger`
+- **Header**: `include/logger.h` (12 bytes)
+```c
+typedef struct {
+    uint32_t buffer;    /* WASM byte offset to UTF-8 text */
+    uint32_t capacity;  /* Buffer size in bytes */
+    uint32_t length;    /* Bytes written by ROM */
+} logger_t;
 ```

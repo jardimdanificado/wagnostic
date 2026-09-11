@@ -1,12 +1,12 @@
 /**
- * Standard Clock Extension: std:clock
+ * Clock Extension: clock
  */
 
 const clockExtension = {
-  name: ['std:clock', 'clock'],
+  name: 'clock',
 
   onRequest(worker, host) {
-    let state = worker.extState.get('std:clock');
+    let state = worker.extState.get('clock');
     if (!state) {
       const clockPtr = worker.alloc(24, 8);
       const view = new DataView(worker.memory.buffer, clockPtr, 24);
@@ -16,13 +16,13 @@ const clockExtension = {
       view.setFloat32(16, defaultDelta, true);
 
       state = { clockPtr };
-      worker.extState.set('std:clock', state);
+      worker.extState.set('clock', state);
     }
     return state.clockPtr;
   },
 
   onBeforeUpdate(worker, host) {
-    const state = worker.extState.get('std:clock');
+    const state = worker.extState.get('clock');
     if (!state || !state.clockPtr || !worker.memory) return;
 
     if (state.clockPtr + 24 <= worker.memory.buffer.byteLength) {

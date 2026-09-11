@@ -10,7 +10,7 @@ static int test_passed = 0;
 
 int32_t update(void) {
     if (!initialized) {
-        clock_ext = (clock_ext_t*)use("std:clock");
+        clock_ext = (clock_ext_t*)use("clock");
         log_ext   = (logger_t*)use("logger");
         int32_t has_workers = (int32_t)(uintptr_t)use("comm:workers");
         void* unk = use("unknown_custom_xyz");

@@ -1,8 +1,8 @@
-# Piolho 2.0 — Multi-ROM Worker & Rendezvous IPC Specification
+# Piolho — Multi-ROM Worker & Rendezvous IPC Specification
 
 ## 1. Overview
 
-Piolho 2.0 supports concurrent multi-ROM execution with a native synchronous rendezvous IPC model.
+Piolho supports concurrent multi-ROM execution with a native synchronous rendezvous IPC model.
 
 Every loaded ROM is a first-class, independent worker with its own:
 - WebAssembly module instance

@@ -19,9 +19,7 @@ const {
 
 const BUILTIN_EXTENSIONS = {
   'clock': clockExtension,
-  'std:clock': clockExtension,
-  'logger': loggerExtension,
-  'std:logger': loggerExtension
+  'logger': loggerExtension
 };
 
 function printHelp() {
