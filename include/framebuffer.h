@@ -1,5 +1,5 @@
-#ifndef WAGNOSTIC_FRAMEBUFFER_H
-#define WAGNOSTIC_FRAMEBUFFER_H
+#ifndef PIOLHO_FRAMEBUFFER_H
+#define PIOLHO_FRAMEBUFFER_H
 
 #include <stdint.h>
 

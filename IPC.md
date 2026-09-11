@@ -1,8 +1,8 @@
-# Wagnostic 2.0 — Multi-ROM Worker & Rendezvous IPC Specification
+# Piolho 2.0 — Multi-ROM Worker & Rendezvous IPC Specification
 
 ## 1. Overview
 
-Wagnostic 2.0 supports concurrent multi-ROM execution with a native synchronous rendezvous IPC model.
+Piolho 2.0 supports concurrent multi-ROM execution with a native synchronous rendezvous IPC model.
 
 Every loaded ROM is a first-class, independent worker with its own:
 - WebAssembly module instance
@@ -32,6 +32,8 @@ int32_t wtell(const char *target, const void *data, int32_t size, int32_t timeou
 
 ### 2.2 Parameters
 - `target`: 32-bit byte offset pointing to a null-terminated UTF-8 string with the target worker name.
+  - In `wtell`: Must be a valid non-empty worker name.
+  - In `wask`: Can be a specific worker name, or **falsy (`NULL` / `0` / `""` / `WIPC_ANY`)** to accept incoming messages from **ANY** sender.
 - `data`: 32-bit byte offset pointing to caller's buffer in linear memory.
 - `size`: Size in bytes to transfer (`size >= 0`).
 - `timeout`: Timeout in milliseconds:
@@ -77,8 +79,8 @@ Run multiple ROM workers simultaneously on the native host:
 
 ```bash
 # Run producer and consumer concurrently:
-./build/wagnostic roms/ipc_producer.wasm:producer roms/ipc_consumer.wasm:consumer
+./build/piolho roms/ipc_producer.wasm:producer roms/ipc_consumer.wasm:consumer
 
 # Headless execution with timeout/max frames:
-./build/wagnostic --headless -n 60 roms/ipc_producer.wasm:producer roms/ipc_consumer.wasm:consumer
+./build/piolho --headless -n 60 roms/ipc_producer.wasm:producer roms/ipc_consumer.wasm:consumer
 ```

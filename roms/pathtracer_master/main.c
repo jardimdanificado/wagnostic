@@ -1,6 +1,6 @@
 #include <stdint.h>
 #include <stdbool.h>
-#include "wagnostic.h"
+#include "piolho.h"
 #include "framebuffer.h"
 #include "clock.h"
 #include "keyboard.h"

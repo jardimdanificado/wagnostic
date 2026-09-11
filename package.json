@@ -1,17 +1,17 @@
 {
-  "name": "wagnostic",
+  "name": "piolho",
   "version": "2.0.0",
   "description": "Universal WASM Host & Multi-ROM Rendezvous IPC Runtime",
   "main": "src/index.js",
   "bin": {
-    "wagnostic": "bin/wagnostic.js"
+    "piolho": "bin/piolho.js"
   },
   "scripts": {
-    "start": "node bin/wagnostic.js",
-    "test": "make -C roms test-node"
+    "start": "node bin/piolho.js",
+    "test": "make -C roms test"
   },
   "keywords": [
-    "wagnostic",
+    "piolho",
     "wasm",
     "webassembly",
     "host",

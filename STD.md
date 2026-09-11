@@ -1,8 +1,8 @@
-# Wagnostic 2.0 — Standard Extensions Specification (`std:*`)
+# Piolho 2.0 — Standard Extensions Specification (`std:*`)
 
-This document defines the official standard extension structures (`std:*`) for Wagnostic 2.0.
+This document defines the official standard extension structures (`std:*`) for Piolho 2.0.
 
-All extensions in Wagnostic are completely **optional** and **modular**. A host is only required to implement the extensions it can support, and a guest ROM must gracefully check if an extension pointer is non-null before accessing its memory.
+All extensions in Piolho are completely **optional** and **modular**. A host is only required to implement the extensions it can support, and a guest ROM must gracefully check if an extension pointer is non-null before accessing its memory.
 
 ---
 

@@ -1,5 +1,5 @@
-#ifndef WAGNOSTIC_GAMEPAD_H
-#define WAGNOSTIC_GAMEPAD_H
+#ifndef PIOLHO_GAMEPAD_H
+#define PIOLHO_GAMEPAD_H
 
 #include <stdint.h>
 
@@ -26,4 +26,4 @@ typedef struct {
     int16_t  axes[8];  /* Offset  4 (16B) - 8 analog axes (-32768..32767) */
 } wgamepad_t;
 
-#endif /* WAGNOSTIC_GAMEPAD_H */
+#endif /* PIOLHO_GAMEPAD_H */

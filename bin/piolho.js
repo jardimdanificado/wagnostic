@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * Wagnostic 2.0 CLI
+ * Piolho 2.0 CLI
  * Universal Zero-Dependency WebAssembly Multi-ROM Host
  * Supports: txiki.js (tjs), Node.js, Bun, Deno
  */
 
 const { ENV } = require('../src/env');
-const { WagnosticHost } = require('../src/host');
+const { PiolhoHost } = require('../src/host');
 
 async function main() {
   const romSpecs = [];
@@ -32,12 +32,12 @@ async function main() {
   }
 
   if (romSpecs.length === 0) {
-    console.log('Wagnostic 2.0 Universal Host (txiki.js, Node.js, Bun, Deno)');
-    console.log('Usage: wagnostic <rom1.wasm[:name1]> [rom2.wasm[:name2] ...] [-n <frames>] [-fps <fps>] [-g <out.gif>]');
+    console.log('Piolho 2.0 Universal Host (txiki.js, Node.js, Bun, Deno)');
+    console.log('Usage: piolho <rom1.wasm[:name1]> [rom2.wasm[:name2] ...] [-n <frames>] [-fps <fps>] [-g <out.gif>]');
     ENV.exit(1);
   }
 
-  const host = new WagnosticHost({
+  const host = new PiolhoHost({
     maxFrames,
     targetFps,
     gifPath

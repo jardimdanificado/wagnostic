@@ -1,5 +1,5 @@
-#ifndef WAGNOSTIC_CLOCK_H
-#define WAGNOSTIC_CLOCK_H
+#ifndef PIOLHO_CLOCK_H
+#define PIOLHO_CLOCK_H
 
 #include <stdint.h>
 
@@ -11,4 +11,4 @@ typedef struct {
     float    delta;
 } wclock_t;
 
-#endif /* WAGNOSTIC_CLOCK_H */
+#endif /* PIOLHO_CLOCK_H */

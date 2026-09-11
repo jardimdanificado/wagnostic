@@ -1,4 +1,4 @@
-#include "wagnostic.h"
+#include "piolho.h"
 #include "framebuffer.h"
 
 #define RGBA(r, g, b, a) ((uint32_t)(((uint8_t)(a) << 24) | ((uint8_t)(b) << 16) | ((uint8_t)(g) << 8) | (uint8_t)(r)))

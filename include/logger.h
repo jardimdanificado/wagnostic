@@ -1,5 +1,5 @@
-#ifndef WAGNOSTIC_LOGGER_H
-#define WAGNOSTIC_LOGGER_H
+#ifndef PIOLHO_LOGGER_H
+#define PIOLHO_LOGGER_H
 
 #include <stdint.h>
 
@@ -11,4 +11,4 @@ typedef struct {
     uint32_t length;      /* Length of text written by ROM (host clears to 0 after printing) */
 } wlogger_t;
 
-#endif /* WAGNOSTIC_LOGGER_H */
+#endif /* PIOLHO_LOGGER_H */

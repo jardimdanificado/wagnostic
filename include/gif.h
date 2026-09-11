@@ -1,5 +1,5 @@
-#ifndef WAGNOSTIC_GIF_H
-#define WAGNOSTIC_GIF_H
+#ifndef PIOLHO_GIF_H
+#define PIOLHO_GIF_H
 
 #include <stdint.h>
 

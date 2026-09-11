@@ -1,7 +1,7 @@
 /**
- * Wagnostic Worker Instance
+ * Piolho Worker Instance
  * 
- * Encapsulates a WebAssembly instance, its linear memory arena, and imports.
+ * Encapsulates a WebAssembly instance, its linear memory arena, and core capability imports.
  */
 
 class WWorker {
@@ -19,16 +19,9 @@ class WWorker {
     this.exitCode = 0;
     this.frameCount = 0;
 
-    // Standard extension pointer cache
-    this.fbPtr = 0;
-    this.defaultFbPtr = 0;
-    this.clockPtr = 0;
-    this.keyboardPtr = 0;
-    this.mousePtr = 0;
-    this.gamepadPtr = 0;
-    this.gifPtr = 0;
-    this.loggerPtr = 0;
-    this.loggerBufPtr = 0;
+    // Extension state storage & active extension trackers
+    this.extState = new Map();
+    this.activeExtensions = [];
   }
 
   alloc(size, align = 4) {
@@ -120,8 +113,10 @@ class WWorker {
     if (typeof this.instance.exports.wupdate !== 'function') return 1;
 
     try {
+      this.host.extensions.onBeforeUpdate(this, this.host);
       const status = this.instance.exports.wupdate();
       this.frameCount++;
+      this.host.extensions.onAfterUpdate(this, this.host);
       return status;
     } catch (err) {
       console.error(`[Worker ${this.name}] wupdate() exception:`, err.message);

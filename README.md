@@ -1,4 +1,4 @@
-# Wagnostic 2.0
+# Piolho 2.0
 
 Minimalist, modular, platform-agnostic WebAssembly multimedia runtime.
 
@@ -14,37 +14,25 @@ Minimalist, modular, platform-agnostic WebAssembly multimedia runtime.
 The primary and most portable host ecosystem. Works out of the box with Node.js, `tjs` (txiki.js), Bun, or Deno:
 ```bash
 # Run with Node.js (via root CLI or npm start):
-node bin/wagnostic.js roms/display_test.wasm
+node bin/piolho.js roms/display_test.wasm
 
 # Run with txiki.js:
-tjs bin/wagnostic.js roms/display_test.wasm
+tjs bin/piolho.js roms/display_test.wasm
 
-# Multi-ROM Parallel Path Tracer with 4 Workers & GIF Export:
-node bin/wagnostic.js roms/pathtracer_master.wasm:master \
-                      roms/pathtracer_worker.wasm:worker0 \
-                      roms/pathtracer_worker.wasm:worker1 \
-                      roms/pathtracer_worker.wasm:worker2 \
-                      roms/pathtracer_worker.wasm:worker3 -g render.gif -n 30
-```
-
-### 2. Native C Host (100% libc / POSIX C + wasm3)
-Native C host for bare environments without JavaScript runtime:
-```bash
-# Build native runner:
-mkdir -p build && cd build && cmake .. && cmake --build .
-
-# Run native host:
-./build/wagnostic roms/display_test.wasm -g output.gif -n 30
+# Multi-ROM Parallel Path Tracer with 2 Workers & GIF Export:
+node bin/piolho.js roms/pathtracer_master.wasm:master \
+                   roms/pathtracer_worker.wasm:worker0 \
+                   roms/pathtracer_worker.wasm:worker1 -g render.gif -n 30
 ```
 
 ---
 
 ## Architecture Overview
 
-In Wagnostic 2.0, modules export a single lifecycle function `wupdate()` and request capabilities dynamically via named extensions:
+In Piolho 2.0, modules export a single lifecycle function `wupdate()` and request capabilities dynamically via named extensions:
 
 ```c
-#include "wagnostic.h"
+#include "piolho.h"
 #include "framebuffer.h"
 #include "clock.h"
 
@@ -90,21 +78,16 @@ For full memory layouts, struct fields, and specifications, see **[STD.md](STD.m
 
 ## Runners & Architecture
  
-1. **Universal Host (`bin/wagnostic.js`, `src/`)**:
+1. **Universal Host (`bin/piolho.js`, `src/`)**:
    - Universal zero-dependency JavaScript host compatible with **Node.js**, **txiki.js (`tjs`)**, **Bun**, and **Deno**.
    - Modular Extension Registry (`ExtensionRegistry`), Multi-ROM Rendezvous IPC, and pure JS GIF encoder.
-2. **Native C Host (`runners/native/`, `build/wagnostic`)**:
-   - 100% `libc` / POSIX C runner with wasm3. Multi-threaded OS worker pool with zero external runtime dependencies.
-3. **Bare Reference Templates (`examples/`)**:
-   - **`examples/bare_runner.js`**: Minimal standalone JavaScript host (~60 lines).
-   - **`examples/bare_runner.c`**: Minimal standalone C host using wasm3 (~90 lines).
- 
+
 ---
  
 ## Running Test Suite
  
 ```bash
-cd roms
-make test-native   # Runs all 15 test ROMs through native runner
-make test-node     # Runs all 15 test ROMs through Node.js runner
+npm test
+# ou:
+make -C roms test
 ```

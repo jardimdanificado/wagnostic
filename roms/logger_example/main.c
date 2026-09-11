@@ -1,6 +1,6 @@
 // logger_example — Demonstrates requesting and writing to a custom "logger" extension
 
-#include "wagnostic.h"
+#include "piolho.h"
 #include "logger.h"
 
 static wlogger_t *logger;
@@ -26,7 +26,7 @@ int32_t wupdate(void) {
     step++;
 
     if (step == 1) {
-        log_str("Hello from Wagnostic 2.0 ROM!");
+        log_str("Hello from Piolho 2.0 ROM!");
     } else if (step == 2) {
         log_str("Step 2: Custom extensions are working smoothly.");
     } else if (step == 3) {

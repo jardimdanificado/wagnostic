@@ -1,6 +1,6 @@
 // display_test — Tests surface modes and formats
 
-#include "wagnostic.h"
+#include "piolho.h"
 #include "framebuffer.h"
 #include "keyboard.h"
 

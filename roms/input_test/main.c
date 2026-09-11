@@ -1,6 +1,6 @@
 // input_test — Tests all input methods
 
-#include "wagnostic.h"
+#include "piolho.h"
 #include "framebuffer.h"
 #include "clock.h"
 #include "keyboard.h"

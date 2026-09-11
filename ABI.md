@@ -1,8 +1,8 @@
-# Wagnostic 2.0 — Binary ABI Specification
+# Piolho 2.0 — Binary ABI Specification
 
-This document defines the core binary Application Binary Interface (ABI) of **Wagnostic 2.0**.
+This document defines the core binary Application Binary Interface (ABI) of **Piolho 2.0**.
 
-The Wagnostic core ABI is an ultra-minimalist, host-agnostic, and language-neutral specification. It establishes only the basic execution lifecycle and capability negotiation mechanism between a host and a guest WebAssembly module.
+The Piolho core ABI is an ultra-minimalist, host-agnostic, and language-neutral specification. It establishes only the basic execution lifecycle and capability negotiation mechanism between a host and a guest WebAssembly module.
 
 All concrete capabilities (graphics, clock, input, sound, storage, network) are implemented as **extensions** negotiated dynamically at runtime. For the standard multimedia extensions specification, see [STD.md](STD.md).
 
@@ -10,7 +10,7 @@ All concrete capabilities (graphics, clock, input, sound, storage, network) are 
 
 ## 1. Core Execution Model
 
-A Wagnostic 2.0 module is a standard 32-bit WebAssembly (Wasm MVP) binary with a linear memory.
+A Piolho 2.0 module is a standard 32-bit WebAssembly (Wasm MVP) binary with a linear memory.
 
 The entire interaction between host and guest is governed by exactly **two functions**:
 1. **One exported entry point**: `wupdate()` (called by the host).
@@ -33,7 +33,7 @@ The entire interaction between host and guest is governed by exactly **two funct
 
 ### 2.1 Guest Exports: `wupdate`, `winit`, `wexit`
 
-Every Wagnostic module must export the `wupdate` function. It may optionally export `winit` and `wexit` for worker lifecycle hooks.
+Every Piolho module must export the `wupdate` function. It may optionally export `winit` and `wexit` for worker lifecycle hooks.
 
 ```c
 int32_t winit(void);    /* Optional: called once on worker startup */
@@ -72,7 +72,7 @@ int32_t wtell(const char *target, const void *data, int32_t size, int32_t timeou
 
 ## 3. Extension Memory Model
 
-Wagnostic does **not** enforce rigid metadata, mandatory headers, or boilerplate fields at the beginning of extension structs. An extension is simply a named memory structure agreed upon between host and guest.
+Piolho does **not** enforce rigid metadata, mandatory headers, or boilerplate fields at the beginning of extension structs. An extension is simply a named memory structure agreed upon between host and guest.
 
 ### 3.1 Memory Rules
 - **Linear Memory Ownership**: Extension structs reside in the guest module's WebAssembly linear memory. The host allocates them in a dedicated host-reserved arena or mapped region within the guest's linear memory.
@@ -123,7 +123,7 @@ The official standard library of extensions is specified in **[STD.md](STD.md)**
 
 ## 6. Official Hosts & Minimal Templates
  
-- **Universal Host (`bin/wagnostic.js`, `src/`)**: Universal zero-dependency JavaScript host compatible with **Node.js**, **txiki.js (`tjs`)**, **Bun**, and **Deno**.
+- **Universal Host (`bin/piolho.js`, `src/`)**: Universal zero-dependency JavaScript host compatible with **Node.js**, **txiki.js (`tjs`)**, **Bun**, and **Deno**.
 - **Native Host (`runners/native/`)**: 100% `libc` / POSIX C runner with wasm3. Multi-threaded OS worker pool with headless GIF export. Zero external windowing dependencies.
 - **`examples/bare_runner.c`**: Minimal standalone C host (~90 lines).
 - **`examples/bare_runner.js`**: Minimal standalone JavaScript host (~60 lines).

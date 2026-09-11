@@ -1,6 +1,6 @@
-// full_test — Comprehensive test of Wagnostic 2.0 features
+// full_test — Comprehensive test of Piolho 2.0 features
 
-#include "wagnostic.h"
+#include "piolho.h"
 #include "framebuffer.h"
 #include "clock.h"
 #include "keyboard.h"

@@ -1,5 +1,5 @@
 /**
- * Wagnostic Environment Abstraction Layer
+ * Piolho Environment Abstraction Layer
  * Supports: txiki.js (tjs), Node.js, Bun, Deno
  */
 

@@ -1,5 +1,5 @@
 /**
- * Wagnostic Synchronous Rendezvous IPC Engine
+ * Piolho Synchronous Rendezvous IPC Engine
  * 
  * Implements wask() and wtell() rendezvous matching across WASM workers.
  */
@@ -17,12 +17,15 @@ class IpcEngine {
   }
 
   ask(callerWorker, targetName, dataPtr, size, timeout, workerMap) {
-    if (targetName === callerWorker.name) return WIPC_PARAM;
-    if (!workerMap.has(targetName)) return WIPC_TARGET;
+    const isAny = !targetName;
+    if (!isAny) {
+      if (targetName === callerWorker.name) return WIPC_PARAM;
+      if (!workerMap.has(targetName)) return WIPC_TARGET;
+    }
 
     // Check if there is already a matching TELL waiting for this ASK
     const matchIdx = this.pendingOps.findIndex(
-      op => op.opType === 'TELL' && op.caller === targetName && op.target === callerWorker.name
+      op => op.opType === 'TELL' && (isAny || op.caller === targetName) && op.target === callerWorker.name
     );
 
     if (matchIdx !== -1) {
@@ -40,7 +43,7 @@ class IpcEngine {
     this.pendingOps.push({
       worker: callerWorker,
       caller: callerWorker.name,
-      target: targetName,
+      target: isAny ? '' : targetName,
       dataPtr,
       size,
       opType: 'ASK'
@@ -49,12 +52,12 @@ class IpcEngine {
   }
 
   tell(callerWorker, targetName, dataPtr, size, timeout, workerMap) {
-    if (targetName === callerWorker.name) return WIPC_PARAM;
+    if (!targetName || targetName === callerWorker.name) return WIPC_PARAM;
     if (!workerMap.has(targetName)) return WIPC_TARGET;
 
     // Check if there is already a matching ASK waiting for this TELL
     const matchIdx = this.pendingOps.findIndex(
-      op => op.opType === 'ASK' && op.caller === targetName && op.target === callerWorker.name
+      op => op.opType === 'ASK' && (!op.target || op.target === callerWorker.name) && op.caller === targetName
     );
 
     if (matchIdx !== -1) {

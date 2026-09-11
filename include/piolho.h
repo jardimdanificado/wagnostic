@@ -1,10 +1,10 @@
-#ifndef WAGNOSTIC_H
-#define WAGNOSTIC_H
+#ifndef PIOLHO_H
+#define PIOLHO_H
 
 #include <stdint.h>
 #include <stddef.h>
 
-#define WAGNOSTIC_VERSION 2
+#define PIOLHO_VERSION 2
 
 #define WUPDATE_OK      0
 #define WUPDATE_EXIT    1
@@ -19,6 +19,10 @@
 #define WIPC_SIZE       -4
 #define WIPC_SHUTDOWN   -5
 #define WIPC_STATE      -6
+
+/* Wildcard Target for wask (receives from any sender) */
+#define PIOLHO_ANY       ((const char*)0)
+#define WIPC_ANY         ((const char*)0)
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,4 +44,4 @@ int32_t wexit(void);
 }
 #endif
 
-#endif /* WAGNOSTIC_H */
+#endif /* PIOLHO_H */

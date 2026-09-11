@@ -1,5 +1,5 @@
-#ifndef WAGNOSTIC_MOUSE_H
-#define WAGNOSTIC_MOUSE_H
+#ifndef PIOLHO_MOUSE_H
+#define PIOLHO_MOUSE_H
 
 #include <stdint.h>
 
@@ -18,4 +18,4 @@ typedef struct {
     int32_t  wheel_y;    /* Offset 16 (4B) - Vertical scroll delta */
 } wmouse_t;
 
-#endif /* WAGNOSTIC_MOUSE_H */
+#endif /* PIOLHO_MOUSE_H */

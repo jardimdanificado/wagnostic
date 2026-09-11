@@ -1,17 +1,16 @@
 /**
- * Wagnostic Host Runner
+ * Piolho Host Runner
  * 
- * Coordinates workers, frame loops, clocks, input polling, logger, and GIF export.
+ * Coordinates workers, frame loops, and extension lifecycle hooks.
  */
 
 const { ENV } = require('./env');
 const { extractFromTar } = require('./tar');
-const { MinimalGifEncoder } = require('./gif');
-const { ExtensionRegistry, defaultRegistry } = require('./extensions');
+const { defaultRegistry } = require('./extensions');
 const { IpcEngine } = require('./ipc');
 const { WWorker } = require('./worker');
 
-class WagnosticHost {
+class PiolhoHost {
   constructor(options = {}) {
     this.maxFrames = (options.maxFrames !== undefined) ? options.maxFrames : 1;
     this.targetFps = options.targetFps || 30;
@@ -21,17 +20,18 @@ class WagnosticHost {
     this.workers = [];
     this.workerMap = new Map();
     this.ipc = new IpcEngine();
-    this.gifEncoder = null;
     this.isRunning = false;
     this.startTime = 0;
     this.lastTime = 0;
     this.frameCount = 0;
 
-    // Shared input state
+    // Generic host input state for input extensions
     this.keyState = new Uint8Array(256);
     this.mouseX = 0;
     this.mouseY = 0;
     this.mouseButtons = 0;
+    this.mouseWheelX = 0;
+    this.mouseWheelY = 0;
     this.gamepadMask = 0;
     this.gamepadAxes = new Int16Array(8);
   }
@@ -69,28 +69,6 @@ class WagnosticHost {
     return worker;
   }
 
-  captureFrame() {
-    if (!this.gifPath) return;
-    const primary = this.workers.find(w => w.fbPtr && w.fbPtr + 12 <= w.memory.buffer.byteLength);
-    if (!primary) return;
-
-    const fbView = new DataView(primary.memory.buffer, primary.fbPtr, 12);
-    const fbW = fbView.getUint32(0, true) || 320;
-    const fbH = fbView.getUint32(4, true) || 240;
-    const pixelsPtr = fbView.getUint32(8, true);
-
-    if (!pixelsPtr || fbW === 0 || fbH === 0 || pixelsPtr + fbW * fbH * 4 > primary.memory.buffer.byteLength) return;
-
-    const pixels = new Uint32Array(primary.memory.buffer, pixelsPtr, fbW * fbH);
-
-    if (!this.gifEncoder) {
-      this.gifEncoder = new MinimalGifEncoder(fbW, fbH, Math.round(100 / this.targetFps));
-    }
-    if (this.gifEncoder) {
-      this.gifEncoder.addFrame(pixels);
-    }
-  }
-
   cleanup() {
     if (!this.isRunning) return;
     this.isRunning = false;
@@ -99,70 +77,19 @@ class WagnosticHost {
       w.exit();
     }
 
-    if (this.gifPath) {
-      if (this.gifEncoder && this.gifEncoder.frames.length > 0) {
-        try {
-          const gifData = this.gifEncoder.save();
-          ENV.writeFile(this.gifPath, gifData);
-          console.log(`[GIF] Saved ${this.gifEncoder.frames.length} frames to ${this.gifPath}`);
-        } catch (err) {
-          console.error('Failed to save GIF:', err.message);
-        }
-      } else {
-        console.log(`[GIF] No active framebuffer in loaded ROMs; skipping ${this.gifPath}`);
-      }
-    }
+    this.extensions.onDestroy(this);
   }
 
   step() {
     if (!this.isRunning) return false;
     this.frameCount++;
     const now = Date.now();
-    const deltaSec = (now - this.lastTime) / 1000.0;
     this.lastTime = now;
 
-    const primary = this.workers[0];
     let anyRunning = false;
 
     for (const w of this.workers) {
       if (!w.running) continue;
-
-      // Update clock extension
-      if (w.clockPtr && w.clockPtr + 24 <= w.memory.buffer.byteLength) {
-        const view = new DataView(w.memory.buffer, w.clockPtr, 24);
-        view.setBigUint64(0, BigInt(now - this.startTime), true);
-        view.setFloat32(16, deltaSec, true);
-      }
-
-      // Update primary input extensions
-      if (w === primary) {
-        if (w.keyboardPtr && w.keyboardPtr + 256 <= w.memory.buffer.byteLength) {
-          new Uint8Array(w.memory.buffer, w.keyboardPtr, 256).set(this.keyState);
-        }
-        if (w.mousePtr && w.mousePtr + 20 <= w.memory.buffer.byteLength) {
-          const view = new DataView(w.memory.buffer, w.mousePtr, 20);
-          view.setInt32(0, this.mouseX, true);
-          view.setInt32(4, this.mouseY, true);
-          view.setUint32(8, this.mouseButtons, true);
-        }
-        if (w.gamepadPtr && w.gamepadPtr + 20 <= w.memory.buffer.byteLength) {
-          const view = new DataView(w.memory.buffer, w.gamepadPtr, 20);
-          view.setUint32(0, this.gamepadMask, true);
-          new Int16Array(w.memory.buffer, w.gamepadPtr + 4, 8).set(this.gamepadAxes);
-        }
-      }
-
-      // Flush logger extension
-      if (w.loggerPtr && w.loggerPtr + 12 <= w.memory.buffer.byteLength) {
-        const view = new DataView(w.memory.buffer, w.loggerPtr, 12);
-        const len = view.getUint32(8, true);
-        if (len > 0 && w.loggerBufPtr && w.loggerBufPtr + len <= w.memory.buffer.byteLength) {
-          const textBytes = new Uint8Array(w.memory.buffer, w.loggerBufPtr, len);
-          const str = new TextDecoder().decode(textBytes);
-          console.log(`[${w.name} Log] ${str}`);
-          view.setUint32(8, 0, true);
-        }
-      }
 
       const status = w.update();
       if (status === 1) { // WUPDATE_EXIT
@@ -181,7 +108,7 @@ class WagnosticHost {
       return false;
     }
 
-    this.captureFrame();
+    this.extensions.onFrameComplete(this);
 
     if (this.maxFrames > 0 && this.frameCount >= this.maxFrames) {
       this.cleanup();
@@ -220,5 +147,5 @@ class WagnosticHost {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { WagnosticHost };
+  module.exports = { PiolhoHost };
 }

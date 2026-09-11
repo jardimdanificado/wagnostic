@@ -1,7 +1,7 @@
-// bare_counter — Minimalist Wagnostic 2.0 ROM with zero extensions
+// bare_counter — Minimalist Piolho 2.0 ROM with zero extensions
 // Runs a 10-step compute loop and requests clean termination.
 
-#include "wagnostic.h"
+#include "piolho.h"
 
 static int step_count = 0;
 static int fib_a = 0;
