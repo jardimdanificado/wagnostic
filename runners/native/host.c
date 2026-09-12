@@ -115,7 +115,17 @@ static void refresh_memory(void) {
 static uint32_t host_alloc(uint32_t size, uint32_t align) {
     refresh_memory();
     if (g_arena_offset == 0) {
-        g_arena_offset = (g_mem_len > 1048576) ? 0x20000 : 0x8000;
+        if (g_module) {
+            for (uint32_t i = 0; i < g_module->numGlobals; i++) {
+                if (g_module->globals[i].name && strcmp(g_module->globals[i].name, "__heap_base") == 0) {
+                    g_arena_offset = (uint32_t)g_module->globals[i].i32Value;
+                    break;
+                }
+            }
+        }
+        if (g_arena_offset == 0) {
+            g_arena_offset = (g_mem_len > 1048576) ? 0x20000 : 0x8000;
+        }
     }
     if (align > 1) {
         g_arena_offset = (g_arena_offset + align - 1) & ~(align - 1);

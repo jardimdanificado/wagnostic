@@ -33,7 +33,11 @@ export class Wagnostic {
   hostAlloc(size, align = 4) {
     if (!this.memory) throw new Error('Memory not initialized');
     if (this.arenaOffset === 0) {
-      this.arenaOffset = (this.memory.buffer.byteLength > 1048576) ? 0x20000 : 0x8000;
+      if (this.exports && this.exports.__heap_base !== undefined) {
+        this.arenaOffset = typeof this.exports.__heap_base === 'object' ? Number(this.exports.__heap_base.value) : Number(this.exports.__heap_base);
+      } else {
+        this.arenaOffset = (this.memory.buffer.byteLength > 1048576) ? 0x20000 : 0x8000;
+      }
     }
     if (align > 1) this.arenaOffset = (this.arenaOffset + align - 1) & ~(align - 1);
     const ptr = this.arenaOffset;
@@ -63,12 +67,13 @@ export class Wagnostic {
     if (typeof Response !== 'undefined' && wasmInput instanceof Response) {
       wasmBytes = await wasmInput.arrayBuffer();
     } else if (typeof wasmInput === 'string') {
-      if (typeof fetch === 'function' && (wasmInput.startsWith('http://') || wasmInput.startsWith('https://') || wasmInput.startsWith('./') || wasmInput.startsWith('/'))) {
-        const res = await fetch(wasmInput);
-        wasmBytes = await res.arrayBuffer();
-      } else if (typeof process !== 'undefined' && process.versions && process.versions.node) {
+      if (typeof process !== 'undefined' && process.versions && process.versions.node) {
         const fs = await import('fs');
         wasmBytes = fs.readFileSync(wasmInput);
+      } else if (typeof fetch === 'function') {
+        const res = await fetch(wasmInput);
+        if (!res.ok) throw new Error(`Failed to load WASM from '${wasmInput}': HTTP ${res.status}`);
+        wasmBytes = await res.arrayBuffer();
       }
     }
 
