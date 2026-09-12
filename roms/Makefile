@@ -1,26 +1,17 @@
 # =============================================================================
-#  WAGNOSTIC — ROMs Makefile
+#  WAGNOSTIC 2.0 — ROMs Makefile
 # =============================================================================
 
 ROM_DIRS = \
 	display_test \
 	input_test \
-	full_test \
-	full_test_static \
-	full_test_dynamic \
 	buttons_test \
-	fallback_test \
-	bpp1_test \
-	bpp2_test \
-	bpp4_test \
-	exotic1_test \
-	exotic2_test \
+	full_test \
 	wextension_test \
 	bare_counter \
 	logger_example
 
-
-WAGNOSTIC_BIN ?= $(firstword $(wildcard ../build/wagnostic ../wagnostic wagnostic))
+WAGNOSTIC_BIN ?= $(firstword $(wildcard ../runners/native/wagnostic ../build/wagnostic ../wagnostic wagnostic))
 NODE_HOST ?= ../runners/node/wagnostic.js
 
 RUNNER ?= native
@@ -59,7 +50,7 @@ test-native: all
 	for pid in $$pids; do wait $$pid 2>/dev/null; done; \
 	echo ""; \
 	echo "===================================================="; \
-	echo " NATIVE RUNNER MASS TEST RESULTS"; \
+	echo " NATIVE RUNNER TEST RESULTS"; \
 	echo "===================================================="; \
 	failed=0; total=0; \
 	for rom in *.wasm; do \
@@ -90,7 +81,7 @@ test-node: all
 	for pid in $$pids; do wait $$pid 2>/dev/null; done; \
 	echo ""; \
 	echo "===================================================="; \
-	echo " NODE.JS RUNNER MASS TEST RESULTS"; \
+	echo " NODE.JS RUNNER TEST RESULTS"; \
 	echo "===================================================="; \
 	failed=0; total=0; \
 	for rom in *.wasm; do \
@@ -109,4 +100,3 @@ test-node: all
 	echo "===================================================="; \
 	rm -rf /tmp/wagnostic_test_logs; \
 	if [ $$failed -gt 0 ]; then exit 1; fi
-

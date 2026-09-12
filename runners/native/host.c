@@ -72,50 +72,12 @@ static uint8_t    *g_gif_rgb_buf = NULL;
 static uint64_t    g_max_frames  = 0;
 static uint32_t    g_target_fps  = 30;
 static int         g_headless    = 0;
-static int         g_is_tar      = 0;
 static char        g_rom_path[1024] = {0};
 
 #if !defined(_WIN32)
 static struct termios g_orig_termios;
 static int g_termios_saved = 0;
 #endif
-
-/* ================================================================
- * TAR Helpers
- * ================================================================ */
-
-static uint8_t* tar_extract_file(const char* tar_path, const char* target_filename, size_t* out_sz) {
-    FILE* f = fopen(tar_path, "rb");
-    if (!f) return NULL;
-    uint8_t header[512];
-    uint8_t* best_data = NULL;
-    size_t best_sz = 0;
-    while (fread(header, 1, 512, f) == 512) {
-        if (header[0] == '\0') break;
-        char name[101];
-        memcpy(name, header, 100);
-        name[100] = '\0';
-        size_t size = 0;
-        for (int i = 0; i < 11; i++) {
-            if (header[124+i] >= '0' && header[124+i] <= '7')
-                size = size * 8 + (header[124+i] - '0');
-        }
-        if (strcmp(name, target_filename) == 0 || strstr(name, target_filename) != NULL) {
-            if (best_data) free(best_data);
-            best_data = (uint8_t*)malloc(size);
-            best_sz = size;
-            fread(best_data, 1, size, f);
-            long remainder = (512 - (size % 512)) % 512;
-            fseek(f, remainder, SEEK_CUR);
-        } else {
-            long skip = size + ((512 - (size % 512)) % 512);
-            fseek(f, skip, SEEK_CUR);
-        }
-    }
-    fclose(f);
-    if (out_sz) *out_sz = best_sz;
-    return best_data;
-}
 
 /* ================================================================
  * Memory & Arena Helpers
@@ -418,7 +380,7 @@ static void render_terminal_frame(wframebuffer_t *fb, uint64_t frame_num) {
 int main(int argc, char **argv) {
     if (argc < 2) {
         printf("Wagnostic 2.0 Native Runner (100%% Libc Terminal Host)\n");
-        printf("Usage: %s <rom.wasm|rom.tar> [-n <frames>] [-fps <fps>] [--headless] [-g <out.gif>]\n", argv[0]);
+        printf("Usage: %s <rom.wasm> [-n <frames>] [-fps <fps>] [--headless] [-g <out.gif>]\n", argv[0]);
         return 1;
     }
 
@@ -447,31 +409,23 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* Load WASM or TAR file */
-    size_t wasm_size = 0;
-    uint8_t *wasm_bytes = NULL;
-
-    size_t name_len = strlen(g_rom_path);
-    if (name_len > 4 && strcmp(g_rom_path + name_len - 4, ".tar") == 0) {
-        g_is_tar = 1;
-        wasm_bytes = tar_extract_file(g_rom_path, "main.wasm", &wasm_size);
-        if (!wasm_bytes) {
-            fprintf(stderr, "Error: 'main.wasm' not found in TAR archive %s\n", g_rom_path);
-            return 1;
-        }
-    } else {
-        FILE *f = fopen(g_rom_path, "rb");
-        if (!f) {
-            fprintf(stderr, "Error: Could not open ROM file: %s\n", g_rom_path);
-            return 1;
-        }
-        fseek(f, 0, SEEK_END);
-        wasm_size = ftell(f);
-        fseek(f, 0, SEEK_SET);
-        wasm_bytes = (uint8_t*)malloc(wasm_size);
-        fread(wasm_bytes, 1, wasm_size, f);
-        fclose(f);
+    /* Load WASM binary */
+    FILE *f = fopen(g_rom_path, "rb");
+    if (!f) {
+        fprintf(stderr, "Error: Could not open ROM file: %s\n", g_rom_path);
+        return 1;
     }
+    fseek(f, 0, SEEK_END);
+    size_t wasm_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    uint8_t *wasm_bytes = (uint8_t*)malloc(wasm_size);
+    if (!wasm_bytes) {
+        fprintf(stderr, "Out of memory\n");
+        fclose(f);
+        return 1;
+    }
+    fread(wasm_bytes, 1, wasm_size, f);
+    fclose(f);
 
     /* Initialize wasm3 */
     IM3Environment env = m3_NewEnvironment();
