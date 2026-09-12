@@ -4,8 +4,8 @@
  *
  * This is a minimal, zero-dependency WebAssembly host.
  * It demonstrates the core Wagnostic contract:
- *   - Host provides `env.wextension(namePtr, version)`
- *   - Guest exports `wupdate()`
+ *   - Host provides `env.ask(namePtr)`
+ *   - Guest exports `update()`
  *
  * Usage:
  *   node bare_runner.js <path-to-rom.wasm> [max_frames]
@@ -66,7 +66,7 @@ async function run() {
   const importObject = {
     env: {
       memory: new WebAssembly.Memory({ initial: 16 }),
-      wextension: (namePtr) => {
+      ask: (namePtr) => {
         const name = readString(namePtr);
         console.log(`[Host] ROM requested extension: "${name}"`);
 
@@ -89,8 +89,8 @@ async function run() {
   const { instance } = await WebAssembly.instantiate(wasmBytes, importObject);
   memory = instance.exports.memory || importObject.env.memory;
 
-  if (typeof instance.exports.wupdate !== 'function') {
-    console.error('Error: WASM module does not export "wupdate()"');
+  if (typeof instance.exports.update !== 'function') {
+    console.error('Error: WASM module does not export "update()"');
     process.exit(1);
   }
 
@@ -98,7 +98,7 @@ async function run() {
 
   let frame = 0;
   while (frame < maxFrames) {
-    const status = instance.exports.wupdate();
+    const status = instance.exports.update();
 
     // Check if guest wrote anything to logger extension
     if (loggerPtr) {

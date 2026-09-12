@@ -132,7 +132,7 @@ export function handleExtension(name, host) {
 }
 
 /**
- * Updates clock, inputs, and processes pending log messages before wupdate().
+ * Updates clock, inputs, and processes pending log messages before update().
  */
 export function updateStd(host) {
   if (!host || !host.memory) return;

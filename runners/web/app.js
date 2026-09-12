@@ -98,7 +98,7 @@ function renderFrame() {
   try {
     status = runner.step();
   } catch (err) {
-    appendLog(`Runtime error in wupdate(): ${err.message}`);
+    appendLog(`Runtime error in update(): ${err.message}`);
     statusDisplay.textContent = 'Runtime Error';
     pauseLoop();
     return;

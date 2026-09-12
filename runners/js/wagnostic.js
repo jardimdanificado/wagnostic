@@ -2,8 +2,8 @@
  * Wagnostic 2.0 — Bare Minimal Embeddable WebAssembly Runner (~60 lines)
  * 
  * Single-file, zero-dependency ES6 module.
- * Only handles WASM loading, memory arena allocation, and wupdate() loop.
- * Passes all `wextension(name)` calls directly to `onExtension(name, host)`.
+ * Only handles WASM loading, memory arena allocation, and update() loop.
+ * Passes all `ask(name)` calls directly to `onExtension(name, host)`.
  */
 
 export class Wagnostic {
@@ -81,7 +81,7 @@ export class Wagnostic {
     const importObject = {
       env: {
         memory: defaultMemory,
-        wextension: (namePtr) => {
+        ask: (namePtr) => {
           const name = this.readString(namePtr);
           return this.onExtension(name, this);
         },
@@ -102,8 +102,8 @@ export class Wagnostic {
     this.instance = module.instance || module;
     this.exports = this.instance.exports;
 
-    if (typeof this.exports.wupdate !== 'function') {
-      throw new Error("ROM module does not export 'wupdate()' function.");
+    if (typeof this.exports.update !== 'function') {
+      throw new Error("ROM module does not export 'update()' function.");
     }
 
     this.memory = this.exports.memory || importObject.env.memory;
@@ -112,11 +112,11 @@ export class Wagnostic {
   }
 
   /**
-   * Executes a single frame (`wupdate()`).
+   * Executes a single frame (`update()`).
    * Returns: 0 = OK, 1 = EXIT, < 0 = ERROR
    */
   step() {
-    if (!this.exports || !this.exports.wupdate) throw new Error('Not initialized');
-    return this.exports.wupdate();
+    if (!this.exports || !this.exports.update) throw new Error('Not initialized');
+    return this.exports.update();
   }
 }

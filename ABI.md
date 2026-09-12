@@ -13,16 +13,16 @@ All concrete capabilities (graphics, clock, input, sound, storage, network) are 
 A Wagnostic 2.0 module is a standard 32-bit WebAssembly (Wasm MVP) binary with a linear memory.
 
 The entire interaction between host and guest is governed by exactly **two functions**:
-1. **One exported entry point**: `wupdate()` (called by the host).
-2. **One imported capability dispatcher**: `wextension(name)` (called by the guest).
+1. **One exported entry point**: `update()` (called by the host).
+2. **One imported capability dispatcher**: `ask(name)` (called by the guest).
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                            HOST                             │
 │                                                             │
-│   Calls: wupdate() ──────────────► [ Guest Execution Step ] │
+│   Calls: update() ───────────────► [ Guest Execution Step ] │
 │                                             │               │
-│   Resolves: wextension(name) ◄──────────────┘               │
+│   Resolves: ask(name) ◄─────────────────────┘               │
 │   Returns: pointer to extension struct in WASM Memory       │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -31,32 +31,32 @@ The entire interaction between host and guest is governed by exactly **two funct
 
 ## 2. Binary Functions
 
-### 2.1 Guest Export: `wupdate`
+### 2.1 Guest Export: `update`
 
-Every Wagnostic module must export the `wupdate` function.
+Every Wagnostic module must export the `update` function.
 
 ```c
-int32_t wupdate(void);
+int32_t update(void);
 ```
 
-- **WASM Type Signature**: `(func (export "wupdate") (result i32))`
-- **Invocation**: The host invokes `wupdate()` periodically (e.g. once per frame at 60 Hz, or on every tick/step in headless runners).
+- **WASM Type Signature**: `(func (export "update") (result i32))`
+- **Invocation**: The host invokes `update()` periodically (e.g. once per frame at 60 Hz, or on every tick/step in headless runners).
 - **Return Codes**:
-  - `0` (`WUPDATE_OK`): The frame/step executed successfully. The host proceeds to the next iteration.
-  - `1` (`WUPDATE_EXIT`): The guest module requests a clean shutdown. The host terminates execution loop.
-  - `<0` (`WUPDATE_ERROR`): Fatal error during guest execution.
+  - `0` (`UPDATE_OK`): The frame/step executed successfully. The host proceeds to the next iteration.
+  - `1` (`UPDATE_EXIT`): The guest module requests a clean shutdown. The host terminates execution loop.
+  - `<0` (`UPDATE_ERROR`): Fatal error during guest execution.
 
 ---
 
-### 2.2 Host Import: `wextension`
+### 2.2 Host Import: `ask`
 
 The host provides a single import under the `"env"` module namespace:
 
 ```c
-void* wextension(const char *name);
+void* ask(const char *name);
 ```
 
-- **WASM Type Signature**: `(import "env" "wextension" (func (param i32) (result i32)))`
+- **WASM Type Signature**: `(import "env" "ask" (func (param i32) (result i32)))`
 - **Parameters**:
   - `name`: 32-bit byte offset in WASM linear memory pointing to a null-terminated UTF-8 string identifying the extension (e.g., `"std:framebuffer"`, `"logger"`).
 - **Return Value**:
@@ -82,21 +82,21 @@ Wagnostic does **not** enforce rigid metadata, mandatory headers, or boilerplate
 ```mermaid
 sequenceDiagram
     participant Host
-    participant Guest as WASM Guest (wupdate)
+    participant Guest as WASM Guest (update)
     participant Mem as WASM Linear Memory
 
-    Host->>Guest: Call wupdate()
+    Host->>Guest: Call update()
     activate Guest
-    Guest->>Host: wextension("std:framebuffer")
+    Guest->>Host: ask("std:framebuffer")
     Host->>Mem: Allocate/populate wframebuffer_t struct
     Host-->>Guest: Return struct pointer (offset)
     Guest->>Mem: Write pixel data to fb->pixels
-    Guest-->>Host: Return WUPDATE_OK (0)
+    Guest-->>Host: Return UPDATE_OK (0)
     deactivate Guest
     Host->>Mem: Read fb->pixels & render
 ```
 
-1. During `wupdate()`, the guest queries desired capabilities by calling `wextension(name)`.
+1. During `update()`, the guest queries desired capabilities by calling `ask(name)`.
 2. If supported, the host provides a memory struct initialized with its capabilities and returns its offset.
 3. If unsupported, the host returns `0` (`NULL`). The guest must handle missing extensions gracefully.
 

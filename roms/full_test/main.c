@@ -119,12 +119,12 @@ static void draw_mouse(int ox, int oy, int qw, int qh) {
     fill_rect(ox + 22, oy + qh - 12, 15, 10, 30, 30, rb);
 }
 
-int32_t wupdate(void) {
+int32_t update(void) {
     if (!initialized) {
-        surface   = (wframebuffer_t*)wextension("std:framebuffer");
-        clock_ext = (wclock_t*)wextension("std:clock");
-        keyboard  = (wkeyboard_t*)wextension("std:keyboard");
-        mouse     = (wmouse_t*)wextension("std:mouse");
+        surface   = (wframebuffer_t*)ask("std:framebuffer");
+        clock_ext = (wclock_t*)ask("std:clock");
+        keyboard  = (wkeyboard_t*)ask("std:keyboard");
+        mouse     = (wmouse_t*)ask("std:mouse");
 
         if (surface) {
             surface->width = 320;
@@ -134,7 +134,7 @@ int32_t wupdate(void) {
         initialized = 1;
     }
 
-    if (!surface || !surface->pixels) return WUPDATE_ERROR;
+    if (!surface || !surface->pixels) return UPDATE_ERROR;
 
     frame_count++;
 
@@ -149,7 +149,7 @@ int32_t wupdate(void) {
     }
     r_was = key_r;
 
-    if (keyboard && keyboard->keys[41]) return WUPDATE_EXIT;
+    if (keyboard && keyboard->keys[41]) return UPDATE_EXIT;
 
     int W = (int)surface->width, H = (int)surface->height;
     clear(15, 15, 20);
@@ -161,5 +161,5 @@ int32_t wupdate(void) {
     draw_dirty_anim(W/2 + 1, 0, W/2 - 1, H/2);
     draw_mouse(0, H/2 + 1, W/2, H/2 - 1);
 
-    return WUPDATE_OK;
+    return UPDATE_OK;
 }

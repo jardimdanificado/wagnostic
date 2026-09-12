@@ -21,21 +21,21 @@ static void log_str(const char *str) {
     logger->length = i;
 }
 
-int32_t wupdate(void) {
+int32_t update(void) {
     if (!logger) {
-        logger = (wlogger_t*)wextension("logger");
+        logger = (wlogger_t*)ask("logger");
     }
 
     step++;
 
     if (step == 1) {
         log_str("Hello from Wagnostic 2.0 ROM!");
-        return WUPDATE_OK;
+        return UPDATE_OK;
     } else if (step == 2) {
         log_str("Step 2: Custom extensions are working smoothly.");
-        return WUPDATE_OK;
+        return UPDATE_OK;
     } else {
         log_str("Step 3: Completing execution. Goodbye!");
-        return WUPDATE_EXIT;
+        return UPDATE_EXIT;
     }
 }

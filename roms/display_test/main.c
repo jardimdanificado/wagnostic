@@ -80,10 +80,10 @@ static void draw_status(void) {
     fill_rect(50, h - 25, 10, 10, 200, 200, 200);
 }
 
-int32_t wupdate(void) {
+int32_t update(void) {
     if (!initialized) {
-        surface  = (wframebuffer_t*)wextension("std:framebuffer");
-        keyboard = (wkeyboard_t*)wextension("std:keyboard");
+        surface  = (wframebuffer_t*)ask("std:framebuffer");
+        keyboard = (wkeyboard_t*)ask("std:keyboard");
 
         if (surface) {
             surface->width = 320;
@@ -93,7 +93,7 @@ int32_t wupdate(void) {
         initialized = 1;
     }
 
-    if (!surface) return WUPDATE_ERROR;
+    if (!surface) return UPDATE_ERROR;
 
     frame_phase++;
 
@@ -120,5 +120,5 @@ int32_t wupdate(void) {
     int ax = (frame_phase * 3) % (int)surface->width;
     fill_rect(ax, 10, 20, 20, 255, 200, 0);
 
-    return WUPDATE_OK;
+    return UPDATE_OK;
 }

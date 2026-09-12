@@ -36,15 +36,15 @@ static int test_passed = 0;
 #define RGBA(r, g, b, a) ((uint32_t)(((uint8_t)(a) << 24) | ((uint8_t)(b) << 16) | ((uint8_t)(g) << 8) | (uint8_t)(r)))
 #define RGB(r, g, b) RGBA(r, g, b, 255)
 
-int32_t wupdate(void) {
+int32_t update(void) {
     if (!initialized) {
         // Discover standard extensions by string name
-        framebuffer = (wframebuffer_t*)wextension("std:framebuffer");
-        clock_ext   = (wclock_t*)wextension("std:clock");
-        keyboard    = (wkeyboard_t*)wextension("std:keyboard");
-        mouse       = (wmouse_t*)wextension("std:mouse");
+        framebuffer = (wframebuffer_t*)ask("std:framebuffer");
+        clock_ext   = (wclock_t*)ask("std:clock");
+        keyboard    = (wkeyboard_t*)ask("std:keyboard");
+        mouse       = (wmouse_t*)ask("std:mouse");
 
-        void* unk = wextension("unknown_custom_xyz");
+        void* unk = ask("unknown_custom_xyz");
 
         test_passed = (framebuffer != NULL) &&
                       (clock_ext != NULL) &&
@@ -70,5 +70,5 @@ int32_t wupdate(void) {
         }
     }
 
-    return test_passed ? WUPDATE_OK : WUPDATE_ERROR;
+    return test_passed ? UPDATE_OK : UPDATE_ERROR;
 }

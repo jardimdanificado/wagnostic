@@ -2,7 +2,7 @@
 
 Minimalist, modular, platform-agnostic WebAssembly multimedia runtime.
 
-- **[ABI.md](ABI.md)**: Core Binary ABI specification (`wupdate`, `wextension`, execution lifecycle).
+- **[ABI.md](ABI.md)**: Core Binary ABI specification (`update`, `ask`, execution lifecycle).
 - **[STD.md](STD.md)**: Standard Extensions specification (`std:framebuffer`, `std:clock`, `std:keyboard`, `std:mouse`, `logger`).
 
 ---
@@ -30,7 +30,7 @@ await runner.init(wasmBytes);
 
 // In your game/frame loop:
 updateStd(runner);
-runner.step(); // calls wupdate()
+runner.step(); // calls update()
 const fb = getFramebuffer(runner);
 ```
 

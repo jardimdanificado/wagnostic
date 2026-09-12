@@ -7,7 +7,7 @@ ROM_DIRS = \
 	input_test \
 	buttons_test \
 	full_test \
-	wextension_test \
+	ask_test \
 	bare_counter \
 	logger_example
 

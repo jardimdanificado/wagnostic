@@ -81,11 +81,11 @@ static void draw_mouse_section(void) {
 
 static int initialized = 0;
 
-int32_t wupdate(void) {
+int32_t update(void) {
     if (!initialized) {
-        surface  = (wframebuffer_t*)wextension("std:framebuffer");
-        keyboard = (wkeyboard_t*)wextension("std:keyboard");
-        mouse    = (wmouse_t*)wextension("std:mouse");
+        surface  = (wframebuffer_t*)ask("std:framebuffer");
+        keyboard = (wkeyboard_t*)ask("std:keyboard");
+        mouse    = (wmouse_t*)ask("std:mouse");
 
         if (surface) {
             surface->width = 320;
@@ -95,14 +95,14 @@ int32_t wupdate(void) {
         initialized = 1;
     }
 
-    if (!surface || !surface->pixels) return WUPDATE_ERROR;
+    if (!surface || !surface->pixels) return UPDATE_ERROR;
 
     fill_rect(0, 0, (int)surface->width, (int)surface->height, RGB(15, 15, 20));
 
     draw_keyboard_section();
     draw_mouse_section();
 
-    if (keyboard && keyboard->keys[41]) return WUPDATE_EXIT;
+    if (keyboard && keyboard->keys[41]) return UPDATE_EXIT;
 
-    return WUPDATE_OK;
+    return UPDATE_OK;
 }

@@ -3,8 +3,8 @@
  *
  * Minimal standalone C host using wasm3.
  * Demonstrates the core Wagnostic contract:
- *   - Host provides `wextension(name, version)`
- *   - Guest exports `wupdate()`
+ *   - Host provides `ask(name)`
+ *   - Guest exports `update()`
  *
  * Compile:
  *   gcc -O2 bare_runner.c -I../runners/native/wasm3/source ../runners/native/wasm3/source/*.c -lm -o bare_runner
@@ -48,8 +48,8 @@ typedef struct {
     uint32_t length;
 } bare_logger_t;
 
-/* ── Host Capability Dispatcher: wextension(name) ── */
-m3ApiRawFunction(host_wextension) {
+/* ── Host Capability Dispatcher: ask(name) ── */
+m3ApiRawFunction(host_ask) {
     m3ApiReturnType(uint32_t);
     m3ApiGetArg(uint32_t, name_ptr);
 
@@ -113,26 +113,26 @@ int main(int argc, char **argv) {
     res = m3_LoadModule(runtime, module);
     if (res) { fprintf(stderr, "LoadModule error: %s\n", res); return 1; }
 
-    // Link wextension import
-    m3_LinkRawFunction(module, "env", "wextension", "i(i)", &host_wextension);
+    // Link ask import
+    m3_LinkRawFunction(module, "env", "ask", "i(i)", &host_ask);
 
-    // Find wupdate export
-    IM3Function func_wupdate;
-    res = m3_FindFunction(&func_wupdate, runtime, "wupdate");
-    if (res) { fprintf(stderr, "Error: wupdate export not found: %s\n", res); return 1; }
+    // Find update export
+    IM3Function func_update;
+    res = m3_FindFunction(&func_update, runtime, "update");
+    if (res) { fprintf(stderr, "Error: update export not found: %s\n", res); return 1; }
 
     printf("[Host] Starting execution loop (%d frames)...\n", max_frames);
 
     int frame = 0;
     while (frame < max_frames) {
-        res = m3_CallV(func_wupdate);
+        res = m3_CallV(func_update);
         if (res) {
             fprintf(stderr, "Runtime error at frame %d: %s\n", frame, res);
             return 1;
         }
 
         int32_t status = 0;
-        m3_GetResultsV(func_wupdate, &status);
+        m3_GetResultsV(func_update, &status);
 
         // Check if guest wrote anything to logger extension
         if (g_logger_ptr) {

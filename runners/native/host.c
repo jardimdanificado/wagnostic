@@ -2,8 +2,8 @@
  * Wagnostic 2.0 Native Runner — 100% Libc/POSIX Terminal & GIF Host
  *
  * Implements the Wagnostic 2.0 ABI using wasm3:
- * - Exports: wupdate() -> int32_t (WUPDATE_OK, WUPDATE_EXIT, WUPDATE_ERROR)
- * - Imports: env.wextension(const char *name, uint32_t version) -> void*
+ * - Exports: update() -> int32_t (UPDATE_OK, UPDATE_EXIT, UPDATE_ERROR)
+ * - Imports: env.ask(const char *name) -> void*
  *
  * Standard Extensions:
  * - std:framebuffer (v1) — Terminal ANSI TrueColor (▀) rendering
@@ -141,10 +141,10 @@ static uint32_t host_alloc(uint32_t size, uint32_t align) {
 }
 
 /* ================================================================
- * Extension Dispatcher (env.wextension)
+ * Capability Dispatcher (env.ask)
  * ================================================================ */
 
-m3ApiRawFunction(host_wextension) {
+m3ApiRawFunction(host_ask) {
     m3ApiReturnType(uint32_t);
     m3ApiGetArg(uint32_t, name_ptr);
 
@@ -334,14 +334,14 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* Link wextension import */
-    m3_LinkRawFunction(g_module, "env", "wextension", "i(i)", &host_wextension);
+    /* Link ask import */
+    m3_LinkRawFunction(g_module, "env", "ask", "i(i)", &host_ask);
 
-    /* Lookup wupdate export */
-    IM3Function f_wupdate = NULL;
-    result = m3_FindFunction(&f_wupdate, g_runtime, "wupdate");
-    if (result || !f_wupdate) {
-        fprintf(stderr, "Error: ROM does not export 'wupdate()' function\n");
+    /* Lookup update export */
+    IM3Function f_update = NULL;
+    result = m3_FindFunction(&f_update, g_runtime, "update");
+    if (result || !f_update) {
+        fprintf(stderr, "Error: ROM does not export 'update()' function\n");
         return 1;
     }
 
@@ -382,21 +382,21 @@ int main(int argc, char **argv) {
             }
         }
 
-        /* Call wupdate() */
-        result = m3_CallV(f_wupdate);
+        /* Call update() */
+        result = m3_CallV(f_update);
         if (result) {
-            fprintf(stderr, "Runtime error in wupdate(): %s\n", result);
+            fprintf(stderr, "Runtime error in update(): %s\n", result);
             break;
         }
 
         int32_t status = 0;
-        m3_GetResultsV(f_wupdate, &status);
+        m3_GetResultsV(f_update, &status);
 
-        if (status == WUPDATE_EXIT) {
+        if (status == UPDATE_EXIT) {
             break;
         }
         if (status < 0) {
-            fprintf(stderr, "wupdate() returned error code %d\n", status);
+            fprintf(stderr, "update() returned error code %d\n", status);
             return status;
         }
 
