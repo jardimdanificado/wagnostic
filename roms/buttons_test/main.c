@@ -1,7 +1,24 @@
 #include "wagnostic.h"
-#include "framebuffer.h"
-#include "keyboard.h"
-#include "mouse.h"
+
+typedef struct {
+    uint32_t width;
+    uint32_t height;
+    uint32_t pixels;
+} wframebuffer_t;
+
+typedef struct {
+    uint8_t keys[256];
+} wkeyboard_t;
+
+typedef struct {
+    int32_t  x;
+    int32_t  y;
+    uint32_t buttons;
+    int32_t  wheel_x;
+    int32_t  wheel_y;
+} wmouse_t;
+
+#define WMOUSE_BTN_LEFT (1 << 0)
 
 static wframebuffer_t *surface;
 static wkeyboard_t    *keyboard;
@@ -27,9 +44,9 @@ static int initialized = 0;
 
 int32_t wupdate(void) {
     if (!initialized) {
-        surface  = (wframebuffer_t*)wextension(WFRAMEBUFFER_EXTENSION);
-        keyboard = (wkeyboard_t*)wextension(WKEYBOARD_EXTENSION);
-        mouse    = (wmouse_t*)wextension(WMOUSE_EXTENSION);
+        surface  = (wframebuffer_t*)wextension("std:framebuffer");
+        keyboard = (wkeyboard_t*)wextension("std:keyboard");
+        mouse    = (wmouse_t*)wextension("std:mouse");
 
         if (surface) {
             surface->width = 320;

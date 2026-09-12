@@ -35,14 +35,78 @@
 #include "m3_api_libc.h"
 
 #include "wagnostic.h"
-#include "framebuffer.h"
-#include "clock.h"
-#include "keyboard.h"
-#include "mouse.h"
-#include "gamepad.h"
-#include "gif.h"
-#include "logger.h"
 #include "gif_encoder.h"
+
+/* Standard Extension Structures & Constants (as documented in STD.md) */
+#define WFRAMEBUFFER_EXTENSION "std:framebuffer"
+#define WCLOCK_EXTENSION       "std:clock"
+#define WKEYBOARD_EXTENSION    "std:keyboard"
+#define WMOUSE_EXTENSION       "std:mouse"
+#define WGAMEPAD_EXTENSION     "std:gamepad"
+#define WGIF_EXTENSION         "std:gif"
+#define WLOGGER_EXTENSION      "logger"
+
+#define WMOUSE_BTN_LEFT        (1 << 0)
+#define WMOUSE_BTN_RIGHT       (1 << 1)
+#define WMOUSE_BTN_MIDDLE      (1 << 2)
+
+#define WGAMEPAD_BTN_A             (1 << 0)
+#define WGAMEPAD_BTN_B             (1 << 1)
+#define WGAMEPAD_BTN_X             (1 << 2)
+#define WGAMEPAD_BTN_Y             (1 << 3)
+#define WGAMEPAD_BTN_LEFTSHOULDER  (1 << 4)
+#define WGAMEPAD_BTN_RIGHTSHOULDER (1 << 5)
+#define WGAMEPAD_BTN_SELECT        (1 << 6)
+#define WGAMEPAD_BTN_START         (1 << 7)
+#define WGAMEPAD_BTN_LEFTSTICK     (1 << 8)
+#define WGAMEPAD_BTN_RIGHTSTICK    (1 << 9)
+#define WGAMEPAD_BTN_DPAD_UP       (1 << 10)
+#define WGAMEPAD_BTN_DPAD_DOWN     (1 << 11)
+#define WGAMEPAD_BTN_DPAD_LEFT     (1 << 12)
+#define WGAMEPAD_BTN_DPAD_RIGHT    (1 << 13)
+
+typedef struct {
+    uint32_t width;
+    uint32_t height;
+    uint32_t pixels;
+} wframebuffer_t;
+
+typedef struct {
+    uint64_t ticks;
+    uint64_t frequency;
+    float    delta;
+} wclock_t;
+
+typedef struct {
+    uint8_t keys[256];
+} wkeyboard_t;
+
+typedef struct {
+    int32_t  x;
+    int32_t  y;
+    uint32_t buttons;
+    int32_t  wheel_x;
+    int32_t  wheel_y;
+} wmouse_t;
+
+typedef struct {
+    uint32_t buttons;
+    int16_t  axes[8];
+} wgamepad_t;
+
+typedef struct {
+    uint32_t recording;
+    uint32_t frame_count;
+    uint32_t max_frames;
+    uint32_t delay_cs;
+    uint32_t save_trigger;
+} wgif_t;
+
+typedef struct {
+    uint32_t buffer;
+    uint32_t capacity;
+    uint32_t length;
+} wlogger_t;
 
 /* ================================================================
  * Globals & State

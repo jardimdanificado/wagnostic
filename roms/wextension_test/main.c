@@ -1,10 +1,42 @@
 #include "wagnostic.h"
-#include "framebuffer.h"
-#include "clock.h"
-#include "keyboard.h"
-#include "mouse.h"
-#include "gamepad.h"
-#include "gif.h"
+
+// Structs declared directly from STD.md documentation
+typedef struct {
+    uint32_t width;
+    uint32_t height;
+    uint32_t pixels;
+} wframebuffer_t;
+
+typedef struct {
+    uint64_t ticks;
+    uint64_t frequency;
+    float    delta;
+} wclock_t;
+
+typedef struct {
+    uint8_t keys[256];
+} wkeyboard_t;
+
+typedef struct {
+    int32_t  x;
+    int32_t  y;
+    uint32_t buttons;
+    int32_t  wheel_x;
+    int32_t  wheel_y;
+} wmouse_t;
+
+typedef struct {
+    uint32_t buttons;
+    int16_t  axes[8];
+} wgamepad_t;
+
+typedef struct {
+    uint32_t recording;
+    uint32_t frame_count;
+    uint32_t max_frames;
+    uint32_t delay_cs;
+    uint32_t save_trigger;
+} wgif_t;
 
 static wframebuffer_t *framebuffer;
 static wclock_t       *clock_ext;
@@ -21,15 +53,14 @@ static int test_passed = 0;
 
 int32_t wupdate(void) {
     if (!initialized) {
-        // Test 1: Discover standard extensions via std:*
-        framebuffer = (wframebuffer_t*)wextension(WFRAMEBUFFER_EXTENSION);
-        clock_ext   = (wclock_t*)wextension(WCLOCK_EXTENSION);
-        keyboard    = (wkeyboard_t*)wextension(WKEYBOARD_EXTENSION);
-        mouse       = (wmouse_t*)wextension(WMOUSE_EXTENSION);
-        gamepad     = (wgamepad_t*)wextension(WGAMEPAD_EXTENSION);
-        gif         = (wgif_t*)wextension(WGIF_EXTENSION);
+        // Discover standard extensions by string name
+        framebuffer = (wframebuffer_t*)wextension("std:framebuffer");
+        clock_ext   = (wclock_t*)wextension("std:clock");
+        keyboard    = (wkeyboard_t*)wextension("std:keyboard");
+        mouse       = (wmouse_t*)wextension("std:mouse");
+        gamepad     = (wgamepad_t*)wextension("std:gamepad");
+        gif         = (wgif_t*)wextension("std:gif");
 
-        // Test 2: Unknown extension returns NULL
         void* unk = wextension("unknown_custom_xyz");
 
         test_passed = (framebuffer != NULL) &&
@@ -60,4 +91,3 @@ int32_t wupdate(void) {
 
     return test_passed ? WUPDATE_OK : WUPDATE_ERROR;
 }
-

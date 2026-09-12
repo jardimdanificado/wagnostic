@@ -23,15 +23,15 @@ Every standard extension structure adheres to the following conventions:
 
 ## 2. Standard Extensions Summary
 
-| Extension Identifier | Description | Struct Size | C Header |
-|---|---|:---:|---|
-| `std:framebuffer` | 32-bit RGBA8888 visual framebuffer (`0xAABBGGRR`) | 12 bytes | `framebuffer.h` |
-| `std:clock` | Monotonic ticks, tick frequency, and delta time | 24 bytes | `clock.h` |
-| `std:keyboard` | Keyboard state (256 USB HID scancodes) | 256 bytes | `keyboard.h` |
-| `std:mouse` | Mouse/pointer coordinates, buttons, and wheel | 20 bytes | `mouse.h` |
-| `std:gamepad` | Gamepad buttons and 8 analog axes | 20 bytes | `gamepad.h` |
-| `std:gif` | GIF recording status and frame synchronization | 20 bytes | `gif.h` |
-| `logger` | UTF-8 host console text logging buffer | 12 bytes | `logger.h` |
+| Extension Identifier | Description | Struct Size |
+|---|---|:---:|
+| `std:framebuffer` | 32-bit RGBA8888 visual framebuffer (`0xAABBGGRR`) | 12 bytes |
+| `std:clock` | Monotonic ticks, tick frequency, and delta time | 24 bytes |
+| `std:keyboard` | Keyboard state (256 USB HID scancodes) | 256 bytes |
+| `std:mouse` | Mouse/pointer coordinates, buttons, and wheel | 20 bytes |
+| `std:gamepad` | Gamepad buttons and 8 analog axes | 20 bytes |
+| `std:gif` | GIF recording status and frame synchronization | 20 bytes |
+| `logger` | UTF-8 host console text logging buffer | 12 bytes |
 
 ---
 
@@ -44,7 +44,6 @@ Provides direct access to a 32-bit RGBA8888 raster visual display.
 - **Identifier**: `"std:framebuffer"` (also aliases to `"framebuffer"`, `"surface"`)
 - **Total Struct Size**: `12 bytes`
 - **Pixel Format**: 32-bit Little-Endian RGBA8888 (`0xAABBGGRR` / `[R, G, B, A]` in memory byte order, 4 bytes per pixel).
-- **Header File**: `include/framebuffer.h`
 
 #### C Structure Definition:
 ```c
@@ -70,7 +69,6 @@ Provides high-precision monotonic timing and frame delta calculations.
 
 - **Identifier**: `"std:clock"` (also aliases to `"clock"`)
 - **Total Struct Size**: `24 bytes`
-- **Header File**: `include/clock.h`
 
 #### C Structure Definition:
 ```c
@@ -96,7 +94,6 @@ Provides keyboard input state representing 256 standard USB HID scancodes.
 
 - **Identifier**: `"std:keyboard"` (also aliases to `"keyboard"`)
 - **Total Struct Size**: `256 bytes`
-- **Header File**: `include/keyboard.h`
 
 #### C Structure Definition:
 ```c
@@ -118,7 +115,6 @@ Provides mouse / pointer coordinates, button bitmask, and 2-axis wheel scroll de
 
 - **Identifier**: `"std:mouse"` (also aliases to `"mouse"`)
 - **Total Struct Size**: `20 bytes`
-- **Header File**: `include/mouse.h`
 
 #### C Structure Definition:
 ```c
@@ -153,7 +149,6 @@ Provides digital gamepad buttons and 8 analog axes.
 
 - **Identifier**: `"std:gamepad"` (also aliases to `"gamepad"`)
 - **Total Struct Size**: `20 bytes`
-- **Header File**: `include/gamepad.h`
 
 #### C Structure Definition:
 ```c
@@ -193,7 +188,6 @@ Synchronizes headless GIF animation capture and recording status between host an
 
 - **Identifier**: `"std:gif"` (also aliases to `"gif"`)
 - **Total Struct Size**: `20 bytes`
-- **Header File**: `include/gif.h`
 
 #### C Structure Definition:
 ```c
@@ -223,7 +217,6 @@ Provides a simple UTF-8 text logging buffer to the host console.
 
 - **Identifier**: `"logger"`
 - **Total Struct Size**: `12 bytes`
-- **Header File**: `include/logger.h`
 
 #### C Structure Definition:
 ```c

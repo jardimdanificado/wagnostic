@@ -1,10 +1,33 @@
 // full_test — Comprehensive test of Wagnostic 2.0 features
 
 #include "wagnostic.h"
-#include "framebuffer.h"
-#include "clock.h"
-#include "keyboard.h"
-#include "mouse.h"
+
+typedef struct {
+    uint32_t width;
+    uint32_t height;
+    uint32_t pixels;
+} wframebuffer_t;
+
+typedef struct {
+    uint64_t ticks;
+    uint64_t frequency;
+    float    delta;
+} wclock_t;
+
+typedef struct {
+    uint8_t keys[256];
+} wkeyboard_t;
+
+typedef struct {
+    int32_t  x;
+    int32_t  y;
+    uint32_t buttons;
+    int32_t  wheel_x;
+    int32_t  wheel_y;
+} wmouse_t;
+
+#define WMOUSE_BTN_LEFT  (1 << 0)
+#define WMOUSE_BTN_RIGHT (1 << 1)
 
 static wframebuffer_t *surface;
 static wclock_t       *clock_ext;
@@ -37,34 +60,6 @@ static void fill_rect(int rx, int ry, int rw, int rh, uint8_t r, uint8_t g, uint
 static void clear(uint8_t r, uint8_t g, uint8_t b) {
     if (!surface) return;
     fill_rect(0, 0, (int)surface->width, (int)surface->height, r, g, b);
-}
-
-static const uint8_t font5x7[10][7] = {
-    {0x0E,0x11,0x13,0x15,0x19,0x11,0x0E},
-    {0x04,0x0C,0x04,0x04,0x04,0x04,0x0E},
-    {0x0E,0x11,0x01,0x06,0x08,0x10,0x1F},
-    {0x1F,0x02,0x04,0x02,0x01,0x11,0x0E},
-    {0x02,0x06,0x0A,0x12,0x1F,0x02,0x02},
-    {0x1F,0x10,0x1E,0x01,0x01,0x11,0x0E},
-    {0x06,0x08,0x10,0x1E,0x11,0x11,0x0E},
-    {0x1F,0x01,0x02,0x04,0x08,0x08,0x08},
-    {0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E},
-    {0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C},
-};
-
-static void draw_digit(int x, int y, int d, uint8_t r, uint8_t g, uint8_t b) {
-    if (d < 0 || d > 9) return;
-    for (int row = 0; row < 7; row++)
-        for (int col = 0; col < 5; col++)
-            if (font5x7[d][row] & (0x10 >> col))
-                set_pixel(x + col, y + row, r, g, b);
-}
-
-static void draw_number(int x, int y, int n, uint8_t r, uint8_t g, uint8_t b) {
-    if (n == 0) { draw_digit(x, y, 0, r, g, b); return; }
-    char buf[12]; int len = 0;
-    while (n > 0 && len < 12) { buf[len++] = n % 10; n /= 10; }
-    for (int i = len - 1; i >= 0; i--) { draw_digit(x, y, buf[i], r, g, b); x += 6; }
 }
 
 static void draw_keyboard(int ox, int oy, int qw, int qh) {
@@ -108,7 +103,6 @@ static void draw_mouse(int ox, int oy, int qw, int qh) {
     int mx = mouse ? mouse->x : 0;
     int my = mouse ? mouse->y : 0;
     uint32_t mbtns = mouse ? mouse->buttons : 0;
-    int mwheel = mouse ? mouse->wheel_y : 0;
 
     int cx = ox + (mx * qw) / (int)surface->width;
     int cy = oy + (my * qh) / (int)surface->height;
@@ -123,16 +117,14 @@ static void draw_mouse(int ox, int oy, int qw, int qh) {
 
     uint8_t rb = (mbtns & WMOUSE_BTN_RIGHT) ? 100 : 80;
     fill_rect(ox + 22, oy + qh - 12, 15, 10, 30, 30, rb);
-
-    draw_number(ox + 45, oy + qh - 12, mwheel, 255, 255, 0);
 }
 
 int32_t wupdate(void) {
     if (!initialized) {
-        surface   = (wframebuffer_t*)wextension(WFRAMEBUFFER_EXTENSION);
-        clock_ext = (wclock_t*)wextension(WCLOCK_EXTENSION);
-        keyboard  = (wkeyboard_t*)wextension(WKEYBOARD_EXTENSION);
-        mouse     = (wmouse_t*)wextension(WMOUSE_EXTENSION);
+        surface   = (wframebuffer_t*)wextension("std:framebuffer");
+        clock_ext = (wclock_t*)wextension("std:clock");
+        keyboard  = (wkeyboard_t*)wextension("std:keyboard");
+        mouse     = (wmouse_t*)wextension("std:mouse");
 
         if (surface) {
             surface->width = 320;

@@ -1,8 +1,16 @@
 // display_test — Tests surface modes and formats
 
 #include "wagnostic.h"
-#include "framebuffer.h"
-#include "keyboard.h"
+
+typedef struct {
+    uint32_t width;
+    uint32_t height;
+    uint32_t pixels;
+} wframebuffer_t;
+
+typedef struct {
+    uint8_t keys[256];
+} wkeyboard_t;
 
 static wframebuffer_t *surface;
 static wkeyboard_t    *keyboard;
@@ -74,8 +82,8 @@ static void draw_status(void) {
 
 int32_t wupdate(void) {
     if (!initialized) {
-        surface  = (wframebuffer_t*)wextension(WFRAMEBUFFER_EXTENSION);
-        keyboard = (wkeyboard_t*)wextension(WKEYBOARD_EXTENSION);
+        surface  = (wframebuffer_t*)wextension("std:framebuffer");
+        keyboard = (wkeyboard_t*)wextension("std:keyboard");
 
         if (surface) {
             surface->width = 320;
