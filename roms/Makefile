@@ -40,11 +40,11 @@ test:
 	fi
 
 test-native: all
-	@echo "Running all ROMs with Native Host ($(WAGNOSTIC_BIN) -n 30 --headless)..."
+	@echo "Running all ROMs with Native Host ($(WAGNOSTIC_BIN) -n 30)..."
 	@rm -rf /tmp/wagnostic_test_logs && mkdir -p /tmp/wagnostic_test_logs
 	@pids=""; \
 	for rom in *.wasm; do \
-		($(WAGNOSTIC_BIN) -n 30 --headless $$rom > /tmp/wagnostic_test_logs/$$rom.log 2>&1; echo $$? > /tmp/wagnostic_test_logs/$$rom.code) & \
+		($(WAGNOSTIC_BIN) -n 30 $$rom > /tmp/wagnostic_test_logs/$$rom.log 2>&1; echo $$? > /tmp/wagnostic_test_logs/$$rom.code) & \
 		pids="$$pids $$!"; \
 	done; \
 	for pid in $$pids; do wait $$pid 2>/dev/null; done; \
@@ -71,11 +71,11 @@ test-native: all
 	if [ $$failed -gt 0 ]; then exit 1; fi
 
 test-node: all
-	@echo "Running all ROMs with Node.js Host (node $(NODE_HOST) -n 30 --headless)..."
+	@echo "Running all ROMs with Node.js Host (node $(NODE_HOST) -n 30)..."
 	@rm -rf /tmp/wagnostic_test_logs && mkdir -p /tmp/wagnostic_test_logs
 	@pids=""; \
 	for rom in *.wasm; do \
-		(node $(NODE_HOST) -n 30 --headless $$rom > /tmp/wagnostic_test_logs/$$rom.log 2>&1; echo $$? > /tmp/wagnostic_test_logs/$$rom.code) & \
+		(node $(NODE_HOST) -n 30 $$rom > /tmp/wagnostic_test_logs/$$rom.log 2>&1; echo $$? > /tmp/wagnostic_test_logs/$$rom.code) & \
 		pids="$$pids $$!"; \
 	done; \
 	for pid in $$pids; do wait $$pid 2>/dev/null; done; \

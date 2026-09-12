@@ -25,25 +25,10 @@ typedef struct {
     int32_t  wheel_y;
 } wmouse_t;
 
-typedef struct {
-    uint32_t buttons;
-    int16_t  axes[8];
-} wgamepad_t;
-
-typedef struct {
-    uint32_t recording;
-    uint32_t frame_count;
-    uint32_t max_frames;
-    uint32_t delay_cs;
-    uint32_t save_trigger;
-} wgif_t;
-
 static wframebuffer_t *framebuffer;
 static wclock_t       *clock_ext;
 static wkeyboard_t    *keyboard;
 static wmouse_t       *mouse;
-static wgamepad_t     *gamepad;
-static wgif_t         *gif;
 
 static int initialized = 0;
 static int test_passed = 0;
@@ -58,8 +43,6 @@ int32_t wupdate(void) {
         clock_ext   = (wclock_t*)wextension("std:clock");
         keyboard    = (wkeyboard_t*)wextension("std:keyboard");
         mouse       = (wmouse_t*)wextension("std:mouse");
-        gamepad     = (wgamepad_t*)wextension("std:gamepad");
-        gif         = (wgif_t*)wextension("std:gif");
 
         void* unk = wextension("unknown_custom_xyz");
 
@@ -67,8 +50,6 @@ int32_t wupdate(void) {
                       (clock_ext != NULL) &&
                       (keyboard != NULL) &&
                       (mouse != NULL) &&
-                      (gamepad != NULL) &&
-                      (gif != NULL) &&
                       (unk == NULL) &&
                       (framebuffer->width == 320) &&
                       (framebuffer->height == 240);

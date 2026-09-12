@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Wagnostic Web Runner</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+    }
+    canvas {
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      border: 1px solid #000;
+      background: #000;
+      display: block;
+      margin: 10px 0;
+    }
+    .controls {
+      margin: 10px 0;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+    .stats {
+      margin: 10px 0;
+      font-family: monospace;
+    }
+    #logOutput {
+      width: 100%;
+      max-width: 640px;
+      height: 120px;
+      font-family: monospace;
+      font-size: 12px;
+      box-sizing: border-box;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Wagnostic Web Runner</h1>
+
+  <div class="controls">
+    <label for="romSelect">ROM:</label>
+    <select id="romSelect">
+      <option value="" disabled selected>-- Choose ROM --</option>
+      <option value="../../roms/display_test.wasm">display_test.wasm</option>
+      <option value="../../roms/full_test.wasm">full_test.wasm</option>
+      <option value="../../roms/input_test.wasm">input_test.wasm</option>
+      <option value="../../roms/buttons_test.wasm">buttons_test.wasm</option>
+      <option value="../../roms/logger_example.wasm">logger_example.wasm</option>
+      <option value="../../roms/bare_counter.wasm">bare_counter.wasm</option>
+      <option value="../../roms/wextension_test.wasm">wextension_test.wasm</option>
+    </select>
+
+    <label for="fileInput">or Upload:</label>
+    <input type="file" id="fileInput" accept=".wasm">
+  </div>
+
+  <canvas id="screen" width="320" height="240"></canvas>
+
+  <div class="controls">
+    <button id="btnPlay">Play</button>
+    <button id="btnStep">Step</button>
+    <button id="btnReset">Reset</button>
+  </div>
+
+  <div class="stats">
+    FPS: <span id="fpsDisplay">0</span> |
+    Resolution: <span id="resDisplay">320x240</span> |
+    Frame: <span id="frameDisplay">0</span> |
+    Status: <span id="statusDisplay">Idle</span>
+  </div>
+
+  <h3>Log:</h3>
+  <textarea id="logOutput" readonly placeholder="Console log output will appear here..."></textarea>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

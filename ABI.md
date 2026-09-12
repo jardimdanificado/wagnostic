@@ -110,15 +110,14 @@ The official standard library of extensions is specified in **[STD.md](STD.md)**
 - `std:clock`: Monotonic timing and frame delta (`ticks`, `frequency`, `delta`).
 - `std:keyboard`: Keyboard input state (256 USB HID scancodes).
 - `std:mouse`: Mouse pointer coordinates, button bitmask, and wheel deltas.
-- `std:gamepad`: Gamepad button bitmask and 8 analog axes.
-- `std:gif`: Headless GIF recording synchronization.
 - `logger`: Text logging buffer.
 
 ---
 
 ## 6. Official Runners & Minimal Templates
 
-- **`runners/native/`**: 100% `libc` / POSIX C runner with wasm3. Renders ANSI TrueColor half-blocks (`▀`) in terminal with headless GIF export. Zero external windowing dependencies.
-- **`runners/node/`**: Universal zero-dependency JavaScript runner compatible with **Node.js** and **txiki.js (`tjs`)**.
+- **`runners/native/`**: 100% `libc` / POSIX C CLI runner with wasm3. Built for headless execution and high-performance GIF animation recording (`-o output.gif`).
+- **`runners/js/`**: Universal zero-dependency ES6 module library / framework for embedding in Node.js, Deno, Bun, and Web browsers.
+- **`runners/web/`**: Web browser host with `<canvas>` rendering and interactive keyboard/mouse controls.
 - **`examples/bare_runner.c`**: Minimal standalone C host (~90 lines).
 - **`examples/bare_runner.js`**: Minimal standalone JavaScript host (~60 lines).

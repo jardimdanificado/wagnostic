@@ -20,25 +20,12 @@ typedef struct {
     int32_t  wheel_y;
 } wmouse_t;
 
-typedef struct {
-    uint32_t buttons;
-    int16_t  axes[8];
-} wgamepad_t;
-
 #define WMOUSE_BTN_LEFT    (1 << 0)
 #define WMOUSE_BTN_RIGHT   (1 << 1)
-
-#define WGAMEPAD_BTN_A     (1 << 0)
-#define WGAMEPAD_BTN_B     (1 << 1)
-#define WGAMEPAD_BTN_UP    (1 << 10)
-#define WGAMEPAD_BTN_DOWN  (1 << 11)
-#define WGAMEPAD_BTN_LEFT  (1 << 12)
-#define WGAMEPAD_BTN_RIGHT (1 << 13)
 
 static wframebuffer_t *surface;
 static wkeyboard_t    *keyboard;
 static wmouse_t       *mouse;
-static wgamepad_t     *gamepad;
 
 #define RGBA(r, g, b, a) ((uint32_t)(((uint8_t)(a) << 24) | ((uint8_t)(b) << 16) | ((uint8_t)(g) << 8) | (uint8_t)(r)))
 #define RGB(r, g, b) RGBA(r, g, b, 255)
@@ -99,7 +86,6 @@ int32_t wupdate(void) {
         surface  = (wframebuffer_t*)wextension("std:framebuffer");
         keyboard = (wkeyboard_t*)wextension("std:keyboard");
         mouse    = (wmouse_t*)wextension("std:mouse");
-        gamepad  = (wgamepad_t*)wextension("std:gamepad");
 
         if (surface) {
             surface->width = 320;

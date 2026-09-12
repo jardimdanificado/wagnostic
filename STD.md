@@ -29,8 +29,6 @@ Every standard extension structure adheres to the following conventions:
 | `std:clock` | Monotonic ticks, tick frequency, and delta time | 24 bytes |
 | `std:keyboard` | Keyboard state (256 USB HID scancodes) | 256 bytes |
 | `std:mouse` | Mouse/pointer coordinates, buttons, and wheel | 20 bytes |
-| `std:gamepad` | Gamepad buttons and 8 analog axes | 20 bytes |
-| `std:gif` | GIF recording status and frame synchronization | 20 bytes |
 | `logger` | UTF-8 host console text logging buffer | 12 bytes |
 
 ---
@@ -143,75 +141,7 @@ typedef struct {
 
 ---
 
-### 3.5 `std:gamepad`
-
-Provides digital gamepad buttons and 8 analog axes.
-
-- **Identifier**: `"std:gamepad"` (also aliases to `"gamepad"`)
-- **Total Struct Size**: `20 bytes`
-
-#### C Structure Definition:
-```c
-/* Gamepad Buttons */
-#define WGAMEPAD_BTN_A             (1 << 0)
-#define WGAMEPAD_BTN_B             (1 << 1)
-#define WGAMEPAD_BTN_X             (1 << 2)
-#define WGAMEPAD_BTN_Y             (1 << 3)
-#define WGAMEPAD_BTN_LEFTSHOULDER  (1 << 4)
-#define WGAMEPAD_BTN_RIGHTSHOULDER (1 << 5)
-#define WGAMEPAD_BTN_SELECT        (1 << 6)
-#define WGAMEPAD_BTN_START         (1 << 7)
-#define WGAMEPAD_BTN_LEFTSTICK     (1 << 8)
-#define WGAMEPAD_BTN_RIGHTSTICK    (1 << 9)
-#define WGAMEPAD_BTN_DPAD_UP       (1 << 10)
-#define WGAMEPAD_BTN_DPAD_DOWN     (1 << 11)
-#define WGAMEPAD_BTN_DPAD_LEFT     (1 << 12)
-#define WGAMEPAD_BTN_DPAD_RIGHT    (1 << 13)
-
-typedef struct {
-    uint32_t buttons;  /* Offset  0 (4B) - Gamepad buttons bitmask */
-    int16_t  axes[8];  /* Offset  4 (16B) - 8 analog axes (-32768..32767) */
-} wgamepad_t;
-```
-
-#### Memory Layout:
-| Offset | Size | Type | Field | Access | Description |
-| :---: | :---: | :---: | :--- | :---: | :--- |
-| `0` | 4 | `u32` | `buttons` | Host (R) | Digital gamepad buttons bitmask |
-| `4` | 16 | `i16[8]` | `axes` | Host (R) | 8 analog axes (`-32768` to `32767`) |
-
----
-
-### 3.6 `std:gif`
-
-Synchronizes headless GIF animation capture and recording status between host and guest.
-
-- **Identifier**: `"std:gif"` (also aliases to `"gif"`)
-- **Total Struct Size**: `20 bytes`
-
-#### C Structure Definition:
-```c
-typedef struct {
-    uint32_t recording;     /* 1 if host is actively recording GIF, 0 otherwise */
-    uint32_t frame_count;   /* Number of frames captured so far */
-    uint32_t max_frames;    /* Max frames to record (0 = unlimited / until exit) */
-    uint32_t delay_cs;      /* Frame delay in centiseconds (1/100s, e.g. 2 = 50 FPS) */
-    uint32_t save_trigger;  /* ROM can set to 1 to request capturing a frame / flush */
-} wgif_t;
-```
-
-#### Memory Layout:
-| Offset | Size | Type | Field | Access | Description |
-| :---: | :---: | :---: | :--- | :---: | :--- |
-| `0` | 4 | `u32` | `recording` | Host (R) | Recording flag (1 = active) |
-| `4` | 4 | `u32` | `frame_count` | Host (R) | Number of frames recorded |
-| `8` | 4 | `u32` | `max_frames` | Host (R) | Target limit frame count |
-| `12` | 4 | `u32` | `delay_cs` | Host (R) | Frame delay (1/100s, e.g. 2 = 50fps) |
-| `16` | 4 | `u32` | `save_trigger` | Guest (RW) | Set to 1 to trigger frame capture |
-
----
-
-### 3.7 `logger`
+### 3.5 `logger`
 
 Provides a simple UTF-8 text logging buffer to the host console.
 
