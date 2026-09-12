@@ -22,11 +22,13 @@
 #include "m3_env.h"
 
 static uint8_t *g_mem = NULL;
-static uint32_t g_mem_len = 0;
+static size_t   g_mem_len = 0;
 static uint32_t g_arena = 0x8000;
 
 static void refresh_memory(IM3Runtime runtime) {
-    g_mem = m3_GetMemory(runtime, &g_mem_len, 0);
+    if (runtime && runtime->modules) {
+        g_mem = m3_GetMemory(runtime->modules, &g_mem_len, 0);
+    }
 }
 
 static uint32_t host_alloc(IM3Runtime runtime, uint32_t size, uint32_t align) {

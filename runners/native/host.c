@@ -52,7 +52,7 @@ static IM3Module  g_module  = NULL;
 static IM3Runtime g_runtime = NULL;
 
 static uint8_t *g_mem     = NULL;
-static uint32_t g_mem_len = 0;
+static size_t   g_mem_len = 0;
 
 static uint32_t g_fb_ptr       = 0;
 static uint32_t g_clock_ptr    = 0;
@@ -122,7 +122,9 @@ static uint8_t* tar_extract_file(const char* tar_path, const char* target_filena
  * ================================================================ */
 
 static void refresh_memory(void) {
-    g_mem = m3_GetMemory(g_runtime, &g_mem_len, 0);
+    if (g_module) {
+        g_mem = m3_GetMemory(g_module, &g_mem_len, 0);
+    }
 }
 
 static uint32_t host_alloc(uint32_t size, uint32_t align) {
@@ -135,9 +137,9 @@ static uint32_t host_alloc(uint32_t size, uint32_t align) {
     }
     uint32_t ptr = g_arena_offset;
     g_arena_offset += size;
-    if (g_arena_offset > g_mem_len && g_runtime) {
+    if (g_arena_offset > g_mem_len && g_runtime && g_module && g_module->numMemories > 0) {
         uint32_t pages = (g_arena_offset + 65535) / 65536;
-        ResizeMemory(g_runtime, pages);
+        ResizeMemory(g_runtime, g_module->memories[0], pages);
         refresh_memory();
     }
     return ptr;
