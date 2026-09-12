@@ -10,12 +10,16 @@ const { ExtensionRegistry } = require('./extensions/registry');
 const { IpcEngine } = require('./ipc');
 const { PeerRegistry } = require('./peer_registry');
 const { WWorker } = require('./worker');
+const { ThreadedWorker } = require('./thread_worker');
+const { ShmArena } = require('./shm_arena');
 
 class Piolho {
   constructor(options = {}) {
     this.name = options.name || 'host';
-    this.intervalMs = options.intervalMs || (options.tickRate ? 1000 / options.tickRate : (options.fps ? 1000 / options.fps : 1000 / 30));
+    this.threaded = !!options.threaded;
+    this.intervalMs = options.intervalMs !== undefined ? options.intervalMs : (options.tickRate ? 1000 / options.tickRate : (options.fps ? 1000 / options.fps : 1000 / 30));
     this.extensions = options.extensions || new ExtensionRegistry();
+    this.arena = new ShmArena();
 
     if (options.extDirs) {
       const dirs = Array.isArray(options.extDirs) ? options.extDirs : [options.extDirs];
@@ -60,7 +64,7 @@ class Piolho {
     return this;
   }
 
-  async loadRom(filePath, customName) {
+  async loadRom(filePath, customName, options = {}) {
     let name = customName;
     if (!name) {
       if (filePath.includes(':')) {
@@ -84,7 +88,10 @@ class Piolho {
     if (extractedWasm) wasmBytes = extractedWasm;
 
     const workerId = this.workers.length + 1;
-    const worker = new WWorker(workerId, name, filePath, this);
+    const isThreaded = options.threaded !== undefined ? options.threaded : this.threaded;
+    const worker = isThreaded
+      ? new ThreadedWorker(workerId, name, filePath, this, options)
+      : new WWorker(workerId, name, filePath, this);
 
     this.workers.push(worker);
     this.workerMap.set(name, worker);

@@ -1,67 +1,37 @@
 /**
- * Piolho 2.0 — Universal WebAssembly Host & Multi-ROM Communication Runtime
+ * Piolho — Pure Minimalist Isomorphic Actor Mesh
+ * 
+ * 3 Primitives: update(), say(), listen()
  */
 
-const { ENV, isTxiki, isNode, isBun, isDeno } = require('./env');
-const { Piolho } = require('./host');
-const { WWorker } = require('./worker');
-const {
-  ExtensionRegistry,
-  createDefaultRegistry,
-  defaultRegistry,
-  clockExtension,
-  loggerExtension,
-  commTcpExtension,
-  commPipeExtension,
-  commWsExtension,
-  commUdpExtension,
-  commWorkersExtension,
-  commStdioExtension,
-  commBroadcastExtension,
-  commWebrtcExtension,
-  commWebtransportExtension,
-  commSerialExtension,
-  commBluetoothExtension,
-  commHttpExtension,
-  commShmExtension
-} = require('./extensions');
-const { IpcEngine } = require('./ipc');
-const { PeerRegistry } = require('./peer_registry');
-const { extractFromTar } = require('./tar');
+const { PiolhoMesh } = require('./mesh');
+const { PiolhoNode } = require('./node');
+const { RendezvousEngine } = require('./rendezvous');
+const { NetworkBridge } = require('./network');
+const constants = require('./constants');
 
-async function createHost(options = {}) {
-  return new Piolho(options);
+function createMesh(options = {}) {
+  const mesh = new PiolhoMesh(options);
+  mesh.net = new NetworkBridge(mesh);
+  return mesh;
 }
 
+const piolho = {
+  create: createMesh,
+  createMesh,
+  Mesh: PiolhoMesh,
+  Node: PiolhoNode,
+  Engine: RendezvousEngine,
+  ...constants
+};
+
 module.exports = {
-  createHost,
-  Piolho,
-  WWorker,
-  Worker: WWorker,
-  ExtensionRegistry,
-  createDefaultRegistry,
-  defaultRegistry,
-  clockExtension,
-  loggerExtension,
-  commTcpExtension,
-  commPipeExtension,
-  commWsExtension,
-  commUdpExtension,
-  commWorkersExtension,
-  commStdioExtension,
-  commBroadcastExtension,
-  commWebrtcExtension,
-  commWebtransportExtension,
-  commSerialExtension,
-  commBluetoothExtension,
-  commHttpExtension,
-  commShmExtension,
-  PeerRegistry,
-  IpcEngine,
-  extractFromTar,
-  ENV,
-  isTxiki,
-  isNode,
-  isBun,
-  isDeno
+  piolho,
+  createMesh,
+  Piolho: PiolhoMesh,
+  PiolhoMesh,
+  PiolhoNode,
+  RendezvousEngine,
+  NetworkBridge,
+  ...constants
 };

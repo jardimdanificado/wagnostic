@@ -1,14 +1,15 @@
 {
   "name": "piolho",
-  "version": "2.0.0",
-  "description": "Universal WASM Host & Multi-ROM Rendezvous IPC Library",
+  "version": "0.1.4",
+  "description": "Minimalist Isomorphic Actor Mesh — update(), say(), listen()",
   "main": "src/index.js",
   "bin": {
     "piolho": "bin/piolho.js"
   },
   "scripts": {
-    "test": "make -C roms test",
-    "bench": "node benchmarks/complex_mesh/run_mesh_benchmark.js"
+    "test": "node tests/test_pure_js_mesh.js && node tests/test_distributed_js_mesh.js",
+    "test:local": "node tests/test_pure_js_mesh.js",
+    "test:net": "node tests/test_distributed_js_mesh.js"
   },
   "keywords": [
     "piolho",

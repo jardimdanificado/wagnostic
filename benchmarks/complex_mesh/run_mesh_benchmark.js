@@ -76,16 +76,23 @@ async function runBenchmark(durationSeconds = 3) {
   console.log(`  - Process 1: Host Alpha (Hub)         : ${stats1.msgCount.toLocaleString()} msgs (${(stats1.bytesCount / 1024).toFixed(1)} KB)`);
   console.log(`  - Process 2: Host Beta (TCP/Pipe/UDP) : ${stats2.msgCount.toLocaleString()} msgs (${(stats2.bytesCount / 1024).toFixed(1)} KB)`);
   console.log(`  - Process 3: Host Gamma (WS/BC/Stdio) : ${stats3.msgCount.toLocaleString()} msgs (${(stats3.bytesCount / 1024).toFixed(1)} KB)`);
-  if (stats1.linkStats) {
-    console.log(' Transport Breakdown on Hub:');
-    console.log(`    * Local Memory Rendezvous : ${stats1.linkStats.local.toLocaleString()} msgs`);
-    console.log(`    * TCP Stream Link         : ${stats1.linkStats.tcp.toLocaleString()} msgs`);
-    console.log(`    * Unix Domain Socket Link : ${stats1.linkStats.pipe.toLocaleString()} msgs`);
-    console.log(`    * WebSocket Stream Link   : ${stats1.linkStats.ws.toLocaleString()} msgs`);
-    console.log(`    * UDP Datagram Beacon     : ${stats1.linkStats.udp.toLocaleString()} msgs`);
-    console.log(`    * Standard I/O (Stdio)    : ${stats1.linkStats.stdio.toLocaleString()} msgs`);
-    console.log(`    * BroadcastChannel Bus    : ${stats1.linkStats.broadcast.toLocaleString()} msgs`);
-  }
+  console.log('----------------------------------------------------------------');
+  console.log(' Mesh-Wide Transport Breakdown:');
+  const totalLocal = (stats1.linkStats?.local || 0) + (stats2.linkStats?.local || 0) + (stats3.linkStats?.local || 0);
+  const totalTcp = (stats1.linkStats?.tcp || 0) + (stats2.linkStats?.tcp || 0);
+  const totalPipe = (stats1.linkStats?.pipe || 0) + (stats2.linkStats?.pipe || 0);
+  const totalWs = (stats1.linkStats?.ws || 0) + (stats3.linkStats?.ws || 0);
+  const totalUdp = (stats1.linkStats?.udp || 0) + (stats2.linkStats?.udp || 0);
+  const totalBc = (stats1.linkStats?.broadcast || 0) + (stats3.linkStats?.broadcast || 0);
+  const totalStdio = (stats1.linkStats?.stdio || 0);
+
+  console.log(`    * Local Memory Rendezvous : ${totalLocal.toLocaleString()} msgs`);
+  console.log(`    * TCP Stream Link         : ${totalTcp.toLocaleString()} msgs`);
+  console.log(`    * Unix Domain Socket Link : ${totalPipe.toLocaleString()} msgs`);
+  console.log(`    * WebSocket Stream Link   : ${totalWs.toLocaleString()} msgs`);
+  console.log(`    * UDP Datagram Beacon     : ${totalUdp.toLocaleString()} msgs`);
+  console.log(`    * BroadcastChannel Bus    : ${totalBc.toLocaleString()} msgs`);
+  console.log(`    * Standard I/O (Stdio)    : ${totalStdio.toLocaleString()} msgs`);
   console.log('----------------------------------------------------------------');
   console.log(' Transport Capabilities Verified:');
   console.log('    [OK] comm:tcp        - TCP Stream client/server');

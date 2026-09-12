@@ -19,6 +19,7 @@ class IpcEngine {
   constructor() {
     this.hearWaiters = []; // { worker, caller, target, dataPtr, size }
     this.onMessage = null; // ({ sender, target, size, data, op }) => void
+    this.rrCursor = 0;
   }
 
   logMessage(sender, target, size, data, op) {
@@ -41,7 +42,7 @@ class IpcEngine {
     if (timeout === 0) return TIMEOUT;
 
     // Update existing waiter or register new listener waiter
-    const existingIdx = this.hearWaiters.findIndex(w => w.worker === callerWorker);
+    const existingIdx = this.hearWaiters.findIndex(w => w.worker === callerWorker || w.caller === callerWorker.name);
     const waiter = {
       worker: callerWorker,
       caller: callerWorker.name,
@@ -69,8 +70,10 @@ class IpcEngine {
 
       // If target is a RemotePeer, transmit over the wire
       if (targetPeer && targetPeer.isRemote) {
-        const dataCopy = new Uint8Array(size);
-        if (size > 0 && callerWorker.memory) {
+        let dataCopy = new Uint8Array(size);
+        if (dataPtr instanceof Uint8Array) {
+          dataCopy = dataPtr.subarray(0, size);
+        } else if (size > 0 && callerWorker.memory) {
           dataCopy.set(new Uint8Array(callerWorker.memory.buffer, dataPtr, size));
         }
         this.logMessage(callerWorker.name, targetName, size, dataCopy, 'tell');
@@ -79,23 +82,44 @@ class IpcEngine {
       }
     }
 
-    // Rendezvous: Find matching HEAR waiting for this TELL
-    const matchIdx = this.hearWaiters.findIndex(
-      w => w.worker !== callerWorker &&
-           (!w.target || w.target === callerWorker.name) &&
-           (isAny || w.caller === targetName)
-    );
+    // Rendezvous: Find matching HEAR waiting for this TELL using Fair Round-Robin
+    const len = this.hearWaiters.length;
+    let matchIdx = -1;
+
+    for (let i = 0; i < len; i++) {
+      const idx = (this.rrCursor + i) % len;
+      const w = this.hearWaiters[idx];
+
+      if (w.worker !== callerWorker && w.caller !== callerWorker.name &&
+          (!w.target || w.target === callerWorker.name) &&
+          (isAny || w.caller === targetName)) {
+        matchIdx = idx;
+        this.rrCursor = (idx + 1) % (len || 1);
+        break;
+      }
+    }
 
     if (matchIdx !== -1) {
       const match = this.hearWaiters.splice(matchIdx, 1)[0];
       if (size > match.size) return ERROR_SIZE;
       let dataCopy = null;
-      if (size > 0 && callerWorker.memory && match.worker.memory) {
+
+      if (dataPtr instanceof Uint8Array) {
+        dataCopy = dataPtr;
+      } else if (size > 0 && callerWorker.memory) {
         dataCopy = new Uint8Array(size);
         const src = new Uint8Array(callerWorker.memory.buffer, dataPtr, size);
         dataCopy.set(src);
-        new Uint8Array(match.worker.memory.buffer, match.dataPtr, size).set(src);
       }
+
+      if (dataCopy && match.worker.memory) {
+        new Uint8Array(match.worker.memory.buffer, match.dataPtr, size).set(dataCopy);
+      }
+
+      if (match.worker.isThreaded && match.worker.threadWorker) {
+        match.worker.threadWorker.deliverTell(callerWorker.name, dataCopy);
+      }
+
       match.worker.lastIpcSender = callerWorker.name;
       this.logMessage(callerWorker.name, match.caller, size, dataCopy, 'rendezvous');
       return OK;
